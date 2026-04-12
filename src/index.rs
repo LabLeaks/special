@@ -654,8 +654,10 @@ mod tests {
 
         assert_eq!(document.nodes.len(), 1);
         assert_eq!(document.nodes[0].id, "EXPORT");
+        assert!(document.nodes[0].is_unsupported());
         assert_eq!(document.nodes[0].children.len(), 1);
         assert_eq!(document.nodes[0].children[0].id, "EXPORT.DOESNTCRASH");
+        assert!(!document.nodes[0].children[0].is_unsupported());
     }
 
     #[test]

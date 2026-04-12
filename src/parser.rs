@@ -482,10 +482,16 @@ mod tests {
     fn requires_attestation_metadata() {
         let block = CommentBlock {
             path: PathBuf::from("src/example.rs"),
-            lines: vec![BlockLine {
-                line: 1,
-                text: "@attests AUTH".to_string(),
-            }],
+            lines: vec![
+                BlockLine {
+                    line: 1,
+                    text: "@attests AUTH".to_string(),
+                },
+                BlockLine {
+                    line: 2,
+                    text: "artifact:".to_string(),
+                },
+            ],
             owned_item: None,
         };
 
@@ -494,6 +500,22 @@ mod tests {
 
         assert_eq!(parsed.attests.len(), 0);
         assert_eq!(parsed.diagnostics.len(), 3);
+        let messages: Vec<&str> = parsed
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("missing required attestation metadata `artifact`")));
+        assert!(messages.iter().any(
+            |message| message.contains("missing required attestation metadata `last_reviewed`")
+        ));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("missing required attestation metadata `owner`"))
+        );
     }
 
     #[test]

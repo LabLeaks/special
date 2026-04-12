@@ -58,27 +58,6 @@ Planned child.
     .expect("verify fixture should be written");
 }
 
-fn write_unsupported_fixture(root: &Path) {
-    fs::write(
-        root.join("specs.rs"),
-        r#"/**
-@spec DEMO
-Demo root.
-
-@spec DEMO.UNSUPPORTED
-Live child without support.
-*/
-"#,
-    )
-    .expect("spec fixture should be written");
-
-    fs::write(
-        root.join("checks.rs"),
-        ["/", "/ @verifies DEMO\n", "fn verifies_demo_root() {}\n"].concat(),
-    )
-    .expect("verify fixture should be written");
-}
-
 fn write_lint_error_fixture(root: &Path) {
     fs::write(
         root.join("specs.rs"),
@@ -223,7 +202,24 @@ fn spec_scopes_to_matching_id_and_descendants() {
 // @verifies SPECIAL.SPEC_COMMAND.UNSUPPORTED
 fn spec_unsupported_filters_live_items_without_support() {
     let root = temp_repo_dir("special-cli-unsupported");
-    write_unsupported_fixture(&root);
+    fs::write(
+        root.join("specs.rs"),
+        r#"/**
+@spec DEMO
+Demo root.
+
+@spec DEMO.UNSUPPORTED
+Live child without support.
+*/
+"#,
+    )
+    .expect("spec fixture should be written");
+
+    fs::write(
+        root.join("checks.rs"),
+        ["/", "/ @verifies DEMO\n", "fn verifies_demo_root() {}\n"].concat(),
+    )
+    .expect("verify fixture should be written");
 
     let output = run_special(&root, &["spec", "--unsupported"]);
     assert!(output.status.success());
@@ -391,7 +387,24 @@ fn lint_reports_orphan_verifies() {
 // @verifies SPECIAL.LINT_COMMAND.UNSUPPORTED_EXCLUDED
 fn lint_does_not_report_unsupported_live_specs() {
     let root = temp_repo_dir("special-cli-lint-clean");
-    write_unsupported_fixture(&root);
+    fs::write(
+        root.join("specs.rs"),
+        r#"/**
+@spec DEMO
+Demo root.
+
+@spec DEMO.UNSUPPORTED
+Live child without support.
+*/
+"#,
+    )
+    .expect("spec fixture should be written");
+
+    fs::write(
+        root.join("checks.rs"),
+        ["/", "/ @verifies DEMO\n", "fn verifies_demo_root() {}\n"].concat(),
+    )
+    .expect("verify fixture should be written");
 
     let output = run_special(&root, &["lint"]);
     assert!(output.status.success());
