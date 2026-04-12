@@ -20,6 +20,8 @@ mise exec -- cargo run -- spec --all
 mise exec -- cargo run -- lint
 ```
 
+The repo root is explicitly anchored by [special.toml](special.toml).
+
 ## What This File Is For
 
 This README is intentionally non-normative. It exists to explain the project at a glance:

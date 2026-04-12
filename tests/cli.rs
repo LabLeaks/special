@@ -97,6 +97,39 @@ Demo root.
     .expect("verify fixture should be written");
 }
 
+fn write_special_toml_root_fixture(root: &Path) {
+    let configured_root = root.join("workspace");
+    fs::create_dir_all(&configured_root).expect("configured root should be created");
+    fs::write(root.join("special.toml"), "root = \"workspace\"\n")
+        .expect("special.toml should be written");
+
+    fs::write(
+        configured_root.join("specs.rs"),
+        r#"/**
+@spec DEMO
+Configured root spec.
+*/
+"#,
+    )
+    .expect("configured root spec fixture should be written");
+
+    fs::write(
+        configured_root.join("checks.rs"),
+        ["/", "/ @verifies DEMO\n", "fn verifies_demo() {}\n"].concat(),
+    )
+    .expect("configured root verify fixture should be written");
+
+    fs::write(
+        root.join("decoy.rs"),
+        r#"/**
+@spec DECOY
+This spec should stay outside the configured root.
+*/
+"#,
+    )
+    .expect("decoy fixture should be written");
+}
+
 #[test]
 // @verifies SPECIAL.SPEC_COMMAND
 fn spec_materializes_live_spec_tree() {
@@ -192,6 +225,39 @@ fn spec_html_emits_html_output() {
     assert!(stdout.contains("<!doctype html>"));
     assert!(stdout.contains("DEMO"));
     assert!(!stdout.contains("DEMO.PLANNED"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.EXPLICIT_ROOT
+fn spec_uses_root_declared_in_special_toml() {
+    let root = temp_repo_dir("special-cli-special-toml-root");
+    write_special_toml_root_fixture(&root);
+
+    let output = run_special(&root, &["spec"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stdout.contains("DEMO"));
+    assert!(!stdout.contains("DECOY"));
+    assert!(!stderr.contains("warning:"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.SUPPRESSES_IMPLICIT_ROOT_WARNING
+fn special_toml_suppresses_implicit_root_warning() {
+    let root = temp_repo_dir("special-cli-special-toml-warning");
+    write_special_toml_root_fixture(&root);
+
+    let output = run_special(&root, &["lint"]);
+    assert!(output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(!stderr.contains("warning: using inferred"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

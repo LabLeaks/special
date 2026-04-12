@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootSource {
@@ -14,6 +14,11 @@ pub enum RootSource {
 pub struct RootResolution {
     pub root: PathBuf,
     pub source: RootSource,
+}
+
+#[derive(Debug, Default)]
+struct SpecialToml {
+    root: Option<PathBuf>,
 }
 
 impl RootResolution {
@@ -36,9 +41,23 @@ pub fn resolve_project_root(start: &Path) -> Result<RootResolution> {
     let start = start.canonicalize()?;
 
     for ancestor in start.ancestors() {
-        if ancestor.join("special.toml").is_file() {
+        let config_path = ancestor.join("special.toml");
+        if config_path.is_file() {
+            let config = load_special_toml(&config_path)?;
+            let root = match config.root {
+                Some(configured_root) => ancestor
+                    .join(configured_root)
+                    .canonicalize()
+                    .with_context(|| {
+                        format!(
+                            "special.toml at `{}` points to a root that does not exist",
+                            config_path.display()
+                        )
+                    })?,
+                None => ancestor.to_path_buf(),
+            };
             return Ok(RootResolution {
-                root: ancestor.to_path_buf(),
+                root,
                 source: RootSource::SpecialToml,
             });
         }
@@ -67,6 +86,42 @@ fn is_marker_present(path: PathBuf) -> bool {
     fs::metadata(path)
         .map(|metadata| metadata.is_dir() || metadata.is_file())
         .unwrap_or(false)
+}
+
+fn load_special_toml(path: &Path) -> Result<SpecialToml> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("failed to read special.toml at `{}`", path.display()))?;
+    parse_special_toml(&content)
+        .with_context(|| format!("failed to parse special.toml at `{}`", path.display()))
+}
+
+fn parse_special_toml(content: &str) -> Result<SpecialToml> {
+    let mut config = SpecialToml::default();
+
+    for (index, raw_line) in content.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            bail!("line {} must use `key = \"value\"` syntax", index + 1);
+        };
+
+        let key = key.trim();
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .ok_or_else(|| anyhow::anyhow!("line {} must use a quoted string value", index + 1))?;
+
+        match key {
+            "root" => config.root = Some(PathBuf::from(value)),
+            _ => bail!("line {} uses unknown key `{key}`", index + 1),
+        }
+    }
+
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -100,9 +155,26 @@ mod tests {
 
         assert_eq!(resolved.root, root);
         assert_eq!(resolved.source, RootSource::SpecialToml);
-        assert!(resolved.warning().is_none());
 
         fs::remove_dir_all(&resolved.root).expect("temp dir should be cleaned up");
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.EXPLICIT_ROOT
+    fn uses_root_from_special_toml() {
+        let repo_root = temp_dir("special-config-explicit-root");
+        let configured_root = repo_root.join("workspace/specs");
+        let nested = repo_root.join("workspace/specs/a/b");
+        fs::create_dir_all(&nested).expect("nested dir should be created");
+        fs::write(repo_root.join("special.toml"), "root = \"workspace/specs\"\n")
+            .expect("special.toml should be created");
+
+        let resolved = resolve_project_root(&nested).expect("root should resolve");
+
+        assert_eq!(resolved.root, configured_root.canonicalize().expect("root should canonicalize"));
+        assert_eq!(resolved.source, RootSource::SpecialToml);
+
+        fs::remove_dir_all(&repo_root).expect("temp dir should be cleaned up");
     }
 
     #[test]
@@ -113,6 +185,21 @@ mod tests {
         let resolved = resolve_project_root(&root).expect("root should resolve");
 
         assert_eq!(resolved.source, RootSource::CurrentDir);
+
+        fs::remove_dir_all(&root).expect("temp dir should be cleaned up");
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.SUPPRESSES_IMPLICIT_ROOT_WARNING
+    fn does_not_warn_when_special_toml_is_present() {
+        let root = temp_dir("special-config-no-warning");
+        let nested = root.join("a/b/c");
+        fs::create_dir_all(&nested).expect("nested dir should be created");
+        fs::write(root.join("special.toml"), "").expect("special.toml should be created");
+
+        let resolved = resolve_project_root(&nested).expect("root should resolve");
+
+        assert!(resolved.warning().is_none());
 
         fs::remove_dir_all(&root).expect("temp dir should be cleaned up");
     }
