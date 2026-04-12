@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 
-use crate::model::{BlockLine, CommentBlock};
+use crate::model::{BlockLine, CommentBlock, OwnedItem, SourceLocation};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "go", "ts", "tsx", "sh"];
 
@@ -84,6 +84,7 @@ fn extract_blocks_from_text(path: PathBuf, content: &str) -> Vec<CommentBlock> {
                 blocks.push(CommentBlock {
                     path: path.clone(),
                     lines: block_lines,
+                    owned_item: extract_owned_item(&path, &lines, index),
                 });
             }
             continue;
@@ -128,6 +129,7 @@ fn extract_blocks_from_text(path: PathBuf, content: &str) -> Vec<CommentBlock> {
                 blocks.push(CommentBlock {
                     path: path.clone(),
                     lines: block_lines,
+                    owned_item: extract_owned_item(&path, &lines, index),
                 });
             }
             continue;
@@ -183,6 +185,115 @@ fn strip_block_line_prefix(line: &str) -> &str {
     stripped.strip_prefix(' ').unwrap_or(stripped)
 }
 
+fn extract_owned_item(path: &Path, lines: &[&str], index: usize) -> Option<OwnedItem> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("sh") => extract_shell_owned_item(path, lines, index),
+        _ => extract_code_owned_item(path, lines, index),
+    }
+}
+
+fn extract_shell_owned_item(path: &Path, lines: &[&str], mut index: usize) -> Option<OwnedItem> {
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+    while index < lines.len() && lines[index].trim_start().starts_with('#') {
+        index += 1;
+    }
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+
+    if index >= lines.len() {
+        return None;
+    }
+
+    let body = lines[index..].join("\n").trim_end().to_string();
+    if body.is_empty() {
+        return None;
+    }
+
+    Some(OwnedItem {
+        location: SourceLocation {
+            path: path.to_path_buf(),
+            line: index + 1,
+        },
+        body,
+    })
+}
+
+fn extract_code_owned_item(path: &Path, lines: &[&str], mut index: usize) -> Option<OwnedItem> {
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+
+    if index >= lines.len() {
+        return None;
+    }
+
+    let first = lines[index].trim_start();
+    if first.starts_with("//") || first.starts_with("/*") {
+        return None;
+    }
+
+    let start = index;
+    let mut body_lines = Vec::new();
+    let mut brace_depth = 0_i32;
+    let mut saw_open_brace = false;
+
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim();
+
+        if index > start && brace_depth == 0 && saw_open_brace && trimmed.is_empty() {
+            break;
+        }
+
+        body_lines.push(line);
+
+        for ch in line.chars() {
+            match ch {
+                '{' => {
+                    brace_depth += 1;
+                    saw_open_brace = true;
+                }
+                '}' => brace_depth -= 1,
+                _ => {}
+            }
+        }
+
+        if saw_open_brace && brace_depth <= 0 {
+            break;
+        }
+
+        if !saw_open_brace && !trimmed.is_empty() {
+            let continues = trimmed.ends_with(',')
+                || trimmed.ends_with('(')
+                || trimmed.ends_with('[')
+                || trimmed.ends_with('=')
+                || trimmed.starts_with("#[")
+                || trimmed.starts_with('@');
+            if !continues && (trimmed.ends_with(';') || !trimmed.contains('(')) {
+                break;
+            }
+        }
+
+        index += 1;
+    }
+
+    let body = body_lines.join("\n").trim_end().to_string();
+    if body.is_empty() {
+        return None;
+    }
+
+    Some(OwnedItem {
+        location: SourceLocation {
+            path: path.to_path_buf(),
+            line: start + 1,
+        },
+        body,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -199,6 +310,14 @@ mod tests {
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].lines[0].text, "@spec AUTH");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "fn main() {}"
+        );
     }
 
     #[test]
@@ -211,6 +330,14 @@ mod tests {
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].lines[1].text, "@verifies AUTH.LOGIN");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "export {};"
+        );
     }
 
     #[test]
@@ -218,13 +345,40 @@ mod tests {
     fn extracts_shell_comment_blocks() {
         let blocks = extract_blocks_from_text(
             PathBuf::from("scripts/verify.sh"),
-            "#!/usr/bin/env bash\n# @verifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED\nset -euo pipefail\n",
+            "#!/usr/bin/env bash\n# @verifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED\nset -euo pipefail\n\nexec mise exec -- cargo clippy --all-targets --all-features -- -D warnings\n",
         );
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(
             blocks[0].lines[1].text,
             "@verifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED"
+        );
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "set -euo pipefail\n\nexec mise exec -- cargo clippy --all-targets --all-features -- -D warnings"
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.VERIFIES.ATTACHES_TO_NEXT_ITEM
+    fn attaches_verify_block_to_next_item() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.rs"),
+            "// @verifies AUTH.LOGIN\n#[test]\nfn verifies_auth_login() {\n    assert!(true);\n}\n",
+        );
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "#[test]\nfn verifies_auth_login() {\n    assert!(true);\n}"
         );
     }
 }

@@ -20,7 +20,8 @@ special allows at most one @verifies per annotation block.
 @spec SPECIAL.PARSE.VERIFIES.ATTACHES_TO_NEXT_ITEM
 special will attach a @verifies annotation block to the next supported item in comment-based languages.
 
-@planned
+@spec SPECIAL.PARSE.VERIFIES.ONLY_ATTACHED_SUPPORT_COUNTS
+special counts a @verifies reference as support only when it successfully attaches to an owned item.
 
 @spec SPECIAL.PARSE.ATTESTS
 special parses @attests records from annotation blocks.

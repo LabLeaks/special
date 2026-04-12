@@ -42,6 +42,9 @@ struct SpecArgs {
 
     #[arg(long = "html", conflicts_with = "json")]
     html: bool,
+
+    #[arg(long = "verbose")]
+    verbose: bool,
 }
 
 pub fn run_from_env() -> ExitCode {
@@ -87,11 +90,11 @@ fn execute(cli: Cli) -> Result<ExitCode> {
             }
 
             if args.json {
-                println!("{}", render_spec_json(&document)?);
+                println!("{}", render_spec_json(&document, args.verbose)?);
             } else if args.html {
-                println!("{}", render_spec_html(&document));
+                println!("{}", render_spec_html(&document, args.verbose));
             } else {
-                println!("{}", render_spec_text(&document));
+                println!("{}", render_spec_text(&document, args.verbose));
             }
             Ok(ExitCode::SUCCESS)
         }

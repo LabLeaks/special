@@ -97,6 +97,21 @@ Demo root.
     .expect("verify fixture should be written");
 }
 
+fn write_orphan_verify_fixture(root: &Path) {
+    fs::write(
+        root.join("specs.rs"),
+        r#"/**
+@spec DEMO
+Demo root.
+*/
+"#,
+    )
+    .expect("spec fixture should be written");
+
+    fs::write(root.join("checks.rs"), "// @verifies DEMO\n")
+        .expect("orphan verify fixture should be written");
+}
+
 fn write_special_toml_root_fixture(root: &Path) {
     let configured_root = root.join("workspace");
     fs::create_dir_all(&configured_root).expect("configured root should be created");
@@ -233,6 +248,7 @@ fn spec_json_emits_json_output() {
     assert!(stdout.contains("\"nodes\""));
     assert!(stdout.contains("\"DEMO\""));
     assert!(!stdout.contains("DEMO.PLANNED"));
+    assert!(!stdout.contains("\"body\""));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -250,6 +266,55 @@ fn spec_html_emits_html_output() {
     assert!(stdout.contains("<!doctype html>"));
     assert!(stdout.contains("DEMO"));
     assert!(!stdout.contains("DEMO.PLANNED"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.VERBOSE
+fn spec_verbose_includes_verify_bodies() {
+    let root = temp_repo_dir("special-cli-verbose");
+    write_live_and_planned_fixture(&root);
+
+    let output = run_special(&root, &["spec", "DEMO.LIVE", "--verbose"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("declared at:"));
+    assert!(stdout.contains("@verifies"));
+    assert!(stdout.contains("fn verifies_demo_live() {}"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.VERBOSE.JSON
+fn spec_verbose_json_includes_support_bodies() {
+    let root = temp_repo_dir("special-cli-verbose-json");
+    write_live_and_planned_fixture(&root);
+
+    let output = run_special(&root, &["spec", "DEMO.LIVE", "--json", "--verbose"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("\"body\""));
+    assert!(stdout.contains("fn verifies_demo_live() {}"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.VERBOSE.HTML
+fn spec_verbose_html_renders_support_details() {
+    let root = temp_repo_dir("special-cli-verbose-html");
+    write_live_and_planned_fixture(&root);
+
+    let output = run_special(&root, &["spec", "DEMO.LIVE", "--html", "--verbose"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("<details><summary>@verifies"));
+    assert!(stdout.contains("<pre>fn verifies_demo_live() {}</pre>"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -298,6 +363,26 @@ fn lint_reports_annotation_errors() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("unknown spec id `UNKNOWN` referenced by @verifies"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.PARSE.VERIFIES.ONLY_ATTACHED_SUPPORT_COUNTS
+fn lint_reports_orphan_verifies() {
+    let root = temp_repo_dir("special-cli-orphan-verify");
+    write_orphan_verify_fixture(&root);
+
+    let output = run_special(&root, &["lint"]);
+    assert!(!output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("@verifies must attach to the next supported item"));
+
+    let output = run_special(&root, &["spec", "--unsupported"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("DEMO [unsupported]"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

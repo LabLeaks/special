@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::model::{LintReport, SpecDocument, SpecNode};
 
-pub fn render_spec_text(document: &SpecDocument) -> String {
+pub fn render_spec_text(document: &SpecDocument, verbose: bool) -> String {
     if document.nodes.is_empty() {
         return "No specs found.".to_string();
     }
@@ -12,21 +12,27 @@ pub fn render_spec_text(document: &SpecDocument) -> String {
         if index > 0 {
             output.push('\n');
         }
-        render_node_text(node, 0, &mut output);
+        render_node_text(node, 0, verbose, &mut output);
     }
     output
 }
 
-pub fn render_spec_json(document: &SpecDocument) -> Result<String> {
-    Ok(serde_json::to_string_pretty(document)?)
+pub fn render_spec_json(document: &SpecDocument, verbose: bool) -> Result<String> {
+    let document = if verbose {
+        document.clone()
+    } else {
+        strip_support_bodies(document)
+    };
+    Ok(serde_json::to_string_pretty(&document)?)
 }
 
-pub fn render_spec_html(document: &SpecDocument) -> String {
+pub fn render_spec_html(document: &SpecDocument, verbose: bool) -> String {
     let mut html = String::from(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>special spec</title>\
          <style>body{font-family:ui-monospace,monospace;padding:24px;line-height:1.5}\
          ul{list-style:none;padding-left:20px}li{margin:10px 0}\
-         .meta{color:#555}.planned{color:#8a5a00}.unsupported{color:#a40000;font-weight:700}</style>\
+         .meta{color:#555}.planned{color:#8a5a00}.unsupported{color:#a40000;font-weight:700}\
+         details{margin-top:8px}pre{white-space:pre-wrap;background:#f7f7f7;padding:12px;border-radius:6px;overflow:auto}</style>\
          </head><body><h1>special spec</h1>",
     );
 
@@ -37,7 +43,7 @@ pub fn render_spec_html(document: &SpecDocument) -> String {
 
     html.push_str("<ul>");
     for node in &document.nodes {
-        render_node_html(node, &mut html);
+        render_node_html(node, verbose, &mut html);
     }
     html.push_str("</ul></body></html>");
     html
@@ -60,7 +66,7 @@ pub fn render_lint_text(report: &LintReport) -> String {
     output.trim_end().to_string()
 }
 
-fn render_node_text(node: &SpecNode, depth: usize, output: &mut String) {
+fn render_node_text(node: &SpecNode, depth: usize, verbose: bool, output: &mut String) {
     let indent = "  ".repeat(depth);
     output.push_str(&indent);
     output.push_str(&node.id);
@@ -87,12 +93,59 @@ fn render_node_text(node: &SpecNode, depth: usize, output: &mut String) {
     output.push_str(&indent);
     output.push_str(&format!("  attests: {}\n", node.attests.len()));
 
+    if verbose {
+        output.push_str(&indent);
+        output.push_str("  declared at: ");
+        output.push_str(&format!(
+            "{}:{}\n",
+            node.location.path.display(),
+            node.location.line
+        ));
+
+        for verify in &node.verifies {
+            output.push_str(&indent);
+            output.push_str("  @verifies ");
+            output.push_str(&format!(
+                "{}:{}\n",
+                verify.location.path.display(),
+                verify.location.line
+            ));
+
+            if let Some(body_location) = &verify.body_location {
+                output.push_str(&indent);
+                output.push_str("    body at: ");
+                output.push_str(&format!(
+                    "{}:{}\n",
+                    body_location.path.display(),
+                    body_location.line
+                ));
+            }
+
+            if let Some(body) = &verify.body {
+                render_block_text(body, depth + 2, output);
+            }
+        }
+
+        for attest in &node.attests {
+            output.push_str(&indent);
+            output.push_str("  @attests ");
+            output.push_str(&format!(
+                "{}:{}\n",
+                attest.location.path.display(),
+                attest.location.line
+            ));
+            if let Some(body) = &attest.body {
+                render_block_text(body, depth + 2, output);
+            }
+        }
+    }
+
     for child in &node.children {
-        render_node_text(child, depth + 1, output);
+        render_node_text(child, depth + 1, verbose, output);
     }
 }
 
-fn render_node_html(node: &SpecNode, html: &mut String) {
+fn render_node_html(node: &SpecNode, verbose: bool, html: &mut String) {
     html.push_str("<li><div>");
     html.push_str(&escape_html(&node.id));
     if node.kind == crate::model::NodeKind::Group {
@@ -120,10 +173,61 @@ fn render_node_html(node: &SpecNode, html: &mut String) {
     ));
     html.push_str("</div>");
 
+    if verbose {
+        html.push_str("<div class=\"meta\">declared at ");
+        html.push_str(&escape_html(&format!(
+            "{}:{}",
+            node.location.path.display(),
+            node.location.line
+        )));
+        html.push_str("</div>");
+
+        for verify in &node.verifies {
+            html.push_str("<details><summary>@verifies ");
+            html.push_str(&escape_html(&format!(
+                "{}:{}",
+                verify.location.path.display(),
+                verify.location.line
+            )));
+            html.push_str("</summary>");
+            if let Some(body_location) = &verify.body_location {
+                html.push_str("<div class=\"meta\">body at ");
+                html.push_str(&escape_html(&format!(
+                    "{}:{}",
+                    body_location.path.display(),
+                    body_location.line
+                )));
+                html.push_str("</div>");
+            }
+            if let Some(body) = &verify.body {
+                html.push_str("<pre>");
+                html.push_str(&escape_html(body));
+                html.push_str("</pre>");
+            }
+            html.push_str("</details>");
+        }
+
+        for attest in &node.attests {
+            html.push_str("<details><summary>@attests ");
+            html.push_str(&escape_html(&format!(
+                "{}:{}",
+                attest.location.path.display(),
+                attest.location.line
+            )));
+            html.push_str("</summary>");
+            if let Some(body) = &attest.body {
+                html.push_str("<pre>");
+                html.push_str(&escape_html(body));
+                html.push_str("</pre>");
+            }
+            html.push_str("</details>");
+        }
+    }
+
     if !node.children.is_empty() {
         html.push_str("<ul>");
         for child in &node.children {
-            render_node_html(child, html);
+            render_node_html(child, verbose, html);
         }
         html.push_str("</ul>");
     }
@@ -136,6 +240,42 @@ fn escape_html(input: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn render_block_text(body: &str, depth: usize, output: &mut String) {
+    let indent = "  ".repeat(depth);
+    for line in body.lines() {
+        output.push_str(&indent);
+        output.push_str(line);
+        output.push('\n');
+    }
+}
+
+fn strip_support_bodies(document: &SpecDocument) -> SpecDocument {
+    SpecDocument {
+        nodes: document
+            .nodes
+            .iter()
+            .cloned()
+            .map(strip_node_support_bodies)
+            .collect(),
+    }
+}
+
+fn strip_node_support_bodies(mut node: SpecNode) -> SpecNode {
+    for verify in &mut node.verifies {
+        verify.body_location = None;
+        verify.body = None;
+    }
+    for attest in &mut node.attests {
+        attest.body = None;
+    }
+    node.children = node
+        .children
+        .into_iter()
+        .map(strip_node_support_bodies)
+        .collect();
+    node
 }
 
 #[cfg(test)]
@@ -164,13 +304,13 @@ mod tests {
 
     #[test]
     fn renders_json_output() {
-        let json = render_spec_json(&sample_document()).expect("json render should succeed");
+        let json = render_spec_json(&sample_document(), false).expect("json render should succeed");
         assert!(json.contains("\"SPECIAL.SPEC_COMMAND\""));
     }
 
     #[test]
     fn renders_html_output() {
-        let html = render_spec_html(&sample_document());
+        let html = render_spec_html(&sample_document(), false);
         assert!(html.contains("<!doctype html>"));
         assert!(html.contains("SPECIAL.SPEC_COMMAND"));
     }

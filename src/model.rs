@@ -16,9 +16,16 @@ pub struct SourceLocation {
 }
 
 #[derive(Debug, Clone)]
+pub struct OwnedItem {
+    pub location: SourceLocation,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct CommentBlock {
     pub path: PathBuf,
     pub lines: Vec<BlockLine>,
+    pub owned_item: Option<OwnedItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +47,10 @@ pub struct SpecDecl {
 pub struct VerifyRef {
     pub spec_id: String,
     pub location: SourceLocation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_location: Option<SourceLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +61,8 @@ pub struct AttestRef {
     pub last_reviewed: String,
     pub review_interval_days: Option<u32>,
     pub location: SourceLocation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

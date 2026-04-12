@@ -122,6 +122,17 @@ fn parse_block(block: &CommentBlock, parsed: &mut ParsedRepo) {
             let id = rest.trim();
             if id.is_empty() {
                 push_diag(parsed, block, entry.line, "missing spec id after @verifies");
+            } else if let Some(owned_item) = &block.owned_item {
+                parsed.verifies.push(VerifyRef {
+                    spec_id: id.to_string(),
+                    location: SourceLocation {
+                        path: block.path.clone(),
+                        line: entry.line,
+                    },
+                    body_location: Some(owned_item.location.clone()),
+                    body: Some(owned_item.body.clone()),
+                });
+                seen_verifies = true;
             } else {
                 parsed.verifies.push(VerifyRef {
                     spec_id: id.to_string(),
@@ -129,8 +140,15 @@ fn parse_block(block: &CommentBlock, parsed: &mut ParsedRepo) {
                         path: block.path.clone(),
                         line: entry.line,
                     },
+                    body_location: None,
+                    body: None,
                 });
-                seen_verifies = true;
+                push_diag(
+                    parsed,
+                    block,
+                    entry.line,
+                    "@verifies must attach to the next supported item",
+                );
             }
             index += 1;
             continue;
@@ -200,6 +218,16 @@ fn parse_block(block: &CommentBlock, parsed: &mut ParsedRepo) {
                         path: block.path.clone(),
                         line: entry.line,
                     },
+                    body: Some(
+                        block
+                            .lines
+                            .iter()
+                            .map(|line| line.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                            .trim()
+                            .to_string(),
+                    ),
                 });
             }
 
@@ -283,7 +311,7 @@ fn push_diag(parsed: &mut ParsedRepo, block: &CommentBlock, line: usize, message
 mod tests {
     use std::path::PathBuf;
 
-    use crate::model::{BlockLine, CommentBlock, NodeKind, ParsedRepo};
+    use crate::model::{BlockLine, CommentBlock, NodeKind, OwnedItem, ParsedRepo, SourceLocation};
 
     use super::parse_block;
 
@@ -306,6 +334,7 @@ mod tests {
                     text: "@planned".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -339,6 +368,7 @@ mod tests {
                     text: "@planned".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -365,6 +395,7 @@ mod tests {
                     text: "Export-related claims.".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -385,6 +416,13 @@ mod tests {
                 line: 1,
                 text: "@verifies EXPORT.DOESNTCRASH".to_string(),
             }],
+            owned_item: Some(OwnedItem {
+                location: SourceLocation {
+                    path: PathBuf::from("src/example.rs"),
+                    line: 2,
+                },
+                body: "fn verifies_export_doesnt_crash() {}".to_string(),
+            }),
         };
 
         let mut parsed = ParsedRepo::default();
@@ -392,6 +430,10 @@ mod tests {
 
         assert_eq!(parsed.verifies.len(), 1);
         assert_eq!(parsed.verifies[0].spec_id, "EXPORT.DOESNTCRASH");
+        assert_eq!(
+            parsed.verifies[0].body.as_deref(),
+            Some("fn verifies_export_doesnt_crash() {}")
+        );
         assert!(parsed.diagnostics.is_empty());
     }
 
@@ -418,12 +460,20 @@ mod tests {
                     text: "last_reviewed: 2026-04-12".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
         parse_block(&block, &mut parsed);
 
         assert_eq!(parsed.attests.len(), 1);
+        assert!(
+            parsed.attests[0]
+                .body
+                .as_deref()
+                .expect("attest body should be present")
+                .contains("@attests AUTH")
+        );
         assert!(parsed.diagnostics.is_empty());
     }
 
@@ -436,6 +486,7 @@ mod tests {
                 line: 1,
                 text: "@attests AUTH".to_string(),
             }],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -468,6 +519,7 @@ mod tests {
                     text: "last_reviewed: 04-12-2026".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -509,6 +561,7 @@ mod tests {
                     text: "review_interval_days: thirty".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -538,6 +591,13 @@ mod tests {
                     text: "@verifies AUTH.TWO".to_string(),
                 },
             ],
+            owned_item: Some(OwnedItem {
+                location: SourceLocation {
+                    path: PathBuf::from("src/example.rs"),
+                    line: 3,
+                },
+                body: "fn verifies_auth() {}".to_string(),
+            }),
         };
 
         let mut parsed = ParsedRepo::default();
@@ -557,6 +617,7 @@ mod tests {
                 line: 1,
                 text: "@planned".to_string(),
             }],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -586,6 +647,7 @@ mod tests {
                     text: "@planned".to_string(),
                 },
             ],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -609,6 +671,7 @@ mod tests {
                 line: 1,
                 text: "@unknown THING".to_string(),
             }],
+            owned_item: None,
         };
 
         let mut parsed = ParsedRepo::default();
@@ -616,5 +679,30 @@ mod tests {
 
         assert_eq!(parsed.diagnostics.len(), 1);
         assert!(parsed.diagnostics[0].message.contains("unknown annotation"));
+    }
+
+    #[test]
+    // @verifies SPECIAL.LINT_COMMAND.ORPHAN_VERIFIES
+    fn rejects_orphan_verifies_blocks() {
+        let block = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![BlockLine {
+                line: 1,
+                text: "@verifies EXPORT.ORPHAN".to_string(),
+            }],
+            owned_item: None,
+        };
+
+        let mut parsed = ParsedRepo::default();
+        parse_block(&block, &mut parsed);
+
+        assert_eq!(parsed.verifies.len(), 1);
+        assert!(parsed.verifies[0].body.is_none());
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert!(
+            parsed.diagnostics[0]
+                .message
+                .contains("@verifies must attach to the next supported item")
+        );
     }
 }

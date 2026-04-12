@@ -141,7 +141,7 @@ fn materialize_spec(parsed: &ParsedRepo, filter: SpecFilter) -> SpecDocument {
     }
 
     for verify in &parsed.verifies {
-        if let Some(node) = flat_nodes.get_mut(&verify.spec_id) {
+        if verify.body.is_some() && let Some(node) = flat_nodes.get_mut(&verify.spec_id) {
             node.verifies.push(verify.clone());
         }
     }
@@ -337,6 +337,8 @@ mod tests {
                     path: "src/lib.rs".into(),
                     line: 8,
                 },
+                body_location: None,
+                body: Some("fn verifies_export() {}".to_string()),
             }],
             attests: Vec::new(),
             diagnostics: Vec::new(),
@@ -386,6 +388,8 @@ mod tests {
                     path: "src/lib.rs".into(),
                     line: 8,
                 },
+                body_location: None,
+                body: Some("fn verifies_export() {}".to_string()),
             }],
             attests: Vec::new(),
             diagnostics: Vec::new(),
@@ -436,6 +440,8 @@ mod tests {
                     path: "src/lib.rs".into(),
                     line: 8,
                 },
+                body_location: None,
+                body: Some("fn verifies_no_crash() {}".to_string()),
             }],
             attests: Vec::new(),
             diagnostics: Vec::new(),
@@ -503,6 +509,8 @@ mod tests {
                     path: "tests/spec.rs".into(),
                     line: 10,
                 },
+                body_location: None,
+                body: Some("fn verifies_unknown() {}".to_string()),
             }],
             attests: Vec::new(),
             diagnostics: Vec::new(),
@@ -542,6 +550,7 @@ mod tests {
                     path: "docs/report.txt".into(),
                     line: 10,
                 },
+                body: Some("@attests UNKNOWN".to_string()),
             }],
             diagnostics: Vec::new(),
         };
@@ -627,6 +636,8 @@ mod tests {
                     path: "tests/spec.rs".into(),
                     line: 10,
                 },
+                body_location: None,
+                body: Some("fn verifies_export_doesnt_crash() {}".to_string()),
             }],
             attests: Vec::new(),
             diagnostics: Vec::new(),
@@ -679,6 +690,8 @@ mod tests {
                     path: "tests/cli.rs".into(),
                     line: 10,
                 },
+                body_location: None,
+                body: Some("fn verifies_special_parse() {}".to_string()),
             }],
             attests: Vec::new(),
             diagnostics: Vec::new(),
