@@ -190,7 +190,12 @@ fn materialize_spec(parsed: &ParsedRepo, filter: SpecFilter) -> SpecDocument {
         children.sort();
     }
 
-    let nodes = build_children(None, &children_map, &flat_nodes);
+    let mut nodes = build_children(None, &children_map, &flat_nodes);
+
+    if let Some(scope) = filter.scope.as_deref() {
+        nodes = scoped_nodes(nodes, scope);
+    }
+
     SpecDocument { nodes }
 }
 
@@ -272,6 +277,23 @@ fn kind_label(kind: NodeKind) -> &'static str {
     }
 }
 
+fn scoped_nodes(nodes: Vec<SpecNode>, scope: &str) -> Vec<SpecNode> {
+    nodes.into_iter()
+        .find_map(|node| find_scoped_node(node, scope))
+        .into_iter()
+        .collect()
+}
+
+fn find_scoped_node(node: SpecNode, scope: &str) -> Option<SpecNode> {
+    if node.id == scope {
+        return Some(node);
+    }
+
+    node.children
+        .into_iter()
+        .find_map(|child| find_scoped_node(child, scope))
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -325,6 +347,7 @@ mod tests {
             SpecFilter {
                 include_planned: false,
                 unsupported_only: false,
+                scope: None,
             },
         );
 
@@ -373,6 +396,7 @@ mod tests {
             SpecFilter {
                 include_planned: true,
                 unsupported_only: false,
+                scope: None,
             },
         );
 
@@ -422,6 +446,7 @@ mod tests {
             SpecFilter {
                 include_planned: false,
                 unsupported_only: true,
+                scope: None,
             },
         );
 
@@ -612,6 +637,7 @@ mod tests {
             SpecFilter {
                 include_planned: false,
                 unsupported_only: false,
+                scope: None,
             },
         );
 
@@ -663,6 +689,7 @@ mod tests {
             SpecFilter {
                 include_planned: false,
                 unsupported_only: false,
+                scope: None,
             },
         );
 
@@ -744,6 +771,7 @@ Demo child.
             SpecFilter {
                 include_planned: false,
                 unsupported_only: false,
+                scope: None,
             },
         )
         .expect("document build should succeed");
@@ -793,6 +821,7 @@ Child claim.
             SpecFilter {
                 include_planned: false,
                 unsupported_only: false,
+                scope: None,
             },
         )
         .expect("document build should succeed");
@@ -837,6 +866,7 @@ Demo root.
             SpecFilter {
                 include_planned: false,
                 unsupported_only: false,
+                scope: None,
             },
         )
         .expect("document build should succeed");

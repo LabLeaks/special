@@ -8,6 +8,9 @@ special spec excludes planned items by default.
 @spec SPECIAL.SPEC_COMMAND.ALL
 special spec --all includes planned items.
 
+@spec SPECIAL.SPEC_COMMAND.ID_SCOPE
+special spec SPEC.ID scopes the materialized view to the matching spec or group node and its descendants.
+
 @spec SPECIAL.SPEC_COMMAND.UNSUPPORTED
 special spec --unsupported shows live items with zero verifies and zero attests.
 
@@ -16,6 +19,21 @@ special spec --json emits the materialized spec as JSON.
 
 @spec SPECIAL.SPEC_COMMAND.HTML
 special spec --html emits the materialized spec as HTML.
+
+@spec SPECIAL.SPEC_COMMAND.VERBOSE
+special spec will support a verbose mode that shows the attached verifies and attests bodies for review.
+
+@planned
+
+@spec SPECIAL.SPEC_COMMAND.VERBOSE.JSON
+special spec --json --verbose will include attached verifies and attests bodies in JSON output.
+
+@planned
+
+@spec SPECIAL.SPEC_COMMAND.VERBOSE.HTML
+special spec --html --verbose will render attached verifies and attests bodies in collapsed detail blocks.
+
+@planned
 
 @spec SPECIAL.LINT_COMMAND
 special lint reports annotation parsing and reference errors.
@@ -40,4 +58,9 @@ special lint reports unknown annotations in annotation blocks.
 
 @spec SPECIAL.LINT_COMMAND.UNSUPPORTED_EXCLUDED
 special lint does not report unsupported live specs.
+
+@spec SPECIAL.LINT_COMMAND.ORPHAN_VERIFIES
+special lint will report @verifies blocks that do not attach to a supported owned item.
+
+@planned
 */

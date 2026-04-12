@@ -17,6 +17,11 @@ special parses @verifies references from annotation blocks.
 @spec SPECIAL.PARSE.VERIFIES.ONE_PER_BLOCK
 special allows at most one @verifies per annotation block.
 
+@spec SPECIAL.PARSE.VERIFIES.ATTACHES_TO_NEXT_ITEM
+special will attach a @verifies annotation block to the next supported item in comment-based languages.
+
+@planned
+
 @spec SPECIAL.PARSE.ATTESTS
 special parses @attests records from annotation blocks.
 
@@ -28,4 +33,9 @@ special requires last_reviewed to use YYYY-MM-DD format.
 
 @spec SPECIAL.PARSE.ATTESTS.REVIEW_INTERVAL_DAYS
 special requires review_interval_days to be a positive integer when present.
+
+@spec SPECIAL.PARSE.PYTHON_LINE_COMMENTS
+special will support Python through comment-based annotation blocks instead of docstring ownership.
+
+@planned
 */

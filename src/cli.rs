@@ -29,6 +29,8 @@ enum Command {
 
 #[derive(Debug, Args)]
 struct SpecArgs {
+    spec_id: Option<String>,
+
     #[arg(long = "all")]
     include_all: bool,
 
@@ -76,6 +78,7 @@ fn execute(cli: Cli) -> Result<ExitCode> {
                 SpecFilter {
                     include_planned: args.include_all,
                     unsupported_only: args.unsupported_only,
+                    scope: args.spec_id,
                 },
             )?;
 

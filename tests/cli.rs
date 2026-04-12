@@ -180,6 +180,31 @@ fn spec_all_includes_planned_items() {
 }
 
 #[test]
+// @verifies SPECIAL.SPEC_COMMAND.ID_SCOPE
+fn spec_scopes_to_matching_id_and_descendants() {
+    let root = temp_repo_dir("special-cli-scope");
+    write_live_and_planned_fixture(&root);
+
+    let output = run_special(&root, &["spec", "DEMO"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("DEMO\n"));
+    assert!(stdout.contains("DEMO.LIVE"));
+    assert!(!stdout.contains("DEMO.PLANNED"));
+    assert!(!stdout.contains("No specs found."));
+
+    let output = run_special(&root, &["spec", "DEMO.LIVE"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("DEMO.LIVE"));
+    assert!(!stdout.contains("DEMO\n"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
 // @verifies SPECIAL.SPEC_COMMAND.UNSUPPORTED
 fn spec_unsupported_filters_live_items_without_support() {
     let root = temp_repo_dir("special-cli-unsupported");

@@ -88,10 +88,11 @@ impl SpecNode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SpecFilter {
     pub include_planned: bool,
     pub unsupported_only: bool,
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
