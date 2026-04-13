@@ -14,13 +14,28 @@ special installs skills as standard skill directories with `SKILL.md` and option
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.INSTALLS_SPECIAL_USAGE_SKILL
-special installs a skill that teaches agents how to use special annotations and CLI workflows correctly in the current repository.
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_SHIP_CHANGE_SKILL
+special installs a skill for shipping a product change without drifting the product contract.
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.INSTALLS_SPEC_WRITING_SKILL
-special installs a skill that teaches agents how to write strong special specs rather than vague or implementation-shaped claims.
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_DEFINE_PRODUCT_SPECS_SKILL
+special installs a skill for turning roadmap items, feature ideas, and vague requirements into explicit product specs.
+*/
+
+/**
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_VALIDATE_PRODUCT_CONTRACT_SKILL
+special installs a skill for checking whether a product claim is honestly supported by its attached verifies or attests.
+*/
+
+/**
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_LIVE_STATE_SKILL
+special installs a skill for discovering the current live validated product-spec state.
+*/
+
+/**
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_PLANNED_WORK_SKILL
+special installs a skill for discovering planned product-spec work that is not yet live.
 */
 
 /**

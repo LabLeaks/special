@@ -204,10 +204,19 @@ fn skills_writes_project_local_skills_directory() {
     assert!(output.status.success());
 
     assert!(root
-        .join(".agents/skills/ship-features-with-product-specs/SKILL.md")
+        .join(".agents/skills/ship-product-change/SKILL.md")
         .is_file());
     assert!(root
-        .join(".agents/skills/write-product-specs/SKILL.md")
+        .join(".agents/skills/define-product-specs/SKILL.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/validate-product-contract/SKILL.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/inspect-live-spec-state/SKILL.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/find-planned-work/SKILL.md")
         .is_file());
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -222,64 +231,131 @@ fn skills_use_standard_skill_directories_with_support_files() {
     assert!(output.status.success());
 
     assert!(root
-        .join(".agents/skills/ship-features-with-product-specs/SKILL.md")
+        .join(".agents/skills/ship-product-change/SKILL.md")
         .is_file());
     assert!(root
-        .join(".agents/skills/ship-features-with-product-specs/references/feature-workflow.md")
+        .join(".agents/skills/ship-product-change/references/change-workflow.md")
         .is_file());
     assert!(root
-        .join(".agents/skills/write-product-specs/SKILL.md")
+        .join(".agents/skills/define-product-specs/SKILL.md")
         .is_file());
     assert!(root
-        .join(".agents/skills/write-product-specs/references/spec-writing.md")
+        .join(".agents/skills/define-product-specs/references/spec-writing.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/validate-product-contract/references/validation-checklist.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/inspect-live-spec-state/references/state-walkthrough.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/find-planned-work/references/planned-workflow.md")
         .is_file());
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]
-// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_SPECIAL_USAGE_SKILL
-fn skills_install_special_usage_skill() {
-    let root = temp_repo_dir("special-cli-skills-usage");
-
-    let output = install_skills(&root);
-    assert!(output.status.success());
-
-    let skill = fs::read_to_string(
-        root.join(".agents/skills/ship-features-with-product-specs/SKILL.md"),
-    )
-    .expect("feature skill should be readable");
-    assert!(skill.contains("name: ship-features-with-product-specs"));
-    assert!(skill.contains(
-        "description: Use this skill when adding a feature or changing behavior in a project where product specs should stay honest."
-    ));
-    assert!(skill.contains("special spec"));
-    assert!(skill.contains("special spec --all"));
-    assert!(skill.contains("special spec SPEC.ID --verbose"));
-    assert!(skill.contains("@planned"));
-    assert!(skill.contains("@group"));
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_SPEC_WRITING_SKILL
-fn skills_install_spec_writing_skill() {
-    let root = temp_repo_dir("special-cli-skills-writing");
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_SHIP_CHANGE_SKILL
+fn skills_install_ship_change_skill() {
+    let root = temp_repo_dir("special-cli-skills-ship-change");
 
     let output = install_skills(&root);
     assert!(output.status.success());
 
     let skill =
-        fs::read_to_string(root.join(".agents/skills/write-product-specs/SKILL.md"))
-            .expect("write-product-specs skill should be readable");
-    assert!(skill.contains("name: write-product-specs"));
-    assert!(skill.contains("Use this skill when creating or revising product specs for a project."));
+        fs::read_to_string(root.join(".agents/skills/ship-product-change/SKILL.md"))
+            .expect("ship-product-change skill should be readable");
+    assert!(skill.contains("name: ship-product-change"));
+    assert!(skill.contains("description: Use this skill when adding a feature, fixing a bug, or changing behavior that should update the product contract."));
+    assert!(skill.contains("special spec"));
+    assert!(skill.contains("special spec --all"));
+    assert!(skill.contains("special spec SPEC.ID --verbose"));
+    assert!(skill.contains("@planned"));
+    assert!(skill.contains("@verifies"));
+    assert!(skill.contains("@attests"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_DEFINE_PRODUCT_SPECS_SKILL
+fn skills_install_define_product_specs_skill() {
+    let root = temp_repo_dir("special-cli-skills-define-specs");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill =
+        fs::read_to_string(root.join(".agents/skills/define-product-specs/SKILL.md"))
+            .expect("define-product-specs skill should be readable");
+    assert!(skill.contains("name: define-product-specs"));
+    assert!(skill.contains("description: Use this skill when scoping a feature, defining behavior, or rewriting vague requirements into product specs."));
     assert!(skill.contains("@group"));
     assert!(skill.contains("@spec"));
     assert!(skill.contains("@planned"));
     assert!(skill.contains("@verifies"));
     assert!(skill.contains("@attests"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_VALIDATE_PRODUCT_CONTRACT_SKILL
+fn skills_install_validate_product_contract_skill() {
+    let root = temp_repo_dir("special-cli-skills-validate");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill = fs::read_to_string(
+        root.join(".agents/skills/validate-product-contract/SKILL.md"),
+    )
+    .expect("validate-product-contract skill should be readable");
+    assert!(skill.contains("name: validate-product-contract"));
+    assert!(skill.contains("description: Use this skill when checking whether a product claim is honestly supported."));
+    assert!(skill.contains("special spec SPEC.ID --verbose"));
+    assert!(skill.contains("special lint"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_LIVE_STATE_SKILL
+fn skills_install_live_state_skill() {
+    let root = temp_repo_dir("special-cli-skills-live-state");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill =
+        fs::read_to_string(root.join(".agents/skills/inspect-live-spec-state/SKILL.md"))
+            .expect("inspect-live-spec-state skill should be readable");
+    assert!(skill.contains("name: inspect-live-spec-state"));
+    assert!(skill.contains("description: Use this skill when you need the current live validated product-spec state."));
+    assert!(skill.contains("special spec"));
+    assert!(skill.contains("special spec SPEC.ID"));
+    assert!(skill.contains("special spec SPEC.ID --verbose"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_PLANNED_WORK_SKILL
+fn skills_install_planned_work_skill() {
+    let root = temp_repo_dir("special-cli-skills-planned-work");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill =
+        fs::read_to_string(root.join(".agents/skills/find-planned-work/SKILL.md"))
+            .expect("find-planned-work skill should be readable");
+    assert!(skill.contains("name: find-planned-work"));
+    assert!(skill.contains("description: Use this skill when looking for product-spec work that is planned but not live yet."));
+    assert!(skill.contains("special spec --all"));
+    assert!(skill.contains("[planned]"));
+    assert!(skill.contains("release target"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -292,18 +368,36 @@ fn skills_frontload_trigger_intent_in_descriptions() {
     let output = install_skills(&root);
     assert!(output.status.success());
 
-    let feature_skill = fs::read_to_string(
-        root.join(".agents/skills/ship-features-with-product-specs/SKILL.md"),
+    let ship_change =
+        fs::read_to_string(root.join(".agents/skills/ship-product-change/SKILL.md"))
+            .expect("ship-product-change skill should be readable");
+    let define_specs =
+        fs::read_to_string(root.join(".agents/skills/define-product-specs/SKILL.md"))
+            .expect("define-product-specs skill should be readable");
+    let validate_contract = fs::read_to_string(
+        root.join(".agents/skills/validate-product-contract/SKILL.md"),
     )
-    .expect("feature skill should be readable");
-    let write_specs =
-        fs::read_to_string(root.join(".agents/skills/write-product-specs/SKILL.md"))
-            .expect("write-product-specs skill should be readable");
-    assert!(feature_skill.contains(
-        "description: Use this skill when adding a feature or changing behavior in a project where product specs should stay honest."
+    .expect("validate-product-contract skill should be readable");
+    let live_state =
+        fs::read_to_string(root.join(".agents/skills/inspect-live-spec-state/SKILL.md"))
+            .expect("inspect-live-spec-state skill should be readable");
+    let planned_work =
+        fs::read_to_string(root.join(".agents/skills/find-planned-work/SKILL.md"))
+            .expect("find-planned-work skill should be readable");
+    assert!(ship_change.contains(
+        "description: Use this skill when adding a feature, fixing a bug, or changing behavior that should update the product contract."
     ));
-    assert!(write_specs.contains(
-        "description: Use this skill when creating or revising product specs for a project."
+    assert!(define_specs.contains(
+        "description: Use this skill when scoping a feature, defining behavior, or rewriting vague requirements into product specs."
+    ));
+    assert!(validate_contract.contains(
+        "description: Use this skill when checking whether a product claim is honestly supported."
+    ));
+    assert!(live_state.contains(
+        "description: Use this skill when you need the current live validated product-spec state."
+    ));
+    assert!(planned_work.contains(
+        "description: Use this skill when looking for product-spec work that is planned but not live yet."
     ));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -317,20 +411,41 @@ fn skills_bundle_reference_docs_for_progressive_disclosure() {
     let output = install_skills(&root);
     assert!(output.status.success());
 
-    let feature_skill = fs::read_to_string(
-        root.join(".agents/skills/ship-features-with-product-specs/SKILL.md"),
+    let ship_change =
+        fs::read_to_string(root.join(".agents/skills/ship-product-change/SKILL.md"))
+            .expect("ship-product-change skill should be readable");
+    let define_specs =
+        fs::read_to_string(root.join(".agents/skills/define-product-specs/SKILL.md"))
+            .expect("define-product-specs skill should be readable");
+    let validate_contract = fs::read_to_string(
+        root.join(".agents/skills/validate-product-contract/SKILL.md"),
     )
-    .expect("feature skill should be readable");
-    let write_specs =
-        fs::read_to_string(root.join(".agents/skills/write-product-specs/SKILL.md"))
-            .expect("write-product-specs skill should be readable");
-    assert!(feature_skill.contains("references/feature-workflow.md"));
-    assert!(write_specs.contains("references/spec-writing.md"));
+    .expect("validate-product-contract skill should be readable");
+    let live_state =
+        fs::read_to_string(root.join(".agents/skills/inspect-live-spec-state/SKILL.md"))
+            .expect("inspect-live-spec-state skill should be readable");
+    let planned_work =
+        fs::read_to_string(root.join(".agents/skills/find-planned-work/SKILL.md"))
+            .expect("find-planned-work skill should be readable");
+    assert!(ship_change.contains("references/change-workflow.md"));
+    assert!(define_specs.contains("references/spec-writing.md"));
+    assert!(validate_contract.contains("references/validation-checklist.md"));
+    assert!(live_state.contains("references/state-walkthrough.md"));
+    assert!(planned_work.contains("references/planned-workflow.md"));
     assert!(root
-        .join(".agents/skills/ship-features-with-product-specs/references/feature-workflow.md")
+        .join(".agents/skills/ship-product-change/references/change-workflow.md")
         .is_file());
     assert!(root
-        .join(".agents/skills/write-product-specs/references/spec-writing.md")
+        .join(".agents/skills/define-product-specs/references/spec-writing.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/validate-product-contract/references/validation-checklist.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/inspect-live-spec-state/references/state-walkthrough.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/find-planned-work/references/planned-workflow.md")
         .is_file());
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -344,18 +459,18 @@ fn skills_include_trigger_eval_fixtures() {
     let output = install_skills(&root);
     assert!(output.status.success());
 
-    let feature_skill = fs::read_to_string(
-        root.join(".agents/skills/ship-features-with-product-specs/references/trigger-evals.md"),
-    )
-    .expect("feature trigger evals should be readable");
-    let write_specs = fs::read_to_string(
-        root.join(".agents/skills/write-product-specs/references/trigger-evals.md"),
-    )
-    .expect("write-product-specs trigger evals should be readable");
-    assert!(feature_skill.contains("## Should Trigger"));
-    assert!(feature_skill.contains("## Should Not Trigger"));
-    assert!(write_specs.contains("## Should Trigger"));
-    assert!(write_specs.contains("## Should Not Trigger"));
+    for path in [
+        ".agents/skills/ship-product-change/references/trigger-evals.md",
+        ".agents/skills/define-product-specs/references/trigger-evals.md",
+        ".agents/skills/validate-product-contract/references/trigger-evals.md",
+        ".agents/skills/inspect-live-spec-state/references/trigger-evals.md",
+        ".agents/skills/find-planned-work/references/trigger-evals.md",
+    ] {
+        let trigger_evals =
+            fs::read_to_string(root.join(path)).expect("trigger evals should be readable");
+        assert!(trigger_evals.contains("## Should Trigger"));
+        assert!(trigger_evals.contains("## Should Not Trigger"));
+    }
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
