@@ -132,10 +132,22 @@ fn github_release_workflow_is_committed_and_in_sync() {
         "release workflow should be committed"
     );
 
+    let metadata = cargo_metadata();
+    let version = metadata["packages"][0]["version"]
+        .as_str()
+        .expect("package version should be a string");
+
     let output = dist_command()
-        .args(["generate", "--mode", "ci", "--check", "--allow-dirty"])
+        .args([
+            "host",
+            "--steps=create",
+            "--tag",
+            &format!("v{version}"),
+            "--output-format=json",
+            "--allow-dirty",
+        ])
         .output()
-        .expect("dist generate --check should run");
+        .expect("dist host --steps=create should run");
 
     assert!(
         output.status.success(),
