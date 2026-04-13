@@ -49,7 +49,7 @@ special hardens its report and HTML UI.
 
 /**
 @spec SPECIAL.ROADMAP.PLANNED_RELEASE_WARNINGS
-special warns when the current project version still contains planned specs targeted for that release or an earlier one.
+special warns when the current project version exactly matches a planned spec's release target string.
 
 @planned
 */
