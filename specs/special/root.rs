@@ -15,7 +15,7 @@ special internal quality contracts.
 special configuration and root discovery.
 
 @group SPECIAL.INIT
-Future project initialization workflow for special.
+special project initialization workflow.
 */
 
 /**

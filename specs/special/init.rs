@@ -1,6 +1,9 @@
 /**
-@spec SPECIAL.INIT.BOOTSTRAPS_PROJECT
-special will provide an init workflow for creating a predictable project setup.
+@spec SPECIAL.INIT.CREATES_SPECIAL_TOML
+special init creates `special.toml` in the current directory with `root = "."`.
+*/
 
-@planned
+/**
+@spec SPECIAL.INIT.DOES_NOT_OVERWRITE_SPECIAL_TOML
+special init fails instead of overwriting an existing `special.toml` in the current directory.
 */

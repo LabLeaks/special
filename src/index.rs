@@ -141,7 +141,9 @@ fn materialize_spec(parsed: &ParsedRepo, filter: SpecFilter) -> SpecDocument {
     }
 
     for verify in &parsed.verifies {
-        if verify.body.is_some() && let Some(node) = flat_nodes.get_mut(&verify.spec_id) {
+        if verify.body.is_some()
+            && let Some(node) = flat_nodes.get_mut(&verify.spec_id)
+        {
             node.verifies.push(verify.clone());
         }
     }
@@ -278,7 +280,8 @@ fn kind_label(kind: NodeKind) -> &'static str {
 }
 
 fn scoped_nodes(nodes: Vec<SpecNode>, scope: &str) -> Vec<SpecNode> {
-    nodes.into_iter()
+    nodes
+        .into_iter()
         .find_map(|node| find_scoped_node(node, scope))
         .into_iter()
         .collect()
@@ -827,7 +830,12 @@ Child claim.
         .expect("child spec should be written");
         fs::write(
             root.join("checks.rs"),
-            ["/", "/ @verifies DEMO.CHILD\n", "fn verifies_demo_child() {}\n"].concat(),
+            [
+                "/",
+                "/ @verifies DEMO.CHILD\n",
+                "fn verifies_demo_child() {}\n",
+            ]
+            .concat(),
         )
         .expect("verify fixture should be written");
 
@@ -872,7 +880,12 @@ Demo root.
         .expect("shell child spec should be written");
         fs::write(
             root.join("checks.rs"),
-            ["/", "/ @verifies DEMO.CHILD\n", "fn verifies_demo_child() {}\n"].concat(),
+            [
+                "/",
+                "/ @verifies DEMO.CHILD\n",
+                "fn verifies_demo_child() {}\n",
+            ]
+            .concat(),
         )
         .expect("verify fixture should be written");
 

@@ -1,7 +1,8 @@
 use std::env;
+use std::fs;
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
 
 use crate::config::resolve_project_root;
@@ -25,6 +26,7 @@ struct Cli {
 enum Command {
     Spec(SpecArgs),
     Lint,
+    Init,
 }
 
 #[derive(Debug, Args)]
@@ -68,14 +70,24 @@ pub fn run_from_env() -> ExitCode {
 
 fn execute(cli: Cli) -> Result<ExitCode> {
     let current_dir = env::current_dir()?;
-    let resolution = resolve_project_root(&current_dir)?;
-    if let Some(warning) = resolution.warning() {
-        eprintln!("{warning}");
-    }
-    let root = resolution.root;
 
     match cli.command {
+        Command::Init => {
+            let config_path = current_dir.join("special.toml");
+            if config_path.exists() {
+                bail!("special.toml already exists at `{}`", config_path.display());
+            }
+
+            fs::write(&config_path, "root = \".\"\n")?;
+            println!("Created {}", config_path.display());
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Spec(args) => {
+            let resolution = resolve_project_root(&current_dir)?;
+            if let Some(warning) = resolution.warning() {
+                eprintln!("{warning}");
+            }
+            let root = resolution.root;
             let (document, lint) = build_spec_document(
                 &root,
                 SpecFilter {
@@ -99,6 +111,11 @@ fn execute(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Lint => {
+            let resolution = resolve_project_root(&current_dir)?;
+            if let Some(warning) = resolution.warning() {
+                eprintln!("{warning}");
+            }
+            let root = resolution.root;
             let report = build_lint_report(&root)?;
             let clean = report.diagnostics.is_empty();
             println!("{}", render_lint_text(&report));

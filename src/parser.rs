@@ -508,9 +508,9 @@ mod tests {
         assert!(messages
             .iter()
             .any(|message| message.contains("missing required attestation metadata `artifact`")));
-        assert!(messages.iter().any(
-            |message| message.contains("missing required attestation metadata `last_reviewed`")
-        ));
+        assert!(messages.iter().any(|message| {
+            message.contains("missing required attestation metadata `last_reviewed`")
+        }));
         assert!(
             messages
                 .iter()

@@ -125,6 +125,44 @@ This spec should stay outside the configured root.
 }
 
 #[test]
+// @verifies SPECIAL.INIT.CREATES_SPECIAL_TOML
+fn init_creates_special_toml_in_current_directory() {
+    let root = temp_repo_dir("special-cli-init");
+
+    let output = run_special(&root, &["init"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("Created"));
+    assert_eq!(
+        fs::read_to_string(root.join("special.toml")).expect("special.toml should be created"),
+        "root = \".\"\n"
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.INIT.DOES_NOT_OVERWRITE_SPECIAL_TOML
+fn init_fails_when_special_toml_already_exists() {
+    let root = temp_repo_dir("special-cli-init-existing");
+    fs::write(root.join("special.toml"), "root = \"workspace\"\n")
+        .expect("special.toml should be written");
+
+    let output = run_special(&root, &["init"]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("special.toml already exists"));
+    assert_eq!(
+        fs::read_to_string(root.join("special.toml")).expect("special.toml should still exist"),
+        "root = \"workspace\"\n"
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
 // @verifies SPECIAL.SPEC_COMMAND
 fn spec_materializes_live_spec_tree() {
     let root = temp_repo_dir("special-cli-spec");

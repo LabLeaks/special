@@ -130,7 +130,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{resolve_project_root, RootSource};
+    use super::{RootSource, resolve_project_root};
 
     fn temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -166,12 +166,20 @@ mod tests {
         let configured_root = repo_root.join("workspace/specs");
         let nested = repo_root.join("workspace/specs/a/b");
         fs::create_dir_all(&nested).expect("nested dir should be created");
-        fs::write(repo_root.join("special.toml"), "root = \"workspace/specs\"\n")
-            .expect("special.toml should be created");
+        fs::write(
+            repo_root.join("special.toml"),
+            "root = \"workspace/specs\"\n",
+        )
+        .expect("special.toml should be created");
 
         let resolved = resolve_project_root(&nested).expect("root should resolve");
 
-        assert_eq!(resolved.root, configured_root.canonicalize().expect("root should canonicalize"));
+        assert_eq!(
+            resolved.root,
+            configured_root
+                .canonicalize()
+                .expect("root should canonicalize")
+        );
         assert_eq!(resolved.source, RootSource::SpecialToml);
 
         fs::remove_dir_all(&repo_root).expect("temp dir should be cleaned up");
@@ -230,7 +238,10 @@ mod tests {
 
         let resolved = resolve_project_root(&nested).expect("root should resolve");
 
-        assert_eq!(resolved.root, nested.canonicalize().expect("path should canonicalize"));
+        assert_eq!(
+            resolved.root,
+            nested.canonicalize().expect("path should canonicalize")
+        );
         assert_eq!(resolved.source, RootSource::CurrentDir);
         assert!(resolved.warning().is_some());
 
