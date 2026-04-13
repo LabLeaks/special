@@ -91,7 +91,13 @@ It creates `special.toml` in the current directory with `root = "."`, and fails 
 
 Local development uses `cargo run`.
 
-Published binaries are intended to come from GitHub Releases for `LabLeaks/special`.
+Published binaries are available from GitHub Releases for `LabLeaks/special`.
+
+Homebrew is the primary install path:
+
+```sh
+brew install LabLeaks/homebrew-tap/special
+```
 
 Cargo is a secondary install path:
 
@@ -101,8 +107,6 @@ cargo install special-cli
 
 That installs the `special` binary.
 
-Homebrew distribution through `LabLeaks/homebrew-tap` is planned, but is not live yet.
-
 ## Release Automation
 
 This repo carries its own release automation contract in `special` format.
@@ -111,9 +115,10 @@ The current live distribution slice covers:
 - crates.io package name and installed binary name
 - GitHub repository metadata for release automation
 - committed GitHub Actions release workflow
-- planned release archives and checksums for supported targets
+- published release archives and checksums for supported targets
+- committed Homebrew formula in `LabLeaks/homebrew-tap`
 
-Actual published GitHub Releases are a separate claim and only become live once a real release exists.
+Actual published GitHub Releases are a separate claim from release automation itself. `v0.1.0` is the first live published release.
 
 ## Annotation Model
 

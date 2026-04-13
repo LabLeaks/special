@@ -30,19 +30,17 @@ special keeps a GitHub Actions release workflow in `.github/workflows/release.ym
 
 /**
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.PUBLISHED
-special will publish GitHub Releases for versioned distribution.
-
-@planned
+special publishes GitHub Releases for versioned distribution.
 */
 
 /**
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.ARCHIVES
-special GitHub release automation plans versioned release archives for supported target platforms.
+special GitHub release automation publishes versioned release archives for supported target platforms.
 */
 
 /**
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.CHECKSUMS
-special GitHub release automation plans checksums for its release archives.
+special GitHub release automation publishes checksums for its release archives.
 */
 
 /**
@@ -52,9 +50,7 @@ special Homebrew distribution.
 
 /**
 @spec SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA
-special will ship a Homebrew formula in LabLeaks/homebrew-tap.
-
-@planned
+special ships a Homebrew formula in LabLeaks/homebrew-tap.
 */
 
 /**
