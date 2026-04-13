@@ -21,13 +21,13 @@ special spec --json emits the materialized spec as JSON.
 special spec --html emits the materialized spec as HTML.
 
 @spec SPECIAL.SPEC_COMMAND.VERBOSE
-special spec will support a verbose mode that shows the attached verifies and attests bodies for review.
+special spec --verbose shows the attached verifies and attests bodies for review.
 
 @spec SPECIAL.SPEC_COMMAND.VERBOSE.JSON
-special spec --json --verbose will include attached verifies and attests bodies in JSON output.
+special spec --json --verbose includes attached verifies and attests bodies in JSON output.
 
 @spec SPECIAL.SPEC_COMMAND.VERBOSE.HTML
-special spec --html --verbose will render attached verifies and attests bodies in collapsed detail blocks.
+special spec --html --verbose renders attached verifies and attests bodies in collapsed detail blocks.
 
 @spec SPECIAL.LINT_COMMAND
 special lint reports annotation parsing and reference errors.
@@ -54,5 +54,5 @@ special lint reports unknown annotations in annotation blocks.
 special lint does not report unsupported live specs.
 
 @spec SPECIAL.LINT_COMMAND.ORPHAN_VERIFIES
-special lint will report @verifies blocks that do not attach to a supported owned item.
+special lint reports @verifies blocks that do not attach to a supported owned item.
 */
