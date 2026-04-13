@@ -19,6 +19,16 @@ special GitHub release distribution.
 */
 
 /**
+@spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.REPOSITORY_URL
+special release automation declares the `https://github.com/LabLeaks/special` repository URL.
+*/
+
+/**
+@spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.WORKFLOW
+special keeps a GitHub Actions release workflow in `.github/workflows/release.yml`.
+*/
+
+/**
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.PUBLISHED
 special will publish GitHub Releases for versioned distribution.
 
@@ -27,16 +37,12 @@ special will publish GitHub Releases for versioned distribution.
 
 /**
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.ARCHIVES
-special will publish versioned release archives for supported target platforms.
-
-@planned
+special GitHub release automation plans versioned release archives for supported target platforms.
 */
 
 /**
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.CHECKSUMS
-special will publish checksums for its release archives.
-
-@planned
+special GitHub release automation plans checksums for its release archives.
 */
 
 /**
