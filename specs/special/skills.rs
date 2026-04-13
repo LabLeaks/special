@@ -1,39 +1,53 @@
 /**
 @group SPECIAL.SKILLS.COMMAND
-special skill installation command.
+special project skill installation command.
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.INSTALLS_PROJECT_SKILLS
-special will install project-local skills for agents to use in the current repository.
+@spec SPECIAL.SKILLS.COMMAND.WRITES_PROJECT_SKILLS_DIRECTORY
+special will install project-local skills into `.agents/skills/` in the current repository.
 
 @planned
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.USES_OPENSKILL_STANDARD
-special will install relevant openskill-standard skills for the project.
+@spec SPECIAL.SKILLS.COMMAND.USES_AGENT_SKILLS_LAYOUT
+special will install skills as standard skill directories with `SKILL.md` and optional support files rather than inventing a special-only layout.
 
 @planned
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.FRONTMATTER_TRIGGER_DESCRIPTIONS
-special will ensure installed skill frontmatter descriptions begin with high-signal trigger text so agents actually select the skills.
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_SPECIAL_USAGE_SKILL
+special will install a skill that teaches agents how to use special annotations and CLI workflows correctly in the current repository.
 
 @planned
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.TEACHES_SPECIAL_USAGE
-special will install skills that teach agents how to use special annotations and CLI workflows correctly.
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_SPEC_WRITING_SKILL
+special will install a skill that teaches agents how to write strong special specs rather than vague or implementation-shaped claims.
 
 @planned
 */
 
 /**
-@spec SPECIAL.SKILLS.COMMAND.TEACHES_SPEC_WRITING
-special will install skills that teach agents how to write strong special specs rather than vague or implementation-shaped claims.
+@spec SPECIAL.SKILLS.COMMAND.DESCRIPTIONS_FRONTLOAD_TRIGGER_INTENT
+special will write skill descriptions so the opening text clearly signals when agents should use the skill.
+
+@planned
+*/
+
+/**
+@spec SPECIAL.SKILLS.COMMAND.BUNDLES_REFERENCES_FOR_PROGRESSIVE_DISCLOSURE
+special will bundle deeper skill guidance in sidecar references so startup skill summaries stay compact while richer instructions remain available on activation.
+
+@planned
+*/
+
+/**
+@spec SPECIAL.SKILLS.COMMAND.INCLUDES_TRIGGER_EVAL_FIXTURES
+special will include trigger eval fixtures so skill descriptions can be checked against should-trigger and should-not-trigger examples.
 
 @planned
 */
