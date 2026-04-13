@@ -20,6 +20,7 @@ Useful commands:
 mise exec -- cargo run -- spec
 mise exec -- cargo run -- spec --all
 mise exec -- cargo run -- spec SPECIAL.SPEC_COMMAND --verbose
+mise exec -- cargo run -- skills
 mise exec -- cargo run -- lint
 ```
 
@@ -46,6 +47,7 @@ Today `special` is a Rust CLI that:
 - includes planned claims on request
 - reports annotation and reference errors
 - shows the attached verification and attestation bodies in verbose mode
+- installs task-shaped project skills for working with product specs
 
 This repo is self-hosting: `special`'s own behavior is described and verified in `special` format under [specs/special](specs/special).
 
@@ -87,6 +89,21 @@ mise exec -- cargo run -- init
 
 It creates `special.toml` in the current directory with `root = "."`, and fails rather than overwriting an existing file.
 
+`special skills` installs project-local agent skills:
+
+```sh
+mise exec -- cargo run -- skills
+```
+
+It writes task-shaped skills into `.agents/skills/` for:
+- shipping a product change without drifting the contract
+- defining product specs
+- validating whether a claim is honestly supported
+- inspecting the current live spec state
+- finding planned work
+
+The installed skill files are generated output and are typically ignored in the repo.
+
 ## Install
 
 Local development uses `cargo run`.
@@ -118,7 +135,7 @@ The current live distribution slice covers:
 - published release archives and checksums for supported targets
 - committed Homebrew formula in `LabLeaks/homebrew-tap`
 
-Actual published GitHub Releases are a separate claim from release automation itself. `v0.1.0` is the first live published release.
+Actual published GitHub Releases are a separate claim from release automation itself.
 
 ## Annotation Model
 
