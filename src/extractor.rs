@@ -6,7 +6,7 @@ use ignore::WalkBuilder;
 
 use crate::model::{BlockLine, CommentBlock, OwnedItem, SourceLocation};
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "go", "ts", "tsx", "sh"];
+const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "go", "ts", "tsx", "sh", "py"];
 
 #[derive(Clone, Copy)]
 enum LineCommentStyle {
@@ -143,7 +143,7 @@ fn extract_blocks_from_text(path: PathBuf, content: &str) -> Vec<CommentBlock> {
 
 fn line_comment_style_for_path(path: &Path) -> LineCommentStyle {
     match path.extension().and_then(|ext| ext.to_str()) {
-        Some("sh") => LineCommentStyle::Hash,
+        Some("sh" | "py") => LineCommentStyle::Hash,
         _ => LineCommentStyle::Slash,
     }
 }
@@ -188,6 +188,7 @@ fn strip_block_line_prefix(line: &str) -> &str {
 fn extract_owned_item(path: &Path, lines: &[&str], index: usize) -> Option<OwnedItem> {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("sh") => extract_shell_owned_item(path, lines, index),
+        Some("py") => extract_python_owned_item(path, lines, index),
         _ => extract_code_owned_item(path, lines, index),
     }
 }
@@ -278,6 +279,72 @@ fn extract_code_owned_item(path: &Path, lines: &[&str], mut index: usize) -> Opt
         }
 
         index += 1;
+    }
+
+    let body = body_lines.join("\n").trim_end().to_string();
+    if body.is_empty() {
+        return None;
+    }
+
+    Some(OwnedItem {
+        location: SourceLocation {
+            path: path.to_path_buf(),
+            line: start + 1,
+        },
+        body,
+    })
+}
+
+fn extract_python_owned_item(path: &Path, lines: &[&str], mut index: usize) -> Option<OwnedItem> {
+    while index < lines.len() && lines[index].trim().is_empty() {
+        index += 1;
+    }
+
+    if index >= lines.len() {
+        return None;
+    }
+
+    let first = lines[index].trim_start();
+    if first.starts_with('#') {
+        return None;
+    }
+
+    let start = index;
+    let mut body_lines = Vec::new();
+    let mut base_indent: Option<usize> = None;
+    let mut saw_header = false;
+
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+
+        if index == start {
+            base_indent = Some(indent);
+        } else if trimmed.is_empty() {
+            if saw_header {
+                body_lines.push(line);
+            }
+            index += 1;
+            continue;
+        } else if let Some(base_indent) = base_indent
+            && indent <= base_indent
+            && !line.trim_start().starts_with('@')
+            && !line.trim_start().starts_with('#')
+        {
+            break;
+        }
+
+        if trimmed.ends_with(':') {
+            saw_header = true;
+        }
+
+        body_lines.push(line);
+        index += 1;
+
+        if !saw_header && index > start {
+            break;
+        }
     }
 
     let body = body_lines.join("\n").trim_end().to_string();
@@ -420,6 +487,26 @@ mod tests {
                 .expect("owned item should be present")
                 .body,
             "set -euo pipefail\n\nexec mise exec -- cargo clippy --all-targets --all-features -- -D warnings"
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.PYTHON_LINE_COMMENTS
+    fn extracts_python_line_comment_blocks() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.py"),
+            "# @verifies AUTH.LOGIN\n\ndef test_auth_login():\n    assert True\n",
+        );
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lines[0].text, "@verifies AUTH.LOGIN");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "def test_auth_login():\n    assert True"
         );
     }
 

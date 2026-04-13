@@ -45,7 +45,5 @@ special requires last_reviewed to use YYYY-MM-DD format.
 special requires review_interval_days to be a positive integer when present.
 
 @spec SPECIAL.PARSE.PYTHON_LINE_COMMENTS
-special will support Python through comment-based annotation blocks instead of docstring ownership.
-
-@planned
+special parses annotation blocks from Python `#` comments in `.py` files instead of docstring ownership.
 */
