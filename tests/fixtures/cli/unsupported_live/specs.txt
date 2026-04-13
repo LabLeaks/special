@@ -1,0 +1,7 @@
+/**
+@spec DEMO
+Demo root.
+
+@spec DEMO.UNSUPPORTED
+Live child without support.
+*/

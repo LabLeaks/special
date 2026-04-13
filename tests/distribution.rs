@@ -1,10 +1,20 @@
+/**
+@module SPECIAL.TESTS.DISTRIBUTION
+Distribution/release asset integration tests in `tests/distribution.rs`.
+*/
+// @implements SPECIAL.TESTS.DISTRIBUTION
 use std::path::PathBuf;
 use std::process::Command;
+use std::{fs, path::Path};
 
 use serde_json::Value;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn read_repo_file(path: impl AsRef<Path>) -> String {
+    fs::read_to_string(repo_root().join(path)).expect("repo file should be readable")
 }
 
 fn cargo_metadata() -> Value {
@@ -32,31 +42,31 @@ fn cargo_metadata() -> Value {
     serde_json::from_slice(&output.stdout).expect("cargo metadata output should be valid json")
 }
 
-fn dist_bin() -> PathBuf {
-    let cargo_home = std::env::var_os("CARGO_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cargo")))
-        .expect("CARGO_HOME or HOME should be set");
+fn release_assets() -> Value {
+    serde_json::from_str(include_str!("../scripts/release-assets.json"))
+        .expect("release assets json should be valid")
+}
 
-    cargo_home.join("bin").join("dist")
+fn package_metadata() -> Value {
+    cargo_metadata()["packages"]
+        .as_array()
+        .expect("packages should be an array")
+        .iter()
+        .find(|package| package["name"].as_str() == Some("special-cli"))
+        .cloned()
+        .expect("cargo metadata should include the special-cli package")
 }
 
 fn dist_command() -> Command {
-    let dist = dist_bin();
-    assert!(
-        dist.is_file(),
-        "cargo-dist should be installed at {}",
-        dist.display()
-    );
-
-    let mut command = Command::new(dist);
+    let mut command = Command::new("mise");
+    command.args(["exec", "--", "dist"]);
     command.current_dir(repo_root());
     command
 }
 
 fn dist_manifest() -> Value {
-    let metadata = cargo_metadata();
-    let version = metadata["packages"][0]["version"]
+    let package = package_metadata();
+    let version = package["version"]
         .as_str()
         .expect("package version should be a string");
 
@@ -86,8 +96,8 @@ fn dist_manifest() -> Value {
 #[test]
 // @verifies SPECIAL.DISTRIBUTION.CRATES_IO.PACKAGE_NAME
 fn crates_io_package_name_is_special_cli() {
-    let metadata = cargo_metadata();
-    let package_name = metadata["packages"][0]["name"]
+    let package = package_metadata();
+    let package_name = package["name"]
         .as_str()
         .expect("package name should be a string");
 
@@ -97,8 +107,8 @@ fn crates_io_package_name_is_special_cli() {
 #[test]
 // @verifies SPECIAL.DISTRIBUTION.CRATES_IO.BINARY_NAME
 fn cargo_package_installs_special_binary() {
-    let metadata = cargo_metadata();
-    let targets = metadata["packages"][0]["targets"]
+    let package = package_metadata();
+    let targets = package["targets"]
         .as_array()
         .expect("targets should be an array");
 
@@ -110,14 +120,17 @@ fn cargo_package_installs_special_binary() {
                 .unwrap_or(false)
     });
 
-    assert!(has_special_bin, "cargo metadata should expose a `special` binary target");
+    assert!(
+        has_special_bin,
+        "cargo metadata should expose a `special` binary target"
+    );
 }
 
 #[test]
 // @verifies SPECIAL.DISTRIBUTION.GITHUB_RELEASES.REPOSITORY_URL
 fn github_release_repository_url_is_declared() {
-    let metadata = cargo_metadata();
-    let repository = metadata["packages"][0]["repository"]
+    let package = package_metadata();
+    let repository = package["repository"]
         .as_str()
         .expect("repository should be a string");
 
@@ -131,9 +144,14 @@ fn github_release_workflow_is_committed_and_in_sync() {
         repo_root().join(".github/workflows/release.yml").is_file(),
         "release workflow should be committed"
     );
+    let workflow = read_repo_file(".github/workflows/release.yml");
+    assert!(workflow.contains("tags:\n      - 'v*.*.*'"));
+    assert!(!workflow.contains("tags:\n      - 'v*'"));
+    assert!(workflow.contains("Validate release tag shape"));
+    assert!(workflow.contains("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"));
 
-    let metadata = cargo_metadata();
-    let version = metadata["packages"][0]["version"]
+    let package = package_metadata();
+    let version = package["version"]
         .as_str()
         .expect("package version should be a string");
 
@@ -170,10 +188,26 @@ fn github_release_plan_contains_versioned_archives() {
         .filter(|artifact| artifact["kind"].as_str() == Some("executable-zip"))
         .collect();
 
-    assert!(
-        !release_archives.is_empty(),
-        "dist manifest should include executable release archives"
-    );
+    let mut archive_names: Vec<_> = release_archives
+        .iter()
+        .map(|archive| {
+            archive["name"]
+                .as_str()
+                .expect("archive name should be a string")
+        })
+        .collect();
+    archive_names.sort_unstable();
+
+    let release_assets = release_assets();
+    let mut expected_archive_names: Vec<_> = release_assets["archives"]
+        .as_array()
+        .expect("archives should be an array")
+        .iter()
+        .map(|archive| archive.as_str().expect("archive should be a string"))
+        .collect();
+    expected_archive_names.sort_unstable();
+
+    assert_eq!(archive_names, expected_archive_names);
 
     for archive in release_archives {
         let name = archive["name"]
@@ -188,7 +222,9 @@ fn github_release_plan_contains_versioned_archives() {
             "archive name should be versioned under the package identity: {name}"
         );
         assert!(
-            assets.iter().any(|asset| asset["kind"].as_str() == Some("executable")),
+            assets
+                .iter()
+                .any(|asset| asset["kind"].as_str() == Some("executable")),
             "archive should include the special executable: {name}"
         );
     }
@@ -201,6 +237,7 @@ fn github_release_plan_contains_checksums_for_archives() {
     let artifacts = manifest["artifacts"]
         .as_object()
         .expect("artifacts should be an object");
+    let release_assets = release_assets();
 
     assert!(
         artifacts
@@ -224,5 +261,21 @@ fn github_release_plan_contains_checksums_for_archives() {
                 "archive checksum artifact should exist for {checksum_name}"
             );
         }
+    }
+
+    for archive_name in release_assets["archives"]
+        .as_array()
+        .expect("archives should be an array")
+        .iter()
+        .map(|archive| archive.as_str().expect("archive should be a string"))
+    {
+        let checksum_name = format!("{archive_name}.sha256");
+        assert!(
+            artifacts
+                .get(&checksum_name)
+                .and_then(|artifact| artifact["kind"].as_str())
+                == Some("checksum"),
+            "dist manifest should define checksum artifact {checksum_name}"
+        );
     }
 }

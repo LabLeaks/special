@@ -1,21 +1,45 @@
+/**
+@module SPECIAL.CLI
+Thin command-line boundary for the Rust application.
+
+@group SPECIAL.HELP
+special help surface and top-level command descriptions.
+
+@spec SPECIAL.HELP.TOP_LEVEL_COMMANDS
+special `--help` lists the top-level commands with purpose-oriented summaries.
+
+@spec SPECIAL.HELP.SPECS_COMMAND_PLURAL_PRIMARY
+special help text presents the semantic spec command as `special specs`.
+
+@spec SPECIAL.HELP.MODULES_COMMAND_PLURAL_PRIMARY
+special help text presents the architecture module command as `special modules`.
+
+@spec SPECIAL.HELP.SKILLS_COMMAND_SHAPES
+special help text explains the `skills`, `skills SKILL_ID`, and `skills install [SKILL_ID]` command shapes.
+*/
+// @implements SPECIAL.CLI
 use std::env;
-use std::fs;
 use std::process::ExitCode;
 
-use anyhow::{Result, bail};
-use clap::{Args, Parser, Subcommand};
+use anyhow::Result;
+use clap::{Parser, Subcommand};
 
-use crate::config::resolve_project_root;
-use crate::index::{build_lint_report, build_spec_document};
-use crate::model::SpecFilter;
-use crate::render::{render_lint_text, render_spec_html, render_spec_json, render_spec_text};
-use crate::skills::install_project_skills;
+mod init;
+mod modules;
+mod skills;
+mod spec;
+
+use self::init::execute_init;
+use self::modules::{ModulesArgs, execute_modules};
+use self::skills::{SkillsArgs, execute_skills};
+use self::spec::{SpecArgs, execute_lint, execute_spec};
 
 #[derive(Debug, Parser)]
 #[command(
     name = "special",
     bin_name = "special",
-    about = "Repo-native claim-and-support materializer",
+    about = "Repo-native semantic spec and skill tool",
+    after_help = "Examples:\n  special specs\n  special specs SPECIAL.CONFIG --verbose\n  special modules\n  special modules SPECIAL.PARSER --verbose\n  special lint\n  special init\n  special skills\n  special skills ship-product-change\n  special skills install\n  special skills install define-product-specs",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -25,30 +49,27 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Spec(SpecArgs),
+    #[command(
+        name = "specs",
+        alias = "spec",
+        about = "Materialize and inspect semantic specs"
+    )]
+    Specs(SpecArgs),
+    #[command(
+        name = "modules",
+        alias = "module",
+        about = "Materialize and inspect architecture modules"
+    )]
+    Modules(ModulesArgs),
+    #[command(about = "Check annotations and references for structural problems")]
     Lint,
+    #[command(about = "Create a starter special.toml in the current directory")]
     Init,
-    Skills,
-}
-
-#[derive(Debug, Args)]
-struct SpecArgs {
-    spec_id: Option<String>,
-
-    #[arg(long = "all")]
-    include_all: bool,
-
-    #[arg(long = "unsupported")]
-    unsupported_only: bool,
-
-    #[arg(long = "json", conflicts_with = "html")]
-    json: bool,
-
-    #[arg(long = "html", conflicts_with = "json")]
-    html: bool,
-
-    #[arg(long = "verbose")]
-    verbose: bool,
+    #[command(
+        about = "List bundled skills, print one skill, or install skills",
+        long_about = "Use `special skills` to see available bundled skills and command shapes.\n\nCommand shapes:\n  special skills\n  special skills SKILL_ID\n  special skills install [SKILL_ID]\n  special skills install [SKILL_ID] --destination DESTINATION\n  special skills install [SKILL_ID] --destination DESTINATION --force"
+    )]
+    Skills(SkillsArgs),
 }
 
 pub fn run_from_env() -> ExitCode {
@@ -74,71 +95,10 @@ fn execute(cli: Cli) -> Result<ExitCode> {
     let current_dir = env::current_dir()?;
 
     match cli.command {
-        Command::Init => {
-            let config_path = current_dir.join("special.toml");
-            if config_path.exists() {
-                bail!("special.toml already exists at `{}`", config_path.display());
-            }
-
-            fs::write(&config_path, "root = \".\"\n")?;
-            println!("Created {}", config_path.display());
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Skills => {
-            let resolution = resolve_project_root(&current_dir)?;
-            if let Some(warning) = resolution.warning() {
-                eprintln!("{warning}");
-            }
-            let root = resolution.root;
-            let installed = install_project_skills(&root)?;
-            println!(
-                "Installed {installed} skills into {}",
-                root.join(".agents/skills").display()
-            );
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Spec(args) => {
-            let resolution = resolve_project_root(&current_dir)?;
-            if let Some(warning) = resolution.warning() {
-                eprintln!("{warning}");
-            }
-            let root = resolution.root;
-            let (document, lint) = build_spec_document(
-                &root,
-                SpecFilter {
-                    include_planned: args.include_all,
-                    unsupported_only: args.unsupported_only,
-                    scope: args.spec_id,
-                },
-            )?;
-
-            if !lint.diagnostics.is_empty() {
-                eprintln!("{}", render_lint_text(&lint));
-            }
-
-            if args.json {
-                println!("{}", render_spec_json(&document, args.verbose)?);
-            } else if args.html {
-                println!("{}", render_spec_html(&document, args.verbose));
-            } else {
-                println!("{}", render_spec_text(&document, args.verbose));
-            }
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Lint => {
-            let resolution = resolve_project_root(&current_dir)?;
-            if let Some(warning) = resolution.warning() {
-                eprintln!("{warning}");
-            }
-            let root = resolution.root;
-            let report = build_lint_report(&root)?;
-            let clean = report.diagnostics.is_empty();
-            println!("{}", render_lint_text(&report));
-            Ok(if clean {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::from(1)
-            })
-        }
+        Command::Init => execute_init(&current_dir),
+        Command::Modules(args) => execute_modules(args, &current_dir),
+        Command::Skills(args) => execute_skills(args, &current_dir),
+        Command::Specs(args) => execute_spec(args, &current_dir),
+        Command::Lint => execute_lint(&current_dir),
     }
 }

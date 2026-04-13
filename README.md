@@ -45,6 +45,7 @@ Today `special` is a Rust CLI that:
 - builds one spec tree across files and file types
 - materializes the live spec by default
 - includes planned claims on request
+- carries optional release metadata on planned claims
 - reports annotation and reference errors
 - shows the attached verification and attestation bodies in verbose mode
 - installs task-shaped project skills for working with product specs
@@ -53,7 +54,7 @@ This repo is self-hosting: `special`'s own behavior is described and verified in
 
 ## Command Surface
 
-The core command is `special spec`.
+The core command is `special specs` (`special spec` also works as an alias).
 
 ```sh
 mise exec -- cargo run -- spec
@@ -70,6 +71,7 @@ mise exec -- cargo run -- spec SPECIAL.CONFIG.SPECIAL_TOML --verbose
 mise exec -- cargo run -- spec --unsupported
 mise exec -- cargo run -- spec --json
 mise exec -- cargo run -- spec --html
+mise exec -- cargo run -- spec --html --verbose
 mise exec -- cargo run -- spec SPECIAL.SPEC_COMMAND --json --verbose
 ```
 
@@ -89,13 +91,16 @@ mise exec -- cargo run -- init
 
 It creates `special.toml` in the current directory with `root = "."`, and fails rather than overwriting an existing file.
 
-`special skills` installs project-local agent skills:
+`special skills` explains and prints bundled skills:
 
 ```sh
 mise exec -- cargo run -- skills
+mise exec -- cargo run -- skills ship-product-change
+mise exec -- cargo run -- skills install
+mise exec -- cargo run -- skills install ship-product-change
 ```
 
-It writes task-shaped skills into `.agents/skills/` for:
+`special skills install` writes task-shaped skills into `.agents/skills/` or another selected destination for:
 - shipping a product change without drifting the contract
 - defining product specs
 - validating whether a claim is honestly supported
@@ -128,6 +133,12 @@ That installs the `special` binary.
 
 This repo carries its own release automation contract in `special` format.
 
+Create release tags through the local wrapper so the Rust release review runs first:
+
+```sh
+python3 scripts/tag-release.py 0.3.0
+```
+
 The current live distribution slice covers:
 - crates.io package name and installed binary name
 - GitHub repository metadata for release automation
@@ -146,7 +157,7 @@ Actual published GitHub Releases are a separate claim from release automation it
 - `@spec ID`
   Real claim node.
 - `@planned`
-  Marks a `@spec` as not part of the live spec yet.
+  Marks a `@spec` as not part of the live spec yet, and may optionally carry a release string like `@planned 0.3.0`.
 - `@verifies ID`
   Attaches one verification artifact to one claim.
 - `@attests ID`
@@ -164,12 +175,12 @@ Important constraints:
 
 ```text
 /**
-@spec EXPORT.DOESNTCRASH
-When you export something, it does not crash.
+@spec EXPORT.CSV.HEADERS
+CSV exports include a header row with the selected column names.
 */
 
 /**
-@verifies EXPORT.DOESNTCRASH
+@verifies EXPORT.CSV.HEADERS
 */
 ```
 
@@ -178,9 +189,17 @@ Planned claims use the same declaration form:
 ```text
 /**
 @spec EXPORT.METADATA
-Exports include provenance metadata.
-
 @planned
+Exports include provenance metadata.
+*/
+```
+
+Planned claims may also carry release metadata:
+
+```text
+/**
+@spec EXPORT.METADATA @planned 0.3.0
+Exports include provenance metadata.
 */
 ```
 
@@ -195,12 +214,15 @@ Export-related claims.
 
 Verbose review works best when a `@verifies` block sits directly above the item it owns:
 
-```rust
-// @verifies EXPORT.DOESNTCRASH
-#[test]
-fn export_does_not_crash() {
-    // ...
-}
+```ts
+// @verifies EXPORT.CSV.HEADERS
+test("csv export includes selected column headers", async () => {
+  const csv = await exportOrdersCsv({
+    columns: ["order_id", "status"],
+  });
+
+  expect(csv.split("\n")[0]).toBe("order_id,status");
+});
 ```
 
 ## Root Discovery
@@ -210,6 +232,7 @@ fn export_does_not_crash() {
 The supported config file is `special.toml`:
 
 ```toml
+version = "1"
 root = "."
 ```
 

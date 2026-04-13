@@ -39,8 +39,43 @@ special exits with an error when `special.toml` uses an unknown key.
 */
 
 /**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.DUPLICATE_KEYS_REJECTED
+special exits with an error when `special.toml` declares the same key more than once.
+*/
+
+/**
 @spec SPECIAL.CONFIG.SPECIAL_TOML.EXISTING_ROOT_REQUIRED
 special exits with an error when `special.toml` points `root` at a path that does not exist.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.ROOT_MUST_BE_DIRECTORY
+special exits with an error when `special.toml` points `root` at a file instead of a directory.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.ROOT_MUST_NOT_BE_EMPTY
+special exits with an error when `special.toml` sets `root` to an empty string.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.VERSION
+special reads an optional `version` key from `special.toml` to select parser and linter rules.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.VERSION.DEFAULTS_TO_LEGACY
+without a `version` key in `special.toml`, special defaults `@planned` to backward-looking within-block ownership instead of version 1's adjacent ownership.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.VERSION.UNKNOWN_REJECTED
+special exits with an error when `special.toml` uses an unsupported `version` value.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.VERSION.MISSING_WARNS_AND_ASSUMES_LEGACY
+when `special.toml` omits `version`, special emits a lint warning that it is using compatibility parsing rules and points to `version = "1"` for the current rules.
 */
 
 /**
@@ -61,4 +96,9 @@ without `special.toml` or VCS metadata, special falls back to the current workin
 /**
 @spec SPECIAL.CONFIG.ROOT_DISCOVERY.IMPLICIT_ROOT_WARNING
 without `special.toml`, special warns that it is using an implicit root for discovery.
+*/
+
+/**
+@spec SPECIAL.CONFIG.ROOT_DISCOVERY.NO_CONFIG_VERSION_WARNING
+without `special.toml`, special emits a lint warning that it is using compatibility parsing rules and points to `special init` for creating current config.
 */

@@ -1,15 +1,14 @@
-use std::fs;
-use std::path::PathBuf;
+/**
+@module SPECIAL.TESTS.QUALITY_CLIPPY
+Pinned clippy-contract tests in `tests/quality_clippy.rs`.
+*/
+// @implements SPECIAL.TESTS.QUALITY_CLIPPY
+#[path = "support/quality.rs"]
+mod support;
+
 use std::process::Command;
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn clippy_script() -> String {
-    fs::read_to_string(repo_root().join("scripts/verify-rust-clippy.sh"))
-        .expect("clippy verification script should be readable")
-}
+use support::{clippy_script, repo_root};
 
 #[test]
 // @verifies SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS

@@ -2,7 +2,7 @@
 
 ## Should Trigger
 
-- Add a feature to this repo and update the product specs as part of the change.
+- Add a feature to a repo that already uses product specs and update the contract as part of the change.
 - We are starting to use product specs in this project; add the first claims before you implement the feature.
 - This bug fix changes user-visible behavior, so make sure the product contract stays honest.
 - I need to ship this command change without drifting from the product spec.

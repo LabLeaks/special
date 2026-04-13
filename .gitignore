@@ -1,3 +1,5 @@
 /target
 special-spec.html
 .agents/skills/
+__pycache__/
+*.pyc

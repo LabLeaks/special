@@ -1,9 +1,15 @@
+/**
+@module SPECIAL.EXTRACTOR
+Collects contiguous supported source comment blocks, normalizes comment syntax, and captures the next owned code item for attachment. This module does not interpret `special` tag semantics or build spec or module trees.
+*/
+// @implements SPECIAL.EXTRACTOR
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 
+use crate::annotation_syntax::is_reserved_special_annotation;
 use crate::model::{BlockLine, CommentBlock, OwnedItem, SourceLocation};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "go", "ts", "tsx", "sh", "py"];
@@ -79,7 +85,7 @@ fn extract_blocks_from_text(path: PathBuf, content: &str) -> Vec<CommentBlock> {
 
             if block_lines
                 .iter()
-                .any(|line| line.text.trim_start().starts_with('@'))
+                .any(|line| is_reserved_special_annotation(line.text.trim_start()))
             {
                 blocks.push(CommentBlock {
                     path: path.clone(),
@@ -124,7 +130,7 @@ fn extract_blocks_from_text(path: PathBuf, content: &str) -> Vec<CommentBlock> {
 
             if block_lines
                 .iter()
-                .any(|line| line.text.trim_start().starts_with('@'))
+                .any(|line| is_reserved_special_annotation(line.text.trim_start()))
             {
                 blocks.push(CommentBlock {
                     path: path.clone(),
@@ -448,6 +454,17 @@ mod tests {
     }
 
     #[test]
+    // @verifies SPECIAL.PARSE.LINE_START_RESERVED_TAGS
+    fn ignores_mid_line_tag_text_when_collecting_blocks() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.rs"),
+            "/// Human prose mentioning @spec EXPORT.CSV inline.\nfn export_csv() {}\n",
+        );
+
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
     // @verifies SPECIAL.PARSE.TYPESCRIPT_BLOCK_COMMENTS
     fn extracts_block_comment_blocks() {
         let blocks = extract_blocks_from_text(
@@ -465,6 +482,39 @@ mod tests {
                 .body,
             "export {};"
         );
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.MIXED_PURPOSE_COMMENTS
+    fn extracts_special_tags_from_ordinary_doc_comment_blocks() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.rs"),
+            "/// Human overview for maintainers.\n/// @spec EXPORT.CSV\n/// CSV exports include a header row.\nfn export_csv() {}\n",
+        );
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lines[0].text, "Human overview for maintainers.");
+        assert_eq!(blocks[0].lines[1].text, "@spec EXPORT.CSV");
+        assert_eq!(blocks[0].lines[2].text, "CSV exports include a header row.");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "fn export_csv() {}"
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.FOREIGN_TAGS_NOT_ERRORS
+    fn ignores_comment_blocks_with_only_foreign_tags() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.ts"),
+            "/**\n * @param file output path\n * @returns CSV text\n */\nexport function render() {}\n",
+        );
+
+        assert!(blocks.is_empty());
     }
 
     #[test]

@@ -1,87 +1,187 @@
-use std::fs;
-use std::path::Path;
+/**
+@module SPECIAL.SKILLS
+Bundled skill catalog in `src/skills.rs`.
+*/
+// @implements SPECIAL.SKILLS
+mod install;
 
 use anyhow::Result;
 
-struct SkillFile {
-    path: &'static str,
+pub(crate) use install::{
+    conflicting_skill_paths, install_bundled_skills, resolve_global_skills_root,
+};
+
+pub struct SkillAsset {
+    relative_path: &'static str,
     contents: &'static str,
 }
 
-const SKILL_FILES: &[SkillFile] = &[
-    SkillFile {
-        path: ".agents/skills/ship-product-change/SKILL.md",
+pub struct BundledSkill {
+    pub id: &'static str,
+    pub summary: &'static str,
+    assets: &'static [SkillAsset],
+}
+
+const SHIP_PRODUCT_CHANGE_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
         contents: include_str!("../templates/skills/ship-product-change/SKILL.md"),
     },
-    SkillFile {
-        path: ".agents/skills/ship-product-change/references/change-workflow.md",
-        contents: include_str!("../templates/skills/ship-product-change/references/change-workflow.md"),
+    SkillAsset {
+        relative_path: "references/change-workflow.md",
+        contents: include_str!(
+            "../templates/skills/ship-product-change/references/change-workflow.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/ship-product-change/references/trigger-evals.md",
-        contents: include_str!("../templates/skills/ship-product-change/references/trigger-evals.md"),
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
+        contents: include_str!(
+            "../templates/skills/ship-product-change/references/trigger-evals.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/define-product-specs/SKILL.md",
+];
+
+const DEFINE_PRODUCT_SPECS_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
         contents: include_str!("../templates/skills/define-product-specs/SKILL.md"),
     },
-    SkillFile {
-        path: ".agents/skills/define-product-specs/references/spec-writing.md",
-        contents: include_str!("../templates/skills/define-product-specs/references/spec-writing.md"),
+    SkillAsset {
+        relative_path: "references/spec-writing.md",
+        contents: include_str!(
+            "../templates/skills/define-product-specs/references/spec-writing.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/define-product-specs/references/trigger-evals.md",
-        contents: include_str!("../templates/skills/define-product-specs/references/trigger-evals.md"),
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
+        contents: include_str!(
+            "../templates/skills/define-product-specs/references/trigger-evals.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/validate-product-contract/SKILL.md",
+];
+
+const VALIDATE_PRODUCT_CONTRACT_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
         contents: include_str!("../templates/skills/validate-product-contract/SKILL.md"),
     },
-    SkillFile {
-        path: ".agents/skills/validate-product-contract/references/validation-checklist.md",
-        contents: include_str!("../templates/skills/validate-product-contract/references/validation-checklist.md"),
+    SkillAsset {
+        relative_path: "references/validation-checklist.md",
+        contents: include_str!(
+            "../templates/skills/validate-product-contract/references/validation-checklist.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/validate-product-contract/references/trigger-evals.md",
-        contents: include_str!("../templates/skills/validate-product-contract/references/trigger-evals.md"),
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
+        contents: include_str!(
+            "../templates/skills/validate-product-contract/references/trigger-evals.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/inspect-live-spec-state/SKILL.md",
+];
+
+const VALIDATE_ARCHITECTURE_IMPLEMENTATION_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
+        contents: include_str!("../templates/skills/validate-architecture-implementation/SKILL.md"),
+    },
+    SkillAsset {
+        relative_path: "references/validation-checklist.md",
+        contents: include_str!(
+            "../templates/skills/validate-architecture-implementation/references/validation-checklist.md"
+        ),
+    },
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
+        contents: include_str!(
+            "../templates/skills/validate-architecture-implementation/references/trigger-evals.md"
+        ),
+    },
+];
+
+const INSPECT_LIVE_SPEC_STATE_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
         contents: include_str!("../templates/skills/inspect-live-spec-state/SKILL.md"),
     },
-    SkillFile {
-        path: ".agents/skills/inspect-live-spec-state/references/state-walkthrough.md",
-        contents: include_str!("../templates/skills/inspect-live-spec-state/references/state-walkthrough.md"),
+    SkillAsset {
+        relative_path: "references/state-walkthrough.md",
+        contents: include_str!(
+            "../templates/skills/inspect-live-spec-state/references/state-walkthrough.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/inspect-live-spec-state/references/trigger-evals.md",
-        contents: include_str!("../templates/skills/inspect-live-spec-state/references/trigger-evals.md"),
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
+        contents: include_str!(
+            "../templates/skills/inspect-live-spec-state/references/trigger-evals.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/find-planned-work/SKILL.md",
+];
+
+const FIND_PLANNED_WORK_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
         contents: include_str!("../templates/skills/find-planned-work/SKILL.md"),
     },
-    SkillFile {
-        path: ".agents/skills/find-planned-work/references/planned-workflow.md",
-        contents: include_str!("../templates/skills/find-planned-work/references/planned-workflow.md"),
+    SkillAsset {
+        relative_path: "references/planned-workflow.md",
+        contents: include_str!(
+            "../templates/skills/find-planned-work/references/planned-workflow.md"
+        ),
     },
-    SkillFile {
-        path: ".agents/skills/find-planned-work/references/trigger-evals.md",
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
         contents: include_str!("../templates/skills/find-planned-work/references/trigger-evals.md"),
     },
 ];
 
-pub fn install_project_skills(root: &Path) -> Result<usize> {
-    for file in SKILL_FILES {
-        let path = root.join(file.path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, file.contents)?;
-    }
+const BUNDLED_SKILLS: &[BundledSkill] = &[
+    BundledSkill {
+        id: "ship-product-change",
+        summary: "Ship a product change without drifting the contract.",
+        assets: SHIP_PRODUCT_CHANGE_ASSETS,
+    },
+    BundledSkill {
+        id: "define-product-specs",
+        summary: "Turn requirements into explicit product specs.",
+        assets: DEFINE_PRODUCT_SPECS_ASSETS,
+    },
+    BundledSkill {
+        id: "validate-product-contract",
+        summary: "Check whether one claim is honestly supported.",
+        assets: VALIDATE_PRODUCT_CONTRACT_ASSETS,
+    },
+    BundledSkill {
+        id: "validate-architecture-implementation",
+        summary: "Check whether one module is honestly implemented.",
+        assets: VALIDATE_ARCHITECTURE_IMPLEMENTATION_ASSETS,
+    },
+    BundledSkill {
+        id: "inspect-live-spec-state",
+        summary: "Inspect the current live validated spec state.",
+        assets: INSPECT_LIVE_SPEC_STATE_ASSETS,
+    },
+    BundledSkill {
+        id: "find-planned-work",
+        summary: "Find planned product-spec work that is not live yet.",
+        assets: FIND_PLANNED_WORK_ASSETS,
+    },
+];
 
-    Ok(SKILL_FILES
+pub fn bundled_skills() -> &'static [BundledSkill] {
+    BUNDLED_SKILLS
+}
+
+pub fn bundled_skill(skill_id: &str) -> Option<&'static BundledSkill> {
+    BUNDLED_SKILLS.iter().find(|skill| skill.id == skill_id)
+}
+
+pub fn primary_skill_contents(skill_id: &str) -> Result<&'static str> {
+    let skill =
+        bundled_skill(skill_id).ok_or_else(|| anyhow::anyhow!("unknown skill id `{skill_id}`"))?;
+    skill
+        .assets
         .iter()
-        .filter(|file| file.path.ends_with("/SKILL.md"))
-        .count())
+        .find(|asset| asset.relative_path == "SKILL.md")
+        .map(|asset| asset.contents)
+        .ok_or_else(|| anyhow::anyhow!("bundled skill `{skill_id}` is missing `SKILL.md`"))
 }

@@ -60,10 +60,7 @@ special installs the `special` binary from LabLeaks/homebrew-tap.
 
 /**
 @attests SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
-artifact: brew upgrade special
+artifact: brew upgrade special (confirmed local install for /opt/homebrew/bin/special at v0.2.0)
 owner: gk
 last_reviewed: 2026-04-13
-result: confirmed local Homebrew installation succeeded for v0.2.0
-installed_binary: /opt/homebrew/bin/special
-installed_version: 0.2.0
 */

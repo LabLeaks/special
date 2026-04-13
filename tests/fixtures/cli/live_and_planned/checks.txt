@@ -1,0 +1,8 @@
+// @verifies DEMO
+fn verifies_demo_root() {}
+
+// @verifies DEMO.LIVE
+fn verifies_demo_live() {}
+
+// @verifies DEMO.PLANNED
+fn verifies_demo_planned() {}

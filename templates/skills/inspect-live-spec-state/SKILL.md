@@ -12,5 +12,7 @@ Use this skill when you need to understand what the project currently claims is 
 3. If you need to understand why a claim is live, use `special spec SPEC.ID --verbose`.
 4. Treat groups as navigation only; the real contract lives on direct `@spec` nodes.
 5. Use this skill before making statements about what the project currently ships.
+6. Learn the repo's main contract layout first so you inspect the authoritative declarations instead of a convenient but secondary file.
+7. If the question turns out to be about architecture structure, implementation ownership, or whether code honestly implements a module rather than shipped behavior, switch surfaces instead of forcing it through product specs: use `special modules`, `@module`, `@area`, and `@implements`.
 
 Read [references/state-walkthrough.md](references/state-walkthrough.md) for the walkthrough and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.

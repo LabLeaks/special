@@ -7,3 +7,10 @@ Use this checklist when deciding whether a claim is honestly supported:
 3. Confirm the support body is self-contained enough to judge locally.
 4. Confirm the verify sits at the right abstraction boundary for the claim.
 5. Confirm the claim is live only if the support is genuinely good enough.
+
+Good pairing:
+
+```text
+Claim: CSV exports include a header row with the selected column names.
+Verify: A test that exports CSV with specific selected columns and asserts the first line is exactly those column names.
+```

@@ -1,0 +1,10 @@
+/**
+@spec DEMO
+Demo root.
+
+@spec DEMO.LIVE
+Live child.
+
+@spec DEMO.PLANNED @planned
+Planned child.
+*/

@@ -1,7 +1,46 @@
+/**
+@module SPECIAL.CONFIG
+Coordinates `special.toml` parsing and project-root discovery for the rest of the application.
+*/
+// @implements SPECIAL.CONFIG
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
+
+mod discovery;
+mod special_toml;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpecialVersion {
+    #[default]
+    V0,
+    V1,
+}
+
+impl SpecialVersion {
+    pub const CURRENT: Self = Self::V1;
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V0 => "0",
+            Self::V1 => "1",
+        }
+    }
+
+    fn parse(value: &str, line: Option<usize>) -> Result<Self> {
+        match value {
+            "0" => Ok(Self::V0),
+            "1" => Ok(Self::V1),
+            _ => {
+                if let Some(line) = line {
+                    bail!("line {line} uses unsupported `special.toml` version `{value}`");
+                }
+                bail!("unsupported `special.toml` version `{value}`");
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootSource {
@@ -14,11 +53,16 @@ pub enum RootSource {
 pub struct RootResolution {
     pub root: PathBuf,
     pub source: RootSource,
+    pub version: SpecialVersion,
+    pub version_explicit: bool,
+    pub config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
-struct SpecialToml {
+pub(super) struct SpecialToml {
     root: Option<PathBuf>,
+    version: SpecialVersion,
+    version_explicit: bool,
 }
 
 impl RootResolution {
@@ -38,90 +82,21 @@ impl RootResolution {
 }
 
 pub fn resolve_project_root(start: &Path) -> Result<RootResolution> {
-    let start = start.canonicalize()?;
-
-    for ancestor in start.ancestors() {
-        let config_path = ancestor.join("special.toml");
-        if config_path.is_file() {
-            let config = load_special_toml(&config_path)?;
-            let root = match config.root {
-                Some(configured_root) => ancestor
-                    .join(configured_root)
-                    .canonicalize()
-                    .with_context(|| {
-                        format!(
-                            "special.toml at `{}` points to a root that does not exist",
-                            config_path.display()
-                        )
-                    })?,
-                None => ancestor.to_path_buf(),
-            };
-            return Ok(RootResolution {
-                root,
-                source: RootSource::SpecialToml,
-            });
-        }
-    }
-
-    for ancestor in start.ancestors() {
-        if is_vcs_root(ancestor) {
-            return Ok(RootResolution {
-                root: ancestor.to_path_buf(),
-                source: RootSource::Vcs,
-            });
-        }
-    }
-
-    Ok(RootResolution {
-        root: start,
-        source: RootSource::CurrentDir,
-    })
+    discovery::resolve_project_root(start)
 }
 
-fn is_vcs_root(path: &Path) -> bool {
+pub(super) fn is_vcs_root(path: &Path) -> bool {
     is_marker_present(path.join(".git")) || is_marker_present(path.join(".jj"))
 }
 
-fn is_marker_present(path: PathBuf) -> bool {
+pub(super) fn is_marker_present(path: PathBuf) -> bool {
     fs::metadata(path)
         .map(|metadata| metadata.is_dir() || metadata.is_file())
         .unwrap_or(false)
 }
 
 fn load_special_toml(path: &Path) -> Result<SpecialToml> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read special.toml at `{}`", path.display()))?;
-    parse_special_toml(&content)
-        .with_context(|| format!("failed to parse special.toml at `{}`", path.display()))
-}
-
-fn parse_special_toml(content: &str) -> Result<SpecialToml> {
-    let mut config = SpecialToml::default();
-
-    for (index, raw_line) in content.lines().enumerate() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let Some((key, value)) = line.split_once('=') else {
-            bail!("line {} must use `key = \"value\"` syntax", index + 1);
-        };
-
-        let key = key.trim();
-        let value = value.trim();
-        let value = value
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .ok_or_else(|| anyhow::anyhow!("line {} must use a quoted string value", index + 1))?;
-
-        match key {
-            "root" => config.root = Some(PathBuf::from(value)),
-            _ => bail!("line {} uses unknown key `{key}`", index + 1),
-        }
-    }
-
-    Ok(config)
+    special_toml::load_special_toml(path)
 }
 
 #[cfg(test)]
@@ -130,7 +105,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{RootSource, resolve_project_root};
+    use super::{RootSource, SpecialVersion, resolve_project_root, special_toml};
 
     fn temp_dir(prefix: &str) -> PathBuf {
         let unique = SystemTime::now()
@@ -181,6 +156,30 @@ mod tests {
                 .expect("root should canonicalize")
         );
         assert_eq!(resolved.source, RootSource::SpecialToml);
+
+        fs::remove_dir_all(&repo_root).expect("temp dir should be cleaned up");
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.ROOT_MUST_BE_DIRECTORY
+    fn rejects_file_root_from_special_toml() {
+        let repo_root = temp_dir("special-config-file-root");
+        let nested = repo_root.join("workspace/specs");
+        fs::create_dir_all(&nested).expect("nested dir should be created");
+        fs::write(repo_root.join("workspace/specs.rs"), "// fixture")
+            .expect("fixture file should be written");
+        fs::write(
+            repo_root.join("special.toml"),
+            "root = \"workspace/specs.rs\"\n",
+        )
+        .expect("special.toml should be created");
+
+        let err = resolve_project_root(&nested).expect_err("file root should fail");
+
+        assert!(
+            err.to_string()
+                .contains("points to a root that is not a directory")
+        );
 
         fs::remove_dir_all(&repo_root).expect("temp dir should be cleaned up");
     }
@@ -249,6 +248,17 @@ mod tests {
     }
 
     #[test]
+    fn reports_unsupported_special_toml_versions_with_line_context() {
+        let err = special_toml::parse_special_toml("root = \".\"\nversion = \"9\"\n")
+            .expect_err("unsupported versions should fail");
+
+        assert!(
+            err.to_string()
+                .contains("line 2 uses unsupported `special.toml` version `9`")
+        );
+    }
+
+    #[test]
     // @verifies SPECIAL.CONFIG.ROOT_DISCOVERY.IMPLICIT_ROOT_WARNING
     fn warns_when_root_is_inferred() {
         let root = temp_dir("special-config-warning");
@@ -261,7 +271,66 @@ mod tests {
 
         assert!(warning.contains("warning: using inferred VCS root"));
         assert!(warning.contains("add special.toml for predictable root selection"));
+        assert!(!resolved.version_explicit);
 
         fs::remove_dir_all(&root).expect("temp dir should be cleaned up");
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.VERSION
+    fn parses_special_toml_version() {
+        let config = special_toml::parse_special_toml("version = \"1\"\nroot = \".\"\n")
+            .expect("config should parse");
+
+        assert_eq!(config.version, SpecialVersion::V1);
+        assert_eq!(config.root, Some(PathBuf::from(".")));
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.VERSION.DEFAULTS_TO_LEGACY
+    fn defaults_special_toml_version_to_legacy() {
+        let config = special_toml::parse_special_toml("root = \".\"\n")
+            .expect("config without version should parse");
+
+        assert_eq!(config.version, SpecialVersion::V0);
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.VERSION.UNKNOWN_REJECTED
+    fn rejects_unknown_special_toml_version() {
+        let err =
+            special_toml::parse_special_toml("version = \"2\"\n").expect_err("config should fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported `special.toml` version `2`")
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.DUPLICATE_KEYS_REJECTED
+    fn rejects_duplicate_special_toml_keys() {
+        let err = special_toml::parse_special_toml("root = \".\"\nroot = \"workspace\"\n")
+            .expect_err("duplicate root should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("line 2"));
+        assert!(message.contains("root"));
+
+        let err = special_toml::parse_special_toml("version = \"1\"\nversion = \"0\"\n")
+            .expect_err("duplicate version should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("line 2"));
+        assert!(message.contains("version"));
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.ROOT_MUST_NOT_BE_EMPTY
+    fn rejects_empty_special_toml_root() {
+        let err =
+            special_toml::parse_special_toml("root = \"\"\n").expect_err("empty root should fail");
+
+        assert!(err.to_string().contains("must not use an empty root path"));
     }
 }
