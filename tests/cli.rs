@@ -124,6 +124,30 @@ This spec should stay outside the configured root.
     .expect("decoy fixture should be written");
 }
 
+fn write_special_toml_dot_root_fixture(root: &Path) -> PathBuf {
+    let nested = root.join("nested/deeper");
+    fs::create_dir_all(&nested).expect("nested dir should be created");
+    fs::write(root.join("special.toml"), "root = \".\"\n").expect("special.toml should be written");
+
+    fs::write(
+        root.join("specs.rs"),
+        r#"/**
+@spec DEMO
+Config-root spec.
+*/
+"#,
+    )
+    .expect("config-root spec fixture should be written");
+
+    fs::write(
+        root.join("checks.rs"),
+        ["/", "/ @verifies DEMO\n", "fn verifies_demo() {}\n"].concat(),
+    )
+    .expect("config-root verify fixture should be written");
+
+    nested
+}
+
 #[test]
 // @verifies SPECIAL.INIT.CREATES_SPECIAL_TOML
 fn init_creates_special_toml_in_current_directory() {
@@ -366,6 +390,23 @@ fn spec_uses_root_declared_in_special_toml() {
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
     assert!(stdout.contains("DEMO"));
     assert!(!stdout.contains("DECOY"));
+    assert!(!stderr.contains("warning:"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.ANCESTOR_CONFIG
+fn spec_uses_ancestor_special_toml_from_nested_directory() {
+    let root = temp_repo_dir("special-cli-special-toml-ancestor");
+    let nested = write_special_toml_dot_root_fixture(&root);
+
+    let output = run_special(&nested, &["spec"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stdout.contains("DEMO"));
     assert!(!stderr.contains("warning:"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

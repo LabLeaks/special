@@ -9,6 +9,11 @@ special uses the optional `root` value in `special.toml` as the explicit project
 */
 
 /**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.ANCESTOR_CONFIG
+when launched from a nested subdirectory, special finds the nearest ancestor `special.toml` and resolves `root = "."` relative to that config file rather than the launch directory.
+*/
+
+/**
 @spec SPECIAL.CONFIG.SPECIAL_TOML.OPTIONAL
 special does not require `special.toml` for basic operation.
 */
