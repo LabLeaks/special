@@ -253,9 +253,11 @@ fn skills_install_special_usage_skill() {
     assert!(skill.contains(
         "description: Use this skill when adding a feature or changing behavior in a project where product specs should stay honest."
     ));
+    assert!(skill.contains("special spec"));
+    assert!(skill.contains("special spec --all"));
     assert!(skill.contains("special spec SPEC.ID --verbose"));
-    assert!(skill.contains("If the change is not ready to ship, add or keep `@planned`"));
-    assert!(skill.contains("whether the repo already uses `special` or you are introducing it now"));
+    assert!(skill.contains("@planned"));
+    assert!(skill.contains("@group"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -273,7 +275,11 @@ fn skills_install_spec_writing_skill() {
             .expect("write-product-specs skill should be readable");
     assert!(skill.contains("name: write-product-specs"));
     assert!(skill.contains("Use this skill when creating or revising product specs for a project."));
-    assert!(skill.contains("present-tense claims"));
+    assert!(skill.contains("@group"));
+    assert!(skill.contains("@spec"));
+    assert!(skill.contains("@planned"));
+    assert!(skill.contains("@verifies"));
+    assert!(skill.contains("@attests"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
