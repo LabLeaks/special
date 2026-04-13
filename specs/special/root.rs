@@ -16,6 +16,9 @@ special configuration and root discovery.
 
 @group SPECIAL.INIT
 special project initialization workflow.
+
+@group SPECIAL.DISTRIBUTION
+special release and installation contract.
 */
 
 /**
