@@ -8,6 +8,15 @@ special parses annotation blocks from contiguous line comments.
 @spec SPECIAL.PARSE.BLOCK_COMMENTS
 special parses annotation blocks from block comments.
 
+@spec SPECIAL.PARSE.GO_LINE_COMMENTS
+special parses annotation blocks from Go line comments in `.go` files.
+
+@spec SPECIAL.PARSE.TYPESCRIPT_LINE_COMMENTS
+special parses annotation blocks from TypeScript line comments in `.ts` files.
+
+@spec SPECIAL.PARSE.TYPESCRIPT_BLOCK_COMMENTS
+special parses annotation blocks from TypeScript block comments in `.ts` files.
+
 @spec SPECIAL.PARSE.PLANNED
 special records @planned on the owning @spec declared in the same annotation block.
 

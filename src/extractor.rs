@@ -321,7 +321,67 @@ mod tests {
     }
 
     #[test]
+    // @verifies SPECIAL.PARSE.GO_LINE_COMMENTS
+    fn extracts_go_line_comment_blocks() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.go"),
+            "// @spec AUTH.LOGIN\n// Auth works.\nfunc main() {}\n",
+        );
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lines[0].text, "@spec AUTH.LOGIN");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "func main() {}"
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.TYPESCRIPT_LINE_COMMENTS
+    fn extracts_typescript_line_comment_blocks() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.ts"),
+            "// @spec AUTH.LOGIN\n// Auth works.\nexport const ok = true;\n",
+        );
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lines[0].text, "@spec AUTH.LOGIN");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "export const ok = true;"
+        );
+    }
+
+    #[test]
     // @verifies SPECIAL.PARSE.BLOCK_COMMENTS
+    fn extracts_generic_block_comment_blocks() {
+        let blocks = extract_blocks_from_text(
+            PathBuf::from("src/example.rs"),
+            "/**\n * @spec AUTH.LOGIN\n * Auth works.\n */\nfn main() {}\n",
+        );
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lines[1].text, "@spec AUTH.LOGIN");
+        assert_eq!(
+            blocks[0]
+                .owned_item
+                .as_ref()
+                .expect("owned item should be present")
+                .body,
+            "fn main() {}"
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.TYPESCRIPT_BLOCK_COMMENTS
     fn extracts_block_comment_blocks() {
         let blocks = extract_blocks_from_text(
             PathBuf::from("src/example.ts"),
