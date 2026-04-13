@@ -20,6 +20,11 @@ special parses annotation blocks from TypeScript block comments in `.ts` files.
 @spec SPECIAL.PARSE.PLANNED
 special records @planned on the owning @spec declared in the same annotation block.
 
+@spec SPECIAL.PARSE.PLANNED.RELEASE_TARGET
+special will parse an optional release string after `@planned` and record it on the owning spec as the intended release for removing `@planned`.
+
+@planned
+
 @spec SPECIAL.PARSE.VERIFIES
 special parses @verifies references from annotation blocks.
 

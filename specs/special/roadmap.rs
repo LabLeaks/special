@@ -46,3 +46,10 @@ special will harden its report and HTML UI.
 
 @planned
 */
+
+/**
+@spec SPECIAL.ROADMAP.PLANNED_RELEASE_WARNINGS
+special will warn when the current project version still contains planned specs targeted for that release or an earlier one.
+
+@planned
+*/
