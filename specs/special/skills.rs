@@ -5,49 +5,49 @@ special project skill installation command.
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.WRITES_PROJECT_SKILLS_DIRECTORY
-special will install project-local skills into `.agents/skills/` in the current repository.
+special installs project-local skills into `.agents/skills/` in the current repository.
 
 @planned
 */
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.USES_AGENT_SKILLS_LAYOUT
-special will install skills as standard skill directories with `SKILL.md` and optional support files rather than inventing a special-only layout.
+special installs skills as standard skill directories with `SKILL.md` and optional support files rather than inventing a special-only layout.
 
 @planned
 */
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.INSTALLS_SPECIAL_USAGE_SKILL
-special will install a skill that teaches agents how to use special annotations and CLI workflows correctly in the current repository.
+special installs a skill that teaches agents how to use special annotations and CLI workflows correctly in the current repository.
 
 @planned
 */
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.INSTALLS_SPEC_WRITING_SKILL
-special will install a skill that teaches agents how to write strong special specs rather than vague or implementation-shaped claims.
+special installs a skill that teaches agents how to write strong special specs rather than vague or implementation-shaped claims.
 
 @planned
 */
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.DESCRIPTIONS_FRONTLOAD_TRIGGER_INTENT
-special will write skill descriptions so the opening text clearly signals when agents should use the skill.
+special writes skill descriptions so the opening text clearly signals when agents should use the skill.
 
 @planned
 */
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.BUNDLES_REFERENCES_FOR_PROGRESSIVE_DISCLOSURE
-special will bundle deeper skill guidance in sidecar references so startup skill summaries stay compact while richer instructions remain available on activation.
+special bundles deeper skill guidance in sidecar references so startup skill summaries stay compact while richer instructions remain available on activation.
 
 @planned
 */
 
 /**
 @spec SPECIAL.SKILLS.COMMAND.INCLUDES_TRIGGER_EVAL_FIXTURES
-special will include trigger eval fixtures so skill descriptions can be checked against should-trigger and should-not-trigger examples.
+special includes trigger eval fixtures so skill descriptions can be checked against should-trigger and should-not-trigger examples.
 
 @planned
 */
