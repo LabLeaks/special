@@ -55,7 +55,14 @@ special ships a Homebrew formula in LabLeaks/homebrew-tap.
 
 /**
 @spec SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
-special will install the `special` binary from LabLeaks/homebrew-tap.
+special installs the `special` binary from LabLeaks/homebrew-tap.
+*/
 
-@planned
+/**
+@attests SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
+artifact: brew install LabLeaks/homebrew-tap/special
+owner: gk
+last_reviewed: 2026-04-12
+result: confirmed local installation succeeded
+installed_binary: /opt/homebrew/bin/special
 */
