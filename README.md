@@ -12,6 +12,8 @@ The canonical product truth for `special` lives in its own self-hosted spec decl
 
 If this README and the materialized spec ever disagree, the spec wins.
 
+If published to crates.io, the package name is `special-cli` and the installed binary is `special`.
+
 Useful commands:
 
 ```sh
@@ -84,6 +86,16 @@ mise exec -- cargo run -- init
 ```
 
 It creates `special.toml` in the current directory with `root = "."`, and fails rather than overwriting an existing file.
+
+## Install
+
+Local development uses `cargo run`, but the intended published package name is:
+
+```sh
+cargo install special-cli
+```
+
+That installs the `special` binary.
 
 ## Annotation Model
 

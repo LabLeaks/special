@@ -1,7 +1,14 @@
 [package]
-name = "special"
+name = "special-cli"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "special"
+
+[[bin]]
+name = "special"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
