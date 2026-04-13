@@ -340,7 +340,8 @@ fn spec_html_renders_best_effort_code_highlighting() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("<span class=\"tok-keyword\">fn</span>"));
+    assert!(stdout.contains("<code class=\"language-rust\">"));
+    assert!(stdout.contains("font-weight:bold;color:#a71d5d;\">fn </span>"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

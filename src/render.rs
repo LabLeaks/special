@@ -1,7 +1,13 @@
 use anyhow::Result;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::model::{LintReport, SpecDocument, SpecNode};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Theme, ThemeSet};
+use syntect::html::{IncludeBackground, styled_line_to_highlighted_html};
+use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::util::LinesWithEndings;
 
 pub fn render_spec_text(document: &SpecDocument, verbose: bool) -> String {
     if document.nodes.is_empty() {
@@ -55,9 +61,6 @@ pub fn render_spec_html(document: &SpecDocument, _verbose: bool) -> String {
          summary{cursor:pointer;color:#374151;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}\
          summary::marker{color:#9ca3af}\
          .code-block{margin:8px 0 0;white-space:pre-wrap;background:var(--code-bg);padding:12px;border-radius:8px;overflow:auto;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}\
-         .tok-keyword{color:#7c3aed;font-weight:600}\
-         .tok-string{color:#0f766e}\
-         .tok-comment{color:#78716c;font-style:italic}\
          </style>\
          </head><body><main><h1>special spec</h1><p class=\"lede\">Materialized semantic spec view for the current repository.</p>",
     );
@@ -287,112 +290,62 @@ fn language_name_for_path(path: &Path) -> &'static str {
 }
 
 fn highlight_code_html(body: &str, language: &str) -> String {
-    let keywords = keywords_for_language(language);
+    let syntax_set = syntax_set();
+    let syntax = syntax_for_language(syntax_set, language);
+    let mut highlighter = HighlightLines::new(syntax, theme());
     let mut rendered = String::new();
 
-    for (index, line) in body.lines().enumerate() {
-        if index > 0 {
-            rendered.push('\n');
+    for line in LinesWithEndings::from(body) {
+        match highlighter.highlight_line(line, syntax_set) {
+            Ok(regions) => match styled_line_to_highlighted_html(&regions, IncludeBackground::No) {
+                Ok(html) => rendered.push_str(&html),
+                Err(_) => rendered.push_str(&escape_html(line)),
+            },
+            Err(_) => rendered.push_str(&escape_html(line)),
         }
-        rendered.push_str(&highlight_line_html(line, language, keywords));
     }
 
     rendered
 }
 
-fn keywords_for_language(language: &str) -> &'static [&'static str] {
+fn syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
+}
+
+fn theme() -> &'static Theme {
+    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
+    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
+    if let Some(theme) = themes.themes.get("InspiredGitHub") {
+        theme
+    } else {
+        themes
+            .themes
+            .values()
+            .next()
+            .expect("syntect should provide at least one theme")
+    }
+}
+
+fn syntax_for_language<'a>(syntax_set: &'a SyntaxSet, language: &str) -> &'a SyntaxReference {
     match language {
-        "rust" => &[
-            "fn", "let", "mut", "if", "else", "match", "for", "while", "loop", "return",
-            "struct", "enum", "impl", "use", "pub", "mod",
-        ],
-        "go" => &[
-            "func", "var", "const", "if", "else", "switch", "case", "for", "range", "return",
-            "type", "struct", "interface", "package", "import",
-        ],
-        "typescript" => &[
-            "function", "const", "let", "var", "if", "else", "switch", "case", "for", "while",
-            "return", "class", "interface", "type", "import", "export", "async", "await",
-        ],
-        "shell" => &["if", "then", "else", "fi", "for", "do", "done", "case", "esac"],
-        "python" => &[
-            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from",
-            "with", "as", "try", "except",
-        ],
-        _ => &[],
+        "rust" => syntax_set
+            .find_syntax_by_extension("rs")
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+        "go" => syntax_set
+            .find_syntax_by_extension("go")
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+        "typescript" => syntax_set
+            .find_syntax_by_extension("ts")
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+        "shell" => syntax_set
+            .find_syntax_by_extension("sh")
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+        "python" => syntax_set
+            .find_syntax_by_extension("py")
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text()),
+        _ => syntax_set.find_syntax_plain_text(),
     }
-}
-
-fn highlight_line_html(line: &str, language: &str, keywords: &[&str]) -> String {
-    let trimmed = line.trim_start();
-    let comment_prefix = match language {
-        "shell" | "python" => Some("#"),
-        "rust" | "go" | "typescript" => {
-            if trimmed.starts_with("//") {
-                Some("//")
-            } else {
-                None
-            }
-        }
-        _ => None,
-    };
-
-    if comment_prefix.is_some() {
-        return format!("<span class=\"tok-comment\">{}</span>", escape_html(line));
-    }
-
-    let mut rendered = String::new();
-    let chars: Vec<char> = line.chars().collect();
-    let mut index = 0;
-
-    while index < chars.len() {
-        let ch = chars[index];
-
-        if ch == '"' || ch == '\'' {
-            let quote = ch;
-            let start = index;
-            index += 1;
-            while index < chars.len() {
-                if chars[index] == '\\' {
-                    index += 2;
-                    continue;
-                }
-                if chars[index] == quote {
-                    index += 1;
-                    break;
-                }
-                index += 1;
-            }
-            let token: String = chars[start..chars.len().min(index)].iter().collect();
-            rendered.push_str("<span class=\"tok-string\">");
-            rendered.push_str(&escape_html(&token));
-            rendered.push_str("</span>");
-            continue;
-        }
-
-        if ch.is_ascii_alphabetic() || ch == '_' {
-            let start = index;
-            index += 1;
-            while index < chars.len() && (chars[index].is_ascii_alphanumeric() || chars[index] == '_')
-            {
-                index += 1;
-            }
-            let token: String = chars[start..index].iter().collect();
-            if keywords.contains(&token.as_str()) {
-                rendered.push_str("<span class=\"tok-keyword\">");
-                rendered.push_str(&escape_html(&token));
-                rendered.push_str("</span>");
-            } else {
-                rendered.push_str(&escape_html(&token));
-            }
-            continue;
-        }
-
-        rendered.push_str(&escape_html(&ch.to_string()));
-        index += 1;
-    }
-
-    rendered
 }
 
 fn render_block_text(body: &str, depth: usize, output: &mut String) {
@@ -478,6 +431,6 @@ mod tests {
         assert!(html.contains("<!doctype html>"));
         assert!(html.contains("SPECIAL.SPEC_COMMAND"));
         assert!(html.contains("<code class=\"language-rust\">"));
-        assert!(html.contains("<span class=\"tok-keyword\">fn</span>"));
+        assert!(html.contains("style=\"color:"));
     }
 }
