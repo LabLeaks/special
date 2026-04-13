@@ -19,6 +19,26 @@ when `special.toml` determines the project root, special does not emit implicit-
 */
 
 /**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.KEY_VALUE_SYNTAX
+special exits with an error when `special.toml` contains a non-empty, non-comment line that does not use `key = "value"` syntax.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.QUOTED_STRING_VALUES
+special exits with an error when `special.toml` uses an unquoted value.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.UNKNOWN_KEYS
+special exits with an error when `special.toml` uses an unknown key.
+*/
+
+/**
+@spec SPECIAL.CONFIG.SPECIAL_TOML.EXISTING_ROOT_REQUIRED
+special exits with an error when `special.toml` points `root` at a path that does not exist.
+*/
+
+/**
 @group SPECIAL.CONFIG.ROOT_DISCOVERY
 special discovers a project root from explicit config, VCS state, or the current directory.
 */

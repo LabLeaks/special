@@ -387,6 +387,71 @@ fn special_toml_suppresses_implicit_root_warning() {
 }
 
 #[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.KEY_VALUE_SYNTAX
+fn special_toml_requires_key_value_syntax() {
+    let root = temp_repo_dir("special-cli-special-toml-key-value");
+    fs::write(root.join("special.toml"), "root\n").expect("special.toml should be written");
+
+    let output = run_special(&root, &["spec"]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("failed to parse special.toml"));
+    assert!(stderr.contains("line 1 must use `key = \"value\"` syntax"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.QUOTED_STRING_VALUES
+fn special_toml_requires_quoted_string_values() {
+    let root = temp_repo_dir("special-cli-special-toml-quoted");
+    fs::write(root.join("special.toml"), "root = workspace\n")
+        .expect("special.toml should be written");
+
+    let output = run_special(&root, &["spec"]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("failed to parse special.toml"));
+    assert!(stderr.contains("line 1 must use a quoted string value"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.UNKNOWN_KEYS
+fn special_toml_rejects_unknown_keys() {
+    let root = temp_repo_dir("special-cli-special-toml-unknown-key");
+    fs::write(root.join("special.toml"), "nope = \".\"\n").expect("special.toml should be written");
+
+    let output = run_special(&root, &["spec"]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("failed to parse special.toml"));
+    assert!(stderr.contains("line 1 uses unknown key `nope`"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.CONFIG.SPECIAL_TOML.EXISTING_ROOT_REQUIRED
+fn special_toml_requires_existing_root_path() {
+    let root = temp_repo_dir("special-cli-special-toml-missing-root");
+    fs::write(root.join("special.toml"), "root = \"missing\"\n")
+        .expect("special.toml should be written");
+
+    let output = run_special(&root, &["spec"]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("points to a root that does not exist"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
 // @verifies SPECIAL.LINT_COMMAND
 fn lint_reports_annotation_errors() {
     let root = temp_repo_dir("special-cli-lint");
