@@ -148,6 +148,15 @@ Config-root spec.
     nested
 }
 
+fn write_skills_fixture(root: &Path) {
+    fs::write(root.join("special.toml"), "root = \".\"\n").expect("special.toml should be written");
+}
+
+fn install_skills(root: &Path) -> std::process::Output {
+    write_skills_fixture(root);
+    run_special(root, &["skills"])
+}
+
 #[test]
 // @verifies SPECIAL.INIT.CREATES_SPECIAL_TOML
 fn init_creates_special_toml_in_current_directory() {
@@ -182,6 +191,165 @@ fn init_fails_when_special_toml_already_exists() {
         fs::read_to_string(root.join("special.toml")).expect("special.toml should still exist"),
         "root = \"workspace\"\n"
     );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.WRITES_PROJECT_SKILLS_DIRECTORY
+fn skills_writes_project_local_skills_directory() {
+    let root = temp_repo_dir("special-cli-skills-dir");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    assert!(root
+        .join(".agents/skills/ship-features-with-product-specs/SKILL.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/write-product-specs/SKILL.md")
+        .is_file());
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.USES_AGENT_SKILLS_LAYOUT
+fn skills_use_standard_skill_directories_with_support_files() {
+    let root = temp_repo_dir("special-cli-skills-layout");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    assert!(root
+        .join(".agents/skills/ship-features-with-product-specs/SKILL.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/ship-features-with-product-specs/references/feature-workflow.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/write-product-specs/SKILL.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/write-product-specs/references/spec-writing.md")
+        .is_file());
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_SPECIAL_USAGE_SKILL
+fn skills_install_special_usage_skill() {
+    let root = temp_repo_dir("special-cli-skills-usage");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill = fs::read_to_string(
+        root.join(".agents/skills/ship-features-with-product-specs/SKILL.md"),
+    )
+    .expect("feature skill should be readable");
+    assert!(skill.contains("name: ship-features-with-product-specs"));
+    assert!(skill.contains(
+        "description: Use this skill when adding a feature or changing behavior in a project where product specs should stay honest."
+    ));
+    assert!(skill.contains("special spec SPEC.ID --verbose"));
+    assert!(skill.contains("If the change is not ready to ship, add or keep `@planned`"));
+    assert!(skill.contains("whether the repo already uses `special` or you are introducing it now"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_SPEC_WRITING_SKILL
+fn skills_install_spec_writing_skill() {
+    let root = temp_repo_dir("special-cli-skills-writing");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill =
+        fs::read_to_string(root.join(".agents/skills/write-product-specs/SKILL.md"))
+            .expect("write-product-specs skill should be readable");
+    assert!(skill.contains("name: write-product-specs"));
+    assert!(skill.contains("Use this skill when creating or revising product specs for a project."));
+    assert!(skill.contains("present-tense claims"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.DESCRIPTIONS_FRONTLOAD_TRIGGER_INTENT
+fn skills_frontload_trigger_intent_in_descriptions() {
+    let root = temp_repo_dir("special-cli-skills-descriptions");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let feature_skill = fs::read_to_string(
+        root.join(".agents/skills/ship-features-with-product-specs/SKILL.md"),
+    )
+    .expect("feature skill should be readable");
+    let write_specs =
+        fs::read_to_string(root.join(".agents/skills/write-product-specs/SKILL.md"))
+            .expect("write-product-specs skill should be readable");
+    assert!(feature_skill.contains(
+        "description: Use this skill when adding a feature or changing behavior in a project where product specs should stay honest."
+    ));
+    assert!(write_specs.contains(
+        "description: Use this skill when creating or revising product specs for a project."
+    ));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.BUNDLES_REFERENCES_FOR_PROGRESSIVE_DISCLOSURE
+fn skills_bundle_reference_docs_for_progressive_disclosure() {
+    let root = temp_repo_dir("special-cli-skills-references");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let feature_skill = fs::read_to_string(
+        root.join(".agents/skills/ship-features-with-product-specs/SKILL.md"),
+    )
+    .expect("feature skill should be readable");
+    let write_specs =
+        fs::read_to_string(root.join(".agents/skills/write-product-specs/SKILL.md"))
+            .expect("write-product-specs skill should be readable");
+    assert!(feature_skill.contains("references/feature-workflow.md"));
+    assert!(write_specs.contains("references/spec-writing.md"));
+    assert!(root
+        .join(".agents/skills/ship-features-with-product-specs/references/feature-workflow.md")
+        .is_file());
+    assert!(root
+        .join(".agents/skills/write-product-specs/references/spec-writing.md")
+        .is_file());
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INCLUDES_TRIGGER_EVAL_FIXTURES
+fn skills_include_trigger_eval_fixtures() {
+    let root = temp_repo_dir("special-cli-skills-trigger-evals");
+
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let feature_skill = fs::read_to_string(
+        root.join(".agents/skills/ship-features-with-product-specs/references/trigger-evals.md"),
+    )
+    .expect("feature trigger evals should be readable");
+    let write_specs = fs::read_to_string(
+        root.join(".agents/skills/write-product-specs/references/trigger-evals.md"),
+    )
+    .expect("write-product-specs trigger evals should be readable");
+    assert!(feature_skill.contains("## Should Trigger"));
+    assert!(feature_skill.contains("## Should Not Trigger"));
+    assert!(write_specs.contains("## Should Trigger"));
+    assert!(write_specs.contains("## Should Not Trigger"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

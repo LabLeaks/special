@@ -9,6 +9,7 @@ use crate::config::resolve_project_root;
 use crate::index::{build_lint_report, build_spec_document};
 use crate::model::SpecFilter;
 use crate::render::{render_lint_text, render_spec_html, render_spec_json, render_spec_text};
+use crate::skills::install_project_skills;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -27,6 +28,7 @@ enum Command {
     Spec(SpecArgs),
     Lint,
     Init,
+    Skills,
 }
 
 #[derive(Debug, Args)]
@@ -80,6 +82,19 @@ fn execute(cli: Cli) -> Result<ExitCode> {
 
             fs::write(&config_path, "root = \".\"\n")?;
             println!("Created {}", config_path.display());
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Skills => {
+            let resolution = resolve_project_root(&current_dir)?;
+            if let Some(warning) = resolution.warning() {
+                eprintln!("{warning}");
+            }
+            let root = resolution.root;
+            let installed = install_project_skills(&root)?;
+            println!(
+                "Installed {installed} skills into {}",
+                root.join(".agents/skills").display()
+            );
             Ok(ExitCode::SUCCESS)
         }
         Command::Spec(args) => {
