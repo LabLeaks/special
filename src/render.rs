@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-use crate::model::{LintReport, SourceLocation, SpecDocument, SpecNode};
+use crate::model::{LintReport, SpecDocument, SpecNode};
 
 pub fn render_spec_text(document: &SpecDocument, verbose: bool) -> String {
     if document.nodes.is_empty() {
@@ -51,12 +51,13 @@ pub fn render_spec_html(document: &SpecDocument, _verbose: bool) -> String {
          .node-text{margin-top:6px;color:#292524}\
          .meta{margin-top:8px;color:var(--muted);font-size:13px}\
          .counts{display:flex;gap:12px;flex-wrap:wrap}\
-         .source-link{color:inherit;text-decoration:underline;text-decoration-color:#d6d3d1;text-underline-offset:2px}\
-         .source-link:hover{text-decoration-color:#6b7280}\
          details{margin-top:10px;border-top:1px solid var(--border);padding-top:10px}\
          summary{cursor:pointer;color:#374151;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}\
          summary::marker{color:#9ca3af}\
-         pre{margin:8px 0 0;white-space:pre-wrap;background:var(--code-bg);padding:12px;border-radius:8px;overflow:auto;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}\
+         .code-block{margin:8px 0 0;white-space:pre-wrap;background:var(--code-bg);padding:12px;border-radius:8px;overflow:auto;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}\
+         .tok-keyword{color:#7c3aed;font-weight:600}\
+         .tok-string{color:#0f766e}\
+         .tok-comment{color:#78716c;font-style:italic}\
          </style>\
          </head><body><main><h1>special spec</h1><p class=\"lede\">Materialized semantic spec view for the current repository.</p>",
     );
@@ -198,34 +199,59 @@ fn render_node_html(node: &SpecNode, verbose: bool, html: &mut String) {
 
     if verbose {
         html.push_str("<div class=\"meta\">declared at ");
-        html.push_str(&render_source_link_html(&node.location));
+        html.push_str(&escape_html(&format!(
+            "{}:{}",
+            node.location.path.display(),
+            node.location.line
+        )));
         html.push_str("</div>");
 
         for verify in &node.verifies {
             html.push_str("<details><summary>@verifies ");
-            html.push_str(&render_source_link_html(&verify.location));
+            html.push_str(&escape_html(&format!(
+                "{}:{}",
+                verify.location.path.display(),
+                verify.location.line
+            )));
             html.push_str("</summary>");
             if let Some(body_location) = &verify.body_location {
                 html.push_str("<div class=\"meta\">body at ");
-                html.push_str(&render_source_link_html(body_location));
+                html.push_str(&escape_html(&format!(
+                    "{}:{}",
+                    body_location.path.display(),
+                    body_location.line
+                )));
                 html.push_str("</div>");
             }
             if let Some(body) = &verify.body {
-                html.push_str("<pre>");
-                html.push_str(&escape_html(body));
-                html.push_str("</pre>");
+                let language = language_name_for_path(
+                    verify
+                        .body_location
+                        .as_ref()
+                        .map(|location| location.path.as_path())
+                        .unwrap_or(verify.location.path.as_path()),
+                );
+                html.push_str("<pre class=\"code-block\"><code class=\"language-");
+                html.push_str(language);
+                html.push_str("\">");
+                html.push_str(&highlight_code_html(body, language));
+                html.push_str("</code></pre>");
             }
             html.push_str("</details>");
         }
 
         for attest in &node.attests {
             html.push_str("<details><summary>@attests ");
-            html.push_str(&render_source_link_html(&attest.location));
+            html.push_str(&escape_html(&format!(
+                "{}:{}",
+                attest.location.path.display(),
+                attest.location.line
+            )));
             html.push_str("</summary>");
             if let Some(body) = &attest.body {
-                html.push_str("<pre>");
+                html.push_str("<pre class=\"code-block\"><code class=\"language-text\">");
                 html.push_str(&escape_html(body));
-                html.push_str("</pre>");
+                html.push_str("</code></pre>");
             }
             html.push_str("</details>");
         }
@@ -249,36 +275,124 @@ fn escape_html(input: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn render_source_link_html(location: &SourceLocation) -> String {
-    let label = format!("{}:{}", location.path.display(), location.line);
-    let href = format!(
-        "file://{}#L{}",
-        encode_path_for_file_uri(&location.path),
-        location.line
-    );
-    format!(
-        "<a class=\"source-link\" href=\"{}\">{}</a>",
-        escape_html(&href),
-        escape_html(&label)
-    )
+fn language_name_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("rs") => "rust",
+        Some("go") => "go",
+        Some("ts" | "tsx") => "typescript",
+        Some("sh") => "shell",
+        Some("py") => "python",
+        _ => "text",
+    }
 }
 
-fn encode_path_for_file_uri(path: &Path) -> String {
-    let mut encoded = String::new();
-    for byte in path.to_string_lossy().bytes() {
-        match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~'
-            | b'/' => encoded.push(char::from(byte)),
-            _ => encoded.push_str(&format!("%{byte:02X}")),
+fn highlight_code_html(body: &str, language: &str) -> String {
+    let keywords = keywords_for_language(language);
+    let mut rendered = String::new();
+
+    for (index, line) in body.lines().enumerate() {
+        if index > 0 {
+            rendered.push('\n');
         }
+        rendered.push_str(&highlight_line_html(line, language, keywords));
     }
-    encoded
+
+    rendered
+}
+
+fn keywords_for_language(language: &str) -> &'static [&'static str] {
+    match language {
+        "rust" => &[
+            "fn", "let", "mut", "if", "else", "match", "for", "while", "loop", "return",
+            "struct", "enum", "impl", "use", "pub", "mod",
+        ],
+        "go" => &[
+            "func", "var", "const", "if", "else", "switch", "case", "for", "range", "return",
+            "type", "struct", "interface", "package", "import",
+        ],
+        "typescript" => &[
+            "function", "const", "let", "var", "if", "else", "switch", "case", "for", "while",
+            "return", "class", "interface", "type", "import", "export", "async", "await",
+        ],
+        "shell" => &["if", "then", "else", "fi", "for", "do", "done", "case", "esac"],
+        "python" => &[
+            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from",
+            "with", "as", "try", "except",
+        ],
+        _ => &[],
+    }
+}
+
+fn highlight_line_html(line: &str, language: &str, keywords: &[&str]) -> String {
+    let trimmed = line.trim_start();
+    let comment_prefix = match language {
+        "shell" | "python" => Some("#"),
+        "rust" | "go" | "typescript" => {
+            if trimmed.starts_with("//") {
+                Some("//")
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    if comment_prefix.is_some() {
+        return format!("<span class=\"tok-comment\">{}</span>", escape_html(line));
+    }
+
+    let mut rendered = String::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            let start = index;
+            index += 1;
+            while index < chars.len() {
+                if chars[index] == '\\' {
+                    index += 2;
+                    continue;
+                }
+                if chars[index] == quote {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            let token: String = chars[start..chars.len().min(index)].iter().collect();
+            rendered.push_str("<span class=\"tok-string\">");
+            rendered.push_str(&escape_html(&token));
+            rendered.push_str("</span>");
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = index;
+            index += 1;
+            while index < chars.len() && (chars[index].is_ascii_alphanumeric() || chars[index] == '_')
+            {
+                index += 1;
+            }
+            let token: String = chars[start..index].iter().collect();
+            if keywords.contains(&token.as_str()) {
+                rendered.push_str("<span class=\"tok-keyword\">");
+                rendered.push_str(&escape_html(&token));
+                rendered.push_str("</span>");
+            } else {
+                rendered.push_str(&escape_html(&token));
+            }
+            continue;
+        }
+
+        rendered.push_str(&escape_html(&ch.to_string()));
+        index += 1;
+    }
+
+    rendered
 }
 
 fn render_block_text(body: &str, depth: usize, output: &mut String) {
@@ -363,7 +477,7 @@ mod tests {
         let html = render_spec_html(&sample_document(), false);
         assert!(html.contains("<!doctype html>"));
         assert!(html.contains("SPECIAL.SPEC_COMMAND"));
-        assert!(html.contains("href=\"file:///tmp/specs/special.rs#L1\""));
-        assert!(html.contains("href=\"file:///tmp/tests/cli.rs#L12\""));
+        assert!(html.contains("<code class=\"language-rust\">"));
+        assert!(html.contains("<span class=\"tok-keyword\">fn</span>"));
     }
 }

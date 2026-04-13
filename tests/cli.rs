@@ -325,22 +325,22 @@ fn spec_html_emits_html_output() {
     assert!(stdout.contains("DEMO"));
     assert!(!stdout.contains("DEMO.PLANNED"));
     assert!(stdout.contains("<details><summary>@verifies"));
-    assert!(stdout.contains("<pre>fn verifies_demo_live() {}</pre>"));
+    assert!(stdout.contains("<pre class=\"code-block\"><code class=\"language-rust\">"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]
-// @verifies SPECIAL.SPEC_COMMAND.HTML.FILE_LINKS
-fn spec_html_renders_best_effort_file_links() {
-    let root = temp_repo_dir("special-cli-html-file-links");
+// @verifies SPECIAL.SPEC_COMMAND.HTML.CODE_HIGHLIGHTING
+fn spec_html_renders_best_effort_code_highlighting() {
+    let root = temp_repo_dir("special-cli-html-highlight");
     write_live_and_planned_fixture(&root);
 
     let output = run_special(&root, &["spec", "--html"]);
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("href=\"file://"));
+    assert!(stdout.contains("<span class=\"tok-keyword\">fn</span>"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

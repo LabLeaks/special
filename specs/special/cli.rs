@@ -20,8 +20,8 @@ special spec --json emits the materialized spec as JSON.
 @spec SPECIAL.SPEC_COMMAND.HTML
 special spec --html emits the materialized spec as HTML with attached verifies and attests in collapsed detail blocks.
 
-@spec SPECIAL.SPEC_COMMAND.HTML.FILE_LINKS
-special spec --html renders source locations as best-effort local file links.
+@spec SPECIAL.SPEC_COMMAND.HTML.CODE_HIGHLIGHTING
+special spec --html renders attached code blocks with best-effort language-sensitive highlighting.
 
 @spec SPECIAL.SPEC_COMMAND.VERBOSE
 special spec --verbose shows the attached verifies and attests bodies for review.
