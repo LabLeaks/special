@@ -18,16 +18,16 @@ special spec --unsupported shows live items with zero verifies and zero attests.
 special spec --json emits the materialized spec as JSON.
 
 @spec SPECIAL.SPEC_COMMAND.HTML
-special spec --html emits the materialized spec as HTML.
+special spec --html emits the materialized spec as HTML with attached verifies and attests in collapsed detail blocks.
+
+@spec SPECIAL.SPEC_COMMAND.HTML.FILE_LINKS
+special spec --html renders source locations as best-effort local file links.
 
 @spec SPECIAL.SPEC_COMMAND.VERBOSE
 special spec --verbose shows the attached verifies and attests bodies for review.
 
 @spec SPECIAL.SPEC_COMMAND.VERBOSE.JSON
 special spec --json --verbose includes attached verifies and attests bodies in JSON output.
-
-@spec SPECIAL.SPEC_COMMAND.VERBOSE.HTML
-special spec --html --verbose renders attached verifies and attests bodies in collapsed detail blocks.
 
 @spec SPECIAL.LINT_COMMAND
 special lint reports annotation parsing and reference errors.

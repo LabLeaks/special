@@ -324,6 +324,23 @@ fn spec_html_emits_html_output() {
     assert!(stdout.contains("<!doctype html>"));
     assert!(stdout.contains("DEMO"));
     assert!(!stdout.contains("DEMO.PLANNED"));
+    assert!(stdout.contains("<details><summary>@verifies"));
+    assert!(stdout.contains("<pre>fn verifies_demo_live() {}</pre>"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.HTML.FILE_LINKS
+fn spec_html_renders_best_effort_file_links() {
+    let root = temp_repo_dir("special-cli-html-file-links");
+    write_live_and_planned_fixture(&root);
+
+    let output = run_special(&root, &["spec", "--html"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("href=\"file://"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -357,22 +374,6 @@ fn spec_verbose_json_includes_support_bodies() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("\"body\""));
     assert!(stdout.contains("fn verifies_demo_live() {}"));
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.SPEC_COMMAND.VERBOSE.HTML
-fn spec_verbose_html_renders_support_details() {
-    let root = temp_repo_dir("special-cli-verbose-html");
-    write_live_and_planned_fixture(&root);
-
-    let output = run_special(&root, &["spec", "DEMO.LIVE", "--html", "--verbose"]);
-    assert!(output.status.success());
-
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("<details><summary>@verifies"));
-    assert!(stdout.contains("<pre>fn verifies_demo_live() {}</pre>"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
