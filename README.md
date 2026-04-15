@@ -4,7 +4,7 @@ Pronounced "spec-ee-al".
 
 `special` is a repo-native semantic spec tool.
 
-It reads annotated source files, materializes the current live spec, and lets you inspect the code and attestations attached to each claim.
+It reads annotated source files, materializes the current live spec and architecture view, and lets you inspect the code and attestations attached to each claim or module.
 
 ## Source Of Truth
 
@@ -13,16 +13,6 @@ The canonical product truth for `special` lives in its own self-hosted spec decl
 If this README and the materialized spec ever disagree, the spec wins.
 
 If published to crates.io, the package name is `special-cli` and the installed binary is `special`.
-
-Useful commands:
-
-```sh
-mise exec -- cargo run -- spec
-mise exec -- cargo run -- spec --all
-mise exec -- cargo run -- spec SPECIAL.SPEC_COMMAND --verbose
-mise exec -- cargo run -- skills
-mise exec -- cargo run -- lint
-```
 
 The repo root is explicitly anchored by [special.toml](special.toml).
 
@@ -43,21 +33,24 @@ Behavioral requirements, planned work, and command semantics should be expressed
 Today `special` is a Rust CLI that:
 - parses annotation blocks from supported source files
 - builds one spec tree across files and file types
+- builds one architecture module tree across source-local declarations and `_project/ARCHITECTURE.md`
 - materializes the live spec by default
+- materializes live modules by default
 - includes planned claims on request
 - carries optional release metadata on planned claims
 - reports annotation and reference errors
 - shows the attached verification and attestation bodies in verbose mode
-- installs task-shaped project skills for working with product specs
+- shows attached implementation bodies for architecture review in verbose module views
+- installs task-shaped project skills for working with product specs and architecture validation
 
 This repo is self-hosting: `special`'s own behavior is described and verified in `special` format under [specs/special](specs/special).
 
 ## Command Surface
 
-The core command is `special specs` (`special spec` also works as an alias).
+The core commands are `special specs` and `special modules` (`special spec` and `special module` also work as aliases).
 
 ```sh
-mise exec -- cargo run -- spec
+special specs
 ```
 
 That shows the current live spec only. Planned claims are hidden by default.
@@ -65,28 +58,39 @@ That shows the current live spec only. Planned claims are hidden by default.
 Useful variants:
 
 ```sh
-mise exec -- cargo run -- spec --all
-mise exec -- cargo run -- spec SPECIAL.CONFIG
-mise exec -- cargo run -- spec SPECIAL.CONFIG.SPECIAL_TOML --verbose
-mise exec -- cargo run -- spec --unsupported
-mise exec -- cargo run -- spec --json
-mise exec -- cargo run -- spec --html
-mise exec -- cargo run -- spec --html --verbose
-mise exec -- cargo run -- spec SPECIAL.SPEC_COMMAND --json --verbose
+special specs --all
+special specs SPECIAL.CONFIG
+special specs SPECIAL.CONFIG.SPECIAL_TOML --verbose
+special specs --unsupported
+special specs --json
+special specs --html
+special specs --html --verbose
+special specs SPECIAL.SPEC_COMMAND --json --verbose
+```
+
+Architecture views work the same way:
+
+```sh
+special modules
+special modules --all
+special modules SPECIAL.PARSER --verbose
+special modules --unsupported
+special modules --json
+special modules --html --verbose
 ```
 
 `special lint` is the mechanical checker:
 
 ```sh
-mise exec -- cargo run -- lint
+special lint
 ```
 
-It reports malformed annotations, bad references, duplicate ids, missing intermediates, orphaned `@verifies`, and related structural errors.
+It reports malformed annotations, bad references, duplicate ids, missing intermediates, orphaned `@verifies`, invalid `@implements`, and related structural errors.
 
 `special init` currently does one thing:
 
 ```sh
-mise exec -- cargo run -- init
+special init
 ```
 
 It creates `special.toml` in the current directory with `root = "."`, and fails rather than overwriting an existing file.
@@ -94,24 +98,23 @@ It creates `special.toml` in the current directory with `root = "."`, and fails 
 `special skills` explains and prints bundled skills:
 
 ```sh
-mise exec -- cargo run -- skills
-mise exec -- cargo run -- skills ship-product-change
-mise exec -- cargo run -- skills install
-mise exec -- cargo run -- skills install ship-product-change
+special skills
+special skills ship-product-change
+special skills install
+special skills install ship-product-change
 ```
 
 `special skills install` writes task-shaped skills into `.agents/skills/` or another selected destination for:
 - shipping a product change without drifting the contract
 - defining product specs
 - validating whether a claim is honestly supported
+- validating whether a concrete architecture module is honestly implemented
 - inspecting the current live spec state
 - finding planned work
 
 The installed skill files are generated output and are typically ignored in the repo.
 
 ## Install
-
-Local development uses `cargo run`.
 
 Published binaries are available from GitHub Releases for `LabLeaks/special`.
 
@@ -129,6 +132,16 @@ cargo install special-cli
 
 That installs the `special` binary.
 
+## Development
+
+For local repo development, use the tool-managed commands:
+
+```sh
+mise exec -- cargo test
+mise exec -- cargo run -- lint
+mise exec -- cargo run -- spec --all
+```
+
 ## Release Automation
 
 This repo carries its own release automation contract in `special` format.
@@ -137,6 +150,12 @@ Create release tags through the local wrapper so the Rust release review runs fi
 
 ```sh
 python3 scripts/tag-release.py 0.3.0
+```
+
+If you intentionally need to bypass the review step, use:
+
+```sh
+python3 scripts/tag-release.py 0.3.0 --skip-review
 ```
 
 The current live distribution slice covers:
@@ -162,6 +181,12 @@ Actual published GitHub Releases are a separate claim from release automation it
   Attaches one verification artifact to one claim.
 - `@attests ID`
   Attaches a manual or external attestation to one claim.
+- `@module ID`
+  Concrete architecture module.
+- `@area ID`
+  Structural architecture node.
+- `@implements ID`
+  Attaches implementation ownership to a concrete architecture module.
 
 Important constraints:
 
@@ -170,6 +195,8 @@ Important constraints:
 - one `@verifies` block may target only one spec id.
 - child claims do not justify a parent `@spec`.
 - `@verifies` only counts when it attaches to a supported owned item.
+- live `@module` nodes require direct `@implements` unless they are planned.
+- `@area` is structural only and does not accept `@planned` or `@implements`.
 
 ## Annotation Examples
 
@@ -210,6 +237,22 @@ Structural organization uses `@group`:
 @group EXPORT
 Export-related claims.
 */
+```
+
+Architecture declarations follow the parallel model:
+
+```text
+/**
+@area SPECIAL
+Top-level product area.
+*/
+
+/**
+@module SPECIAL.PARSER
+Parses reserved annotations from extracted comment blocks.
+*/
+
+// @implements SPECIAL.PARSER
 ```
 
 Verbose review works best when a `@verifies` block sits directly above the item it owns:
