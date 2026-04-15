@@ -42,7 +42,7 @@ on:
   pull_request:
   push:
     tags:
-      - 'v*.*.*'
+      - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
@@ -60,14 +60,6 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Validate release tag shape
-        if: ${{ !github.event.pull_request }}
-        shell: bash
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
-            echo "unsupported release tag: ${GITHUB_REF_NAME}" >&2
-            exit 1
-          fi
       - name: Install dist
         # we specify bash to get pipefail; it guards against the `curl` command
         # failing. otherwise `sh` won't catch that `curl` returned non-0
@@ -272,8 +264,8 @@ jobs:
           merge-multiple: true
       - name: Cleanup
         run: |
-          # Remove dist manifests before publishing the public release assets
-          rm -f artifacts/*dist-manifest.json
+          # Remove the granular manifests
+          rm -f artifacts/*-dist-manifest.json
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"

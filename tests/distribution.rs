@@ -145,10 +145,9 @@ fn github_release_workflow_is_committed_and_in_sync() {
         "release workflow should be committed"
     );
     let workflow = read_repo_file(".github/workflows/release.yml");
-    assert!(workflow.contains("tags:\n      - 'v*.*.*'"));
-    assert!(!workflow.contains("tags:\n      - 'v*'"));
-    assert!(workflow.contains("Validate release tag shape"));
-    assert!(workflow.contains("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"));
+    assert!(workflow.contains("tags:\n      - '**[0-9]+.[0-9]+.[0-9]+*'"));
+    assert!(!workflow.contains("Validate release tag shape"));
+    assert!(workflow.contains("rm -f artifacts/*-dist-manifest.json"));
 
     let package = package_metadata();
     let version = package["version"]
