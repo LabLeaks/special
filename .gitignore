@@ -3,3 +3,4 @@ special-spec.html
 .agents/skills/
 __pycache__/
 *.pyc
+AGENTS.md

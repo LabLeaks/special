@@ -3,10 +3,10 @@
 special local release publication flow.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.CHECKLIST
-before publishing, the release script interactively confirms easy-to-forget release tasks such as updating `README.md` and `CHANGELOG.md`.
+before publishing, the release script interactively confirms easy-to-forget release tasks such as updating public docs, updating `CHANGELOG.md`, bumping the release version, and running core validation.
 
-@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.YES_BYPASSES_CHECKLIST
-the release script accepts `--yes` to bypass the interactive release checklist.
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.SKIP_CHECKLIST_BYPASSES_CHECKLIST
+the release script accepts `--skip-checklist` to bypass the interactive prerelease checklist.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.DRY_RUN
 the release script dry-run prints the planned checklist and publication commands without creating a tag, moving the main bookmark, pushing to origin, or updating Homebrew.
@@ -56,7 +56,22 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
             .as_array()
             .expect("checklist should be an array")
             .len(),
-        2
+        4
+    );
+    let checklist = payload["checklist"]
+        .as_array()
+        .expect("checklist should be an array");
+    let checklist_ids: Vec<_> = checklist
+        .iter()
+        .map(|entry| {
+            entry["id"]
+                .as_str()
+                .expect("checklist id should be a string")
+        })
+        .collect();
+    assert_eq!(
+        checklist_ids,
+        vec!["readme", "changelog", "version", "validation"]
     );
     assert_eq!(
         payload["bookmark_command"]
@@ -144,14 +159,19 @@ fn release_tag_script_aborts_cleanly_when_checklist_has_no_input() {
         "stderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--skip-checklist"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(execution.mock_log.is_empty());
 }
 
 #[test]
-// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.YES_BYPASSES_CHECKLIST
-fn release_tag_script_yes_bypasses_checklist_and_runs_publication_steps() {
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.SKIP_CHECKLIST_BYPASSES_CHECKLIST
+fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_steps() {
     let version = current_package_version();
-    let execution = release_tag_live_output(&version, &["--yes"]);
+    let execution = release_tag_live_output(&version, &["--skip-checklist"]);
     let output = execution.output;
 
     assert!(output.status.success());

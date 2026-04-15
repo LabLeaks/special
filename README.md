@@ -58,8 +58,10 @@ It does that by:
 
 ## Source Of Truth
 
-The canonical product truth for `special` lives in its own self-hosted spec
-declarations under [specs](specs).
+The canonical product truth for `special` lives in its own self-hosted `special`
+declarations, primarily colocated with the owning source and test boundaries.
+Small central markdown residue remains only for structural and planned contract
+scaffolding.
 
 If this README and the materialized spec ever disagree, the spec wins.
 
@@ -86,7 +88,8 @@ Today `special` is a Rust CLI that:
 - installs task-shaped skills for product-spec and architecture workflows
 
 This repo is self-hosting: `special`'s own behavior is described and verified in
-`special` format under [specs](specs).
+`special` format across its source files, test files, and minimal central
+markdown contract residue.
 
 ## Who It Is For
 
@@ -145,13 +148,13 @@ Useful variants:
 ```sh
 special specs
 special specs --all
-special specs SPECIAL.CONFIG
-special specs SPECIAL.CONFIG.SPECIAL_TOML --verbose
+special specs APP.CONFIG
+special specs APP.CONFIG.FILE --verbose
 special specs --unsupported
 special specs --json
 special specs --html
 special specs --html --verbose
-special specs SPECIAL.SPEC_COMMAND --json --verbose
+special specs APP.EXPORT --json --verbose
 ```
 
 `special specs` gives you the current live contract by default. `--all` includes
@@ -170,7 +173,7 @@ Useful variants:
 ```sh
 special modules
 special modules --all
-special modules SPECIAL.PARSER --verbose
+special modules APP.PARSER --verbose
 special modules --metrics
 special modules --metrics --verbose
 special modules --json
@@ -251,7 +254,7 @@ For local repo development, use the tool-managed commands:
 ```sh
 mise exec -- cargo test
 mise exec -- cargo run -- lint
-mise exec -- cargo run -- specs --all
+mise exec -- cargo run -- spec --all
 mise exec -- cargo run -- modules --metrics
 ```
 
@@ -266,7 +269,7 @@ mise exec -- cargo run -- modules --metrics
   Real claim node.
 - `@planned`
   Marks a `@spec` as not part of the live spec yet, and may optionally carry a
-  release string like `@planned 0.3.0`.
+  release string like `@planned X.Y.Z`.
 - `@verifies ID`
   Attaches one verification artifact to one claim.
 - `@attests ID`
@@ -276,16 +279,24 @@ mise exec -- cargo run -- modules --metrics
 - `@area ID`
   Structural architecture node.
 - `@implements ID`
-  Attaches implementation ownership to a concrete architecture module.
+  Attaches implementation ownership for one owned item to a concrete
+  architecture module.
+- `@fileimplements ID`
+  Attaches implementation ownership for the containing file to a concrete
+  architecture module.
+- `@fileverifies ID`
+  Attaches one file-scoped verification artifact to one claim.
 
 Important constraints:
 
 - `@group` and `@spec` are mutually exclusive for the same id.
 - `@planned` is local to the owning `@spec`.
 - one `@verifies` block may target only one spec id.
+- one `@fileverifies` block may target only one spec id.
 - child claims do not justify a parent `@spec`.
 - `@verifies` only counts when it attaches to a supported owned item.
-- live `@module` nodes require direct `@implements` unless they are planned.
+- live `@module` nodes require direct `@implements` or `@fileimplements` unless
+  they are planned.
 - `@area` is structural only and does not accept `@planned` or `@implements`.
 
 ## Annotation Examples
@@ -324,16 +335,16 @@ Architecture declarations follow the parallel model:
 
 ```text
 /**
-@area SPECIAL
+@area APP
 Top-level product area.
 */
 
 /**
-@module SPECIAL.PARSER
+@module APP.PARSER
 Parses reserved annotations from extracted comment blocks.
 */
 
-// @implements SPECIAL.PARSER
+// @fileimplements APP.PARSER
 ```
 
 ## Root Discovery
@@ -388,14 +399,22 @@ checklist, main bookmark push, release tag push, GitHub release verification, an
 Homebrew formula update:
 
 ```sh
-python3 scripts/tag-release.py 0.3.0
+python3 scripts/tag-release.py X.Y.Z
 ```
 
-If you have already checked the release checklist items and want to bypass the
+The wrapper will walk you through the easy-to-forget prerelease items before it
+publishes:
+
+- public docs like `README.md`
+- `CHANGELOG.md`
+- version bump and release references
+- core validation (`cargo test`, `special lint`, `special spec --all`)
+
+If you have already checked the prerelease list and want to bypass the
 interactive prompts, use:
 
 ```sh
-python3 scripts/tag-release.py 0.3.0 --yes
+python3 scripts/tag-release.py X.Y.Z --skip-checklist
 ```
 
 The current live distribution slice covers:

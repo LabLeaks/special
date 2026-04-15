@@ -3,9 +3,16 @@
 Projects materialized specs and modules into the visible verbose or non-verbose shape shared by all render backends. This module does not format text or HTML.
 */
 // @fileimplements SPECIAL.RENDER.PROJECTION
+mod module_analysis;
+
 use crate::model::{
     ArchitectureCoverageSummary, ModuleCoverageSummary, ModuleDocument, ModuleNode, SpecDocument,
     SpecNode,
+};
+
+pub(super) use self::module_analysis::{
+    ProjectedArchitectureCoverage, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
+    ProjectedModuleAnalysis, project_architecture_coverage_view, project_module_analysis_view,
 };
 
 pub(super) fn project_document(document: &SpecDocument, verbose: bool) -> SpecDocument {

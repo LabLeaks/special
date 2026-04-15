@@ -1,3 +1,8 @@
+/**
+@module SPECIAL.RENDER.COMMON
+Provides shared render constants plus escaping and syntax-highlighting helpers used by text and HTML backends.
+*/
+// @fileimplements SPECIAL.RENDER.COMMON
 use std::path::Path;
 use std::sync::OnceLock;
 

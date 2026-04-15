@@ -31,6 +31,14 @@ CHECKLIST = [
         "id": "changelog",
         "prompt": "Updated CHANGELOG.md for this release?",
     },
+    {
+        "id": "version",
+        "prompt": "Bumped Cargo.toml and release references to this version?",
+    },
+    {
+        "id": "validation",
+        "prompt": "Ran core validation (`cargo test`, `special lint`, `special spec --all`)?",
+    },
 ]
 GITHUB_RELEASE_POLL_SECONDS = 10
 GITHUB_RELEASE_TIMEOUT_SECONDS = 15 * 60
@@ -54,10 +62,12 @@ def parse_args() -> argparse.Namespace:
         help="Print the planned checklist and publication commands without publishing.",
     )
     parser.add_argument(
-        "--yes",
+        "--skip-checklist",
+        dest="skip_checklist",
         action="store_true",
-        help="Bypass the interactive release checklist.",
+        help="Bypass the interactive prerelease checklist.",
     )
+    parser.add_argument("--yes", dest="skip_checklist", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--allow-mock-publish", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--allow-existing-tag", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
@@ -73,12 +83,13 @@ def current_revision(root: Path) -> str:
 
 
 def prompt_checklist() -> None:
+    print("Prerelease checklist:")
     for item in CHECKLIST:
         try:
-            answer = input(f"{item['prompt']} [y/N]: ").strip().lower()
+            answer = input(f" - {item['prompt']} [y/N]: ").strip().lower()
         except EOFError as err:
             raise SystemExit(
-                "interactive release checklist is unavailable; rerun with --yes to publish"
+                "interactive release checklist is unavailable; rerun with --skip-checklist to publish"
             ) from err
         if answer not in {"y", "yes"}:
             raise SystemExit("aborted release publishing")
@@ -176,7 +187,7 @@ def main() -> int:
         )
         return 0
 
-    if not args.yes:
+    if not args.skip_checklist:
         prompt_checklist()
 
     run_step(root, "bookmark_main", bookmark_command, args)

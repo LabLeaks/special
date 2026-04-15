@@ -5,8 +5,14 @@ Thin command-line boundary for the Rust application.
 @group SPECIAL.HELP
 special help surface and top-level command descriptions.
 
+@group SPECIAL.VERSION
+special top-level version output surface.
+
 @spec SPECIAL.HELP.TOP_LEVEL_COMMANDS
 special `--help` lists the top-level commands with purpose-oriented summaries.
+
+@spec SPECIAL.HELP.SUBCOMMAND
+special `help` prints the same top-level help surface as `special --help`.
 
 @spec SPECIAL.HELP.SPECS_COMMAND_PLURAL_PRIMARY
 special help text presents the semantic spec command as `special specs`.
@@ -16,13 +22,17 @@ special help text presents the architecture module command as `special modules`.
 
 @spec SPECIAL.HELP.SKILLS_COMMAND_SHAPES
 special help text explains the `skills`, `skills SKILL_ID`, and `skills install [SKILL_ID]` command shapes.
+
+@spec SPECIAL.VERSION.FLAGS
+special `-v` and `--version` print the current CLI version and exit successfully.
 */
 // @fileimplements SPECIAL.CLI
 use std::env;
+use std::ffi::OsStr;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 mod init;
 mod modules;
@@ -73,7 +83,13 @@ enum Command {
 }
 
 pub fn run_from_env() -> ExitCode {
-    let cli = match Cli::try_parse() {
+    let args: Vec<_> = env::args_os().collect();
+
+    if let Some(code) = handle_top_level_shortcuts(&args) {
+        return code;
+    }
+
+    let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
         Err(err) => {
             let code = err.exit_code();
@@ -100,5 +116,34 @@ fn execute(cli: Cli) -> Result<ExitCode> {
         Command::Skills(args) => execute_skills(args, &current_dir),
         Command::Specs(args) => execute_spec(args, &current_dir),
         Command::Lint => execute_lint(&current_dir),
+    }
+}
+
+fn handle_top_level_shortcuts(args: &[std::ffi::OsString]) -> Option<ExitCode> {
+    if args.len() != 2 {
+        return None;
+    }
+
+    match args[1].as_os_str() {
+        arg if arg == OsStr::new("help") => Some(print_top_level_help()),
+        arg if arg == OsStr::new("-v") || arg == OsStr::new("--version") => {
+            println!("special {}", env!("CARGO_PKG_VERSION"));
+            Some(ExitCode::SUCCESS)
+        }
+        _ => None,
+    }
+}
+
+fn print_top_level_help() -> ExitCode {
+    let mut cmd = Cli::command();
+    match cmd.print_help() {
+        Ok(()) => {
+            println!();
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(1)
+        }
     }
 }

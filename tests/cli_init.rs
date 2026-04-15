@@ -142,3 +142,43 @@ fn top_level_help_lists_command_summaries() {
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
+
+#[test]
+// @verifies SPECIAL.HELP.SUBCOMMAND
+fn help_subcommand_matches_top_level_help_surface() {
+    let root = temp_repo_dir("special-cli-help-subcommand");
+
+    let help_output = run_special(&root, &["help"]);
+    assert!(help_output.status.success());
+
+    let flag_output = run_special(&root, &["--help"]);
+    assert!(flag_output.status.success());
+
+    let help_stdout = String::from_utf8(help_output.stdout).expect("stdout should be utf-8");
+    let flag_stdout = String::from_utf8(flag_output.stdout).expect("stdout should be utf-8");
+    assert_eq!(help_stdout.trim(), flag_stdout.trim());
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.VERSION.FLAGS
+fn version_flags_print_current_cli_version() {
+    let root = temp_repo_dir("special-cli-version");
+
+    for args in [["-v"], ["--version"]] {
+        let output = run_special(&root, &args);
+        assert!(output.status.success(), "{args:?} should succeed");
+
+        let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+        assert_eq!(
+            stdout.trim(),
+            format!("special {}", env!("CARGO_PKG_VERSION"))
+        );
+
+        let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+        assert!(stderr.trim().is_empty(), "{args:?} should not write stderr");
+    }
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}

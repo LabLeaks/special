@@ -3,7 +3,7 @@
 ## Should Trigger
 
 - Check whether this live claim is actually validated by its attached test.
-- Review whether the verify for `SPECIAL.CONFIG.SPECIAL_TOML.EXPLICIT_ROOT` is honest.
+- Review whether the verify for `APP.CONFIG.EXPLICIT_ROOT` is honest.
 - I need to know if this spec is truly supported or if the test is adjacent hand-waving.
 - Use `special spec SPEC.ID --verbose` and tell me whether the contract really matches the code.
 

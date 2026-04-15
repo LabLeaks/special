@@ -5,19 +5,17 @@ Renders projected specs and modules into HTML views with shared styling and best
 // @fileimplements SPECIAL.RENDER.HTML
 use askama::Template;
 
-use crate::model::{
-    ArchitectureCoverageSummary, ArchitectureKind, ModuleDocument, ModuleNode, SpecDocument,
-    SpecNode,
-};
-use crate::modules::analyze::explain::{
-    MetricExplanation, MetricExplanationKey, metric_explanation,
-};
+use crate::model::{ArchitectureKind, ModuleDocument, ModuleNode, SpecDocument, SpecNode};
 
 use super::common::{
     MODULES_HTML_EMPTY, SPEC_HTML_EMPTY, SPEC_HTML_STYLE, escape_html, highlight_code_html,
     language_name_for_path, planned_badge_text,
 };
-use super::projection::{project_document, project_module_document};
+use super::projection::{
+    ProjectedArchitectureCoverage, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
+    project_architecture_coverage_view, project_document, project_module_analysis_view,
+    project_module_document,
+};
 use super::templates::render_template;
 
 #[derive(Clone)]
@@ -248,7 +246,12 @@ impl ModulePageHtmlTemplate<'_> {
             .analysis
             .as_ref()
             .and_then(|analysis| analysis.coverage.as_ref())
-            .map(|coverage| format_architecture_coverage_html(coverage, self.verbose))
+            .map(|coverage| {
+                format_architecture_coverage_html(&project_architecture_coverage_view(
+                    coverage,
+                    self.verbose,
+                ))
+            })
             .unwrap_or_default()
     }
 
@@ -303,122 +306,8 @@ impl ModuleNodeHtmlTemplate<'_> {
             label: "implements",
             value: self.node.implements.len().to_string(),
         }];
-
-        if let Some(analysis) = &self.node.analysis {
-            if let Some(coverage) = &analysis.coverage {
-                counts.push(HtmlCount {
-                    label: "covered files",
-                    value: coverage.covered_files.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "weak files",
-                    value: coverage.weak_files.to_string(),
-                });
-            }
-            if let Some(metrics) = &analysis.metrics {
-                counts.push(HtmlCount {
-                    label: "owned lines",
-                    value: metrics.owned_lines.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "public items",
-                    value: metrics.public_items.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "internal items",
-                    value: metrics.internal_items.to_string(),
-                });
-            }
-            if let Some(complexity) = &analysis.complexity {
-                counts.push(HtmlCount {
-                    label: "complexity functions",
-                    value: complexity.function_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "cyclomatic total",
-                    value: complexity.total_cyclomatic.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "cyclomatic max",
-                    value: complexity.max_cyclomatic.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "cognitive total",
-                    value: complexity.total_cognitive.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "cognitive max",
-                    value: complexity.max_cognitive.to_string(),
-                });
-            }
-            if let Some(quality) = &analysis.quality {
-                counts.push(HtmlCount {
-                    label: "quality public functions",
-                    value: quality.public_function_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "quality parameters",
-                    value: quality.parameter_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "quality bool params",
-                    value: quality.bool_parameter_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "quality raw string params",
-                    value: quality.raw_string_parameter_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "quality panic sites",
-                    value: quality.panic_site_count.to_string(),
-                });
-            }
-            if let Some(item_signals) = &analysis.item_signals {
-                counts.push(HtmlCount {
-                    label: "item signals analyzed",
-                    value: item_signals.analyzed_items.to_string(),
-                });
-            }
-            if let Some(coupling) = &analysis.coupling {
-                counts.push(HtmlCount {
-                    label: "fan in",
-                    value: coupling.fan_in.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "fan out",
-                    value: coupling.fan_out.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "afferent coupling",
-                    value: coupling.afferent_coupling.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "efferent coupling",
-                    value: coupling.efferent_coupling.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "instability",
-                    value: format!("{:.2}", coupling.instability),
-                });
-                counts.push(HtmlCount {
-                    label: "external dependency targets",
-                    value: coupling.external_target_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "unresolved internal dependency targets",
-                    value: coupling.unresolved_internal_target_count.to_string(),
-                });
-            }
-            if let Some(dependencies) = &analysis.dependencies {
-                counts.push(HtmlCount {
-                    label: "dependency refs",
-                    value: dependencies.reference_count.to_string(),
-                });
-                counts.push(HtmlCount {
-                    label: "dependency targets",
-                    value: dependencies.distinct_targets.to_string(),
-                });
-            }
+        if let Some(analysis) = project_module_analysis_view(self.node, self.verbose) {
+            counts.extend(analysis.counts.iter().map(projected_count));
         }
 
         render_template(&CountsSectionHtmlTemplate { counts: &counts })
@@ -473,177 +362,9 @@ impl ModuleNodeHtmlTemplate<'_> {
             Vec::new()
         };
         let mut explanations = Vec::new();
-        if let Some(analysis) = &self.node.analysis {
-            if self.verbose
-                && let Some(coverage) = &analysis.coverage
-            {
-                meta_lines.extend(coverage.covered_paths.iter().map(|path| HtmlMetaLine {
-                    label: "covered file",
-                    value: path.display().to_string(),
-                }));
-                meta_lines.extend(coverage.weak_paths.iter().map(|path| HtmlMetaLine {
-                    label: "weak file",
-                    value: path.display().to_string(),
-                }));
-            }
-            if self.verbose
-                && let Some(dependencies) = &analysis.dependencies
-            {
-                meta_lines.extend(dependencies.targets.iter().map(|target| HtmlMetaLine {
-                    label: "dependency target",
-                    value: format!("{} ({})", target.path, target.count),
-                }));
-            }
-            if self.verbose
-                && let Some(item_signals) = &analysis.item_signals
-            {
-                meta_lines.extend(
-                    item_signals
-                        .connected_items
-                        .iter()
-                        .map(|item| HtmlMetaLine {
-                            label: "connected item",
-                            value: format_item_signal(item),
-                        }),
-                );
-                meta_lines.extend(item_signals.outbound_heavy_items.iter().map(|item| {
-                    HtmlMetaLine {
-                        label: "outbound-heavy item",
-                        value: format_item_signal(item),
-                    }
-                }));
-                meta_lines.extend(item_signals.isolated_items.iter().map(|item| HtmlMetaLine {
-                    label: "isolated item",
-                    value: format_item_signal(item),
-                }));
-                meta_lines.extend(item_signals.highest_complexity_items.iter().map(|item| {
-                    HtmlMetaLine {
-                        label: "highest complexity item",
-                        value: format_item_signal(item),
-                    }
-                }));
-                meta_lines.extend(item_signals.parameter_heavy_items.iter().map(|item| {
-                    HtmlMetaLine {
-                        label: "parameter-heavy item",
-                        value: format_item_signal(item),
-                    }
-                }));
-                meta_lines.extend(item_signals.stringly_boundary_items.iter().map(|item| {
-                    HtmlMetaLine {
-                        label: "stringly boundary item",
-                        value: format_item_signal(item),
-                    }
-                }));
-                meta_lines.extend(
-                    item_signals
-                        .panic_heavy_items
-                        .iter()
-                        .map(|item| HtmlMetaLine {
-                            label: "panic-heavy item",
-                            value: format_item_signal(item),
-                        }),
-                );
-            }
-            if analysis.complexity.is_some() {
-                explanations.push(explanation_section(
-                    "cyclomatic total",
-                    MetricExplanationKey::CyclomaticTotal,
-                ));
-                explanations.push(explanation_section(
-                    "cyclomatic max",
-                    MetricExplanationKey::CyclomaticMax,
-                ));
-                explanations.push(explanation_section(
-                    "cognitive total",
-                    MetricExplanationKey::CognitiveTotal,
-                ));
-                explanations.push(explanation_section(
-                    "cognitive max",
-                    MetricExplanationKey::CognitiveMax,
-                ));
-            }
-            if analysis.quality.is_some() {
-                explanations.push(explanation_section(
-                    "quality public functions",
-                    MetricExplanationKey::QualityPublicFunctions,
-                ));
-                explanations.push(explanation_section(
-                    "quality parameters",
-                    MetricExplanationKey::QualityParameters,
-                ));
-                explanations.push(explanation_section(
-                    "quality bool params",
-                    MetricExplanationKey::QualityBoolParameters,
-                ));
-                explanations.push(explanation_section(
-                    "quality raw string params",
-                    MetricExplanationKey::QualityRawStringParameters,
-                ));
-                explanations.push(explanation_section(
-                    "quality panic sites",
-                    MetricExplanationKey::QualityPanicSites,
-                ));
-            }
-            if let Some(item_signals) = &analysis.item_signals {
-                if !item_signals.connected_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "connected item",
-                        MetricExplanationKey::ConnectedItem,
-                    ));
-                }
-                if !item_signals.outbound_heavy_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "outbound-heavy item",
-                        MetricExplanationKey::OutboundHeavyItem,
-                    ));
-                }
-                if !item_signals.isolated_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "isolated item",
-                        MetricExplanationKey::IsolatedItem,
-                    ));
-                }
-                if !item_signals.highest_complexity_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "highest complexity item",
-                        MetricExplanationKey::HighestComplexityItem,
-                    ));
-                }
-                if !item_signals.parameter_heavy_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "parameter-heavy item",
-                        MetricExplanationKey::ParameterHeavyItem,
-                    ));
-                }
-                if !item_signals.stringly_boundary_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "stringly boundary item",
-                        MetricExplanationKey::StringlyBoundaryItem,
-                    ));
-                }
-                if !item_signals.panic_heavy_items.is_empty() {
-                    explanations.push(explanation_section(
-                        "panic-heavy item",
-                        MetricExplanationKey::PanicHeavyItem,
-                    ));
-                }
-            }
-            if analysis.coupling.is_some() {
-                explanations.push(explanation_section("fan in", MetricExplanationKey::FanIn));
-                explanations.push(explanation_section("fan out", MetricExplanationKey::FanOut));
-                explanations.push(explanation_section(
-                    "afferent coupling",
-                    MetricExplanationKey::AfferentCoupling,
-                ));
-                explanations.push(explanation_section(
-                    "efferent coupling",
-                    MetricExplanationKey::EfferentCoupling,
-                ));
-                explanations.push(explanation_section(
-                    "instability",
-                    MetricExplanationKey::Instability,
-                ));
-            }
+        if let Some(analysis) = project_module_analysis_view(self.node, self.verbose) {
+            meta_lines.extend(analysis.meta_lines.iter().map(projected_meta_line));
+            explanations.extend(analysis.explanations.iter().map(projected_explanation));
         }
 
         render_template(&ModuleVerboseHtmlTemplate {
@@ -709,73 +430,41 @@ pub(super) fn render_module_html(document: &ModuleDocument, verbose: bool) -> St
     })
 }
 
-fn format_architecture_coverage_html(
-    coverage: &ArchitectureCoverageSummary,
-    verbose: bool,
-) -> String {
-    let counts = vec![
-        HtmlCount {
-            label: "analyzed files",
-            value: coverage.analyzed_files.to_string(),
-        },
-        HtmlCount {
-            label: "covered files",
-            value: coverage.covered_files.to_string(),
-        },
-        HtmlCount {
-            label: "uncovered files",
-            value: coverage.uncovered_files.to_string(),
-        },
-        HtmlCount {
-            label: "weak files",
-            value: coverage.weak_files.to_string(),
-        },
-    ];
-    let uncovered_paths = coverage
-        .uncovered_paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>();
-    let weak_paths = coverage
-        .weak_paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>();
+fn format_architecture_coverage_html(coverage: &ProjectedArchitectureCoverage) -> String {
     render_template(&CoverageSectionHtmlTemplate {
-        counts_html: render_template(&CountsSectionHtmlTemplate { counts: &counts }),
-        verbose,
-        uncovered_paths: &uncovered_paths,
-        weak_paths: &weak_paths,
+        counts_html: render_template(&CountsSectionHtmlTemplate {
+            counts: &coverage
+                .counts
+                .iter()
+                .map(projected_count)
+                .collect::<Vec<_>>(),
+        }),
+        verbose: !(coverage.uncovered_paths.is_empty() && coverage.weak_paths.is_empty()),
+        uncovered_paths: &coverage.uncovered_paths,
+        weak_paths: &coverage.weak_paths,
     })
 }
 
-fn explanation_section(label: &'static str, key: MetricExplanationKey) -> HtmlExplanationSection {
-    let explanation: MetricExplanation = metric_explanation(key);
-    HtmlExplanationSection {
-        label,
-        plain: explanation.plain.to_string(),
-        precise: explanation.precise.to_string(),
+fn projected_count(count: &ProjectedCount) -> HtmlCount {
+    HtmlCount {
+        label: count.label,
+        value: count.value.clone(),
     }
 }
 
-fn format_item_signal(item: &crate::model::ModuleItemSignal) -> String {
-    format!(
-        "{} [{}; params {} (bool {}, raw string {}), internal refs {}, inbound {}, external refs {}, cyclomatic {}, cognitive {}, panic sites {}]",
-        item.name,
-        match item.kind {
-            crate::model::ModuleItemKind::Function => "function",
-            crate::model::ModuleItemKind::Method => "method",
-        },
-        item.parameter_count,
-        item.bool_parameter_count,
-        item.raw_string_parameter_count,
-        item.internal_refs,
-        item.inbound_internal_refs,
-        item.external_refs,
-        item.cyclomatic,
-        item.cognitive,
-        item.panic_site_count,
-    )
+fn projected_meta_line(line: &ProjectedMetaLine) -> HtmlMetaLine {
+    HtmlMetaLine {
+        label: line.label,
+        value: line.value.clone(),
+    }
+}
+
+fn projected_explanation(explanation: &ProjectedExplanation) -> HtmlExplanationSection {
+    HtmlExplanationSection {
+        label: explanation.label,
+        plain: explanation.plain.to_string(),
+        precise: explanation.precise.to_string(),
+    }
 }
 
 fn verify_label(verify: &crate::model::VerifyRef) -> &'static str {
