@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -80,13 +81,6 @@ pub fn current_python_executable() -> String {
     String::from_utf8(output.stdout)
         .expect("python executable should be utf-8")
         .trim()
-        .to_string()
-}
-
-pub fn review_script_path() -> String {
-    repo_root()
-        .join("scripts/review-rust-release-style.py")
-        .display()
         .to_string()
 }
 
@@ -334,58 +328,9 @@ pub fn split_stdout_json_prefix(output: &std::process::Output) -> (Value, String
     (payload, remainder)
 }
 
-fn release_tag_validate_preview_shape_output(payload: &str) -> std::process::Output {
-    let script = r#"
-import importlib.util
-import json
-import pathlib
-import sys
-
-root = pathlib.Path(sys.argv[1])
-payload = json.loads(sys.argv[2])
-spec = importlib.util.spec_from_file_location(
-    "tag_release", root / "scripts" / "tag-release.py"
-)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-try:
-    validated = module.validate_review_preview(payload)
-    print(json.dumps(validated))
-except SystemExit as err:
-    print(str(err), file=sys.stderr)
-    raise
-"#;
-
-    Command::new("python3")
-        .arg("-c")
-        .arg(script)
-        .arg(repo_root())
-        .arg(payload)
-        .current_dir(repo_root())
-        .output()
-        .expect("preview validation helper should run")
-}
-
-pub fn release_tag_validate_preview_shape_ok(payload: &str) -> Value {
-    let output = release_tag_validate_preview_shape_output(payload);
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\n\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).expect("validated preview should be valid json")
-}
-
-pub fn release_tag_validate_preview_shape_err(payload: &str) -> String {
-    let output = release_tag_validate_preview_shape_output(payload);
-    assert!(
-        !output.status.success(),
-        "stdout:\n{}\n\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stderr).expect("stderr should be utf-8")
+pub struct ReleaseTagExecution {
+    pub output: std::process::Output,
+    pub mock_log: Vec<Value>,
 }
 
 pub fn python_entrypoint_runtime_flag(script_name: &str) -> Value {
@@ -509,30 +454,20 @@ pub fn current_revision() -> String {
         .to_string()
 }
 
-pub fn release_tag_command_output(
-    version: &str,
-    extra_args: &[&str],
-    mock_output: &str,
-    mock_exit_code: Option<&str>,
-) -> std::process::Output {
+pub fn release_tag_command_output(version: &str, extra_args: &[&str]) -> std::process::Output {
     let mut command = Command::new("python3");
     command
         .arg("scripts/tag-release.py")
         .arg(version)
         .args(extra_args)
+        .arg("--allow-existing-tag")
         .arg("--dry-run")
-        .arg("--allow-mock-review")
-        .current_dir(repo_root())
-        .env("SPECIAL_RUST_RELEASE_REVIEW_ALLOW_MOCK", "1")
-        .env("SPECIAL_RUST_RELEASE_REVIEW_MOCK_OUTPUT", mock_output);
-    if let Some(code) = mock_exit_code {
-        command.env("SPECIAL_RUST_RELEASE_REVIEW_MOCK_EXIT_CODE", code);
-    }
+        .current_dir(repo_root());
     command.output().expect("tag release script should run")
 }
 
-pub fn release_tag_dry_run(version: &str, extra_args: &[&str], mock_output: &str) -> Value {
-    let output = release_tag_command_output(version, extra_args, mock_output, None);
+pub fn release_tag_dry_run(version: &str, extra_args: &[&str]) -> Value {
+    let output = release_tag_command_output(version, extra_args);
     assert!(
         output.status.success(),
         "stdout:\n{}\n\nstderr:\n{}",
@@ -542,49 +477,62 @@ pub fn release_tag_dry_run(version: &str, extra_args: &[&str], mock_output: &str
     serde_json::from_slice(&output.stdout).expect("tag dry-run output should be valid json")
 }
 
-pub fn release_tag_live_output(
-    version: &str,
-    extra_args: &[&str],
-    mock_output: &str,
-    mock_exit_code: Option<&str>,
-) -> std::process::Output {
+fn release_mock_log_path() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    repo_root().join(format!(".tmp-release-mock-log-{nanos}"))
+}
+
+fn read_release_tag_mock_log(path: &PathBuf) -> Vec<Value> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    fs::read_to_string(path)
+        .expect("release mock log should be readable")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("release mock log line should be valid json"))
+        .collect()
+}
+
+pub fn release_tag_live_output(version: &str, extra_args: &[&str]) -> ReleaseTagExecution {
+    let log_path = release_mock_log_path();
     let mut command = Command::new("python3");
     command
         .arg("scripts/tag-release.py")
         .arg(version)
         .args(extra_args)
-        .arg("--allow-mock-review")
+        .arg("--allow-existing-tag")
+        .arg("--allow-mock-publish")
         .current_dir(repo_root())
-        .env("SPECIAL_RUST_RELEASE_REVIEW_ALLOW_MOCK", "1")
-        .env("SPECIAL_RUST_RELEASE_REVIEW_MOCK_OUTPUT", mock_output);
-    if let Some(code) = mock_exit_code {
-        command.env("SPECIAL_RUST_RELEASE_REVIEW_MOCK_EXIT_CODE", code);
-    }
-    command.output().expect("tag release script should run")
+        .env("SPECIAL_RELEASE_ALLOW_MOCK", "1")
+        .env("SPECIAL_RELEASE_MOCK_LOG_PATH", &log_path);
+    let output = command.output().expect("tag release script should run");
+    let mock_log = read_release_tag_mock_log(&log_path);
+    let _ = fs::remove_file(log_path);
+    ReleaseTagExecution { output, mock_log }
 }
 
 pub fn release_tag_live_output_with_input(
     version: &str,
     extra_args: &[&str],
-    mock_output: &str,
-    mock_exit_code: Option<&str>,
     input: &str,
-) -> std::process::Output {
+) -> ReleaseTagExecution {
+    let log_path = release_mock_log_path();
     let mut command = Command::new("python3");
     command
         .arg("scripts/tag-release.py")
         .arg(version)
         .args(extra_args)
-        .arg("--allow-mock-review")
+        .arg("--allow-existing-tag")
+        .arg("--allow-mock-publish")
         .current_dir(repo_root())
-        .env("SPECIAL_RUST_RELEASE_REVIEW_ALLOW_MOCK", "1")
-        .env("SPECIAL_RUST_RELEASE_REVIEW_MOCK_OUTPUT", mock_output)
+        .env("SPECIAL_RELEASE_ALLOW_MOCK", "1")
+        .env("SPECIAL_RELEASE_MOCK_LOG_PATH", &log_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(code) = mock_exit_code {
-        command.env("SPECIAL_RUST_RELEASE_REVIEW_MOCK_EXIT_CODE", code);
-    }
 
     let mut child = command.spawn().expect("tag release script should run");
     child
@@ -594,9 +542,12 @@ pub fn release_tag_live_output_with_input(
         .write_all(input.as_bytes())
         .expect("warning prompt input should be written");
     let _ = child.stdin.take();
-    child
+    let output = child
         .wait_with_output()
-        .expect("tag release output should be captured")
+        .expect("tag release output should be captured");
+    let mock_log = read_release_tag_mock_log(&log_path);
+    let _ = fs::remove_file(log_path);
+    ReleaseTagExecution { output, mock_log }
 }
 
 pub fn current_package_version() -> String {

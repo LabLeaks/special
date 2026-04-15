@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-# @module SPECIAL.RELEASE_REVIEW.TAG
-# Release tag flow in `scripts/tag-release.py`.
-# @implements SPECIAL.RELEASE_REVIEW.TAG
-# @verifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW
+# @module SPECIAL.DISTRIBUTION.RELEASE_FLOW
+# Local release publication flow in `scripts/tag-release.py`.
+# @implements SPECIAL.DISTRIBUTION.RELEASE_FLOW
 
 from __future__ import annotations
 
@@ -12,18 +11,29 @@ sys.dont_write_bytecode = True
 
 import argparse
 import json
+import os
 import subprocess
+import time
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from release_review_contract import (
-    validate_review_payload as validate_release_review_payload,
-    validate_review_preview as validate_release_review_preview,
-)
 from release_tooling import normalize_tag, package_version, run_checked
+
+CHECKLIST = [
+    {
+        "id": "readme",
+        "prompt": "Updated README.md and other public docs for this release?",
+    },
+    {
+        "id": "changelog",
+        "prompt": "Updated CHANGELOG.md for this release?",
+    },
+]
+GITHUB_RELEASE_POLL_SECONDS = 10
+GITHUB_RELEASE_TIMEOUT_SECONDS = 15 * 60
 
 
 def repo_root() -> Path:
@@ -32,47 +42,26 @@ def repo_root() -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the Rust release review, then create a jj release tag."
+        description=(
+            "Publish the current revision by updating main, tagging the release, pushing both, "
+            "verifying the GitHub release, and updating Homebrew."
+        )
     )
     parser.add_argument("version", help="Release version, with or without a leading `v`.")
-    model_group = parser.add_mutually_exclusive_group()
-    model_group.add_argument(
-        "--fast",
-        action="store_true",
-        help="Run the release review with the fast Spark model.",
-    )
-    model_group.add_argument(
-        "--smart",
-        action="store_true",
-        help="Run the release review with the smarter GPT-5.4 model.",
-    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run the release review and print the planned tag command without creating the tag.",
-    )
-    parser.add_argument(
-        "--skip-review",
-        action="store_true",
-        help="Skip the Rust release review and create the tag directly.",
-    )
-    review_scope_group = parser.add_mutually_exclusive_group()
-    review_scope_group.add_argument(
-        "--full",
-        action="store_true",
-        help="Run the release review in full-scan mode instead of the default previous-tag diff.",
-    )
-    review_scope_group.add_argument(
-        "--base",
-        help="Run the release review against an explicit base revision instead of the latest semver tag.",
+        help="Print the planned checklist and publication commands without publishing.",
     )
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="Create the tag without prompting when the release review returns warnings.",
+        help="Bypass the interactive release checklist.",
     )
-    parser.add_argument("--allow-mock-review", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--allow-mock-publish", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--allow-existing-tag", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
+
 
 def existing_tags(root: Path) -> set[str]:
     output = run_checked(root, ["jj", "tag", "list"])
@@ -83,97 +72,57 @@ def current_revision(root: Path) -> str:
     return run_checked(root, ["jj", "log", "-r", "@", "--no-graph", "-T", "commit_id"]).strip()
 
 
-def release_review_command(
-    args: argparse.Namespace, revision: str, *, dry_run: bool = False
-) -> list[str]:
-    command = [sys.executable, str(SCRIPT_DIR / "review-rust-release-style.py")]
-    if args.fast:
-        command.append("--fast")
-    elif args.smart:
-        command.append("--smart")
-    if args.full:
-        command.append("--full")
-    elif args.base:
-        command.extend(["--base", args.base])
-    command.extend(["--head", revision])
-    if dry_run:
-        command.append("--dry-run")
-    if getattr(args, "allow_mock_review", False):
-        command.append("--allow-mock")
-    return command
-
-
-def validate_review_payload(payload: dict) -> dict:
-    return validate_release_review_payload(payload, subject="release review payload")
-
-
-def validate_review_preview(payload: dict) -> dict:
-    return validate_release_review_preview(payload, subject="release review dry-run preview")
-
-
-def run_release_review(root: Path, command: list[str]) -> dict:
-    result = subprocess.run(
-        command,
-        cwd=root,
-        capture_output=True,
-        text=True,
-    )
-
-    payload = None
-    stdout = result.stdout.strip()
-    if stdout:
+def prompt_checklist() -> None:
+    for item in CHECKLIST:
         try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError:
-            payload = None
-
-    if result.returncode != 0:
-        if payload is not None:
-            if result.stderr:
-                sys.stderr.write(result.stderr)
-            print(json.dumps(payload, indent=2))
-            raise SystemExit("release review did not complete cleanly; tag not created")
-
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        raise SystemExit(result.returncode)
-
-    if payload is None:
-        raise SystemExit("release review did not return valid JSON")
-    return validate_review_payload(payload)
+            answer = input(f"{item['prompt']} [y/N]: ").strip().lower()
+        except EOFError as err:
+            raise SystemExit(
+                "interactive release checklist is unavailable; rerun with --yes to publish"
+            ) from err
+        if answer not in {"y", "yes"}:
+            raise SystemExit("aborted release publishing")
 
 
-def run_json_command(root: Path, command: list[str], failure_message: str) -> dict:
-    result = subprocess.run(
+def run_command(root: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         command,
         cwd=root,
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0:
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        raise SystemExit(failure_message)
-
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as err:
-        raise SystemExit(f"{failure_message}: invalid JSON output") from err
-    return validate_review_preview(payload)
 
 
-def prompt_to_continue(tag: str, warning_count: int) -> None:
-    try:
-        answer = input(
-            f"Rust release review returned {warning_count} warning(s). Create {tag} anyway? [y/N]: "
-        ).strip().lower()
-    except EOFError as err:
-        raise SystemExit(
-            "release review returned warnings and interactive confirmation is unavailable; "
-            "rerun with --yes to create the tag"
-        ) from err
-    if answer not in {"y", "yes"}:
-        raise SystemExit("aborted release tagging")
+def record_mock_step(root: Path, label: str, command: list[str]) -> None:
+    log_override = os.environ.get("SPECIAL_RELEASE_MOCK_LOG_PATH")
+    log_path = Path(log_override) if log_override else root / ".tmp-release-mock-log"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"label": label, "command": command}) + "\n")
+
+
+def run_step(root: Path, label: str, command: list[str], args: argparse.Namespace) -> None:
+    if args.allow_mock_publish:
+        record_mock_step(root, label, command)
+        return
+    run_checked(root, command)
+
+
+def wait_for_github_release(root: Path, label: str, command: list[str], args: argparse.Namespace) -> None:
+    if args.allow_mock_publish:
+        record_mock_step(root, label, command)
+        return
+    deadline = time.monotonic() + GITHUB_RELEASE_TIMEOUT_SECONDS
+    last_stderr = ""
+    while True:
+        result = run_command(root, command)
+        if result.returncode == 0:
+            return
+        last_stderr = result.stderr
+        if time.monotonic() >= deadline:
+            if last_stderr:
+                sys.stderr.write(last_stderr)
+            raise SystemExit("timed out waiting for GitHub release publication")
+        time.sleep(GITHUB_RELEASE_POLL_SECONDS)
 
 
 def main() -> int:
@@ -183,46 +132,60 @@ def main() -> int:
     manifest_tag = normalize_tag(package_version(root))
 
     if not root.joinpath(".jj").exists():
-        raise SystemExit("release tagging requires a jj repository root")
+        raise SystemExit("release publishing requires a jj repository root")
     revision = current_revision(root)
-    if tag in existing_tags(root):
+    if tag in existing_tags(root) and not args.allow_existing_tag:
         raise SystemExit(f"release tag `{tag}` already exists")
     if tag != manifest_tag:
         raise SystemExit(
             f"release tag `{tag}` does not match Cargo.toml version `{manifest_tag}`"
         )
 
+    bookmark_command = ["jj", "bookmark", "set", "main", "-r", revision]
     tag_command = ["jj", "tag", "set", tag, "-r", revision]
+    push_command = ["jj", "git", "push", "--bookmark", "main", "--tag", tag]
+    verify_github_release_command = [
+        "bash",
+        str(SCRIPT_DIR / "verify-github-release-published.sh"),
+    ]
+    update_homebrew_formula_command = [
+        sys.executable,
+        str(SCRIPT_DIR / "update-homebrew-formula.py"),
+    ]
+    verify_homebrew_formula_command = [
+        "bash",
+        str(SCRIPT_DIR / "verify-homebrew-formula.sh"),
+    ]
 
     if args.dry_run:
-        payload = {
-            "tag": tag,
-            "skip_review": args.skip_review,
-            "tag_command": tag_command,
-        }
-        if not args.skip_review:
-            review_command = release_review_command(args, revision, dry_run=True)
-            review_preview = run_json_command(
-                root,
-                review_command,
-                "release review dry-run did not complete cleanly; tag not created",
+        print(
+            json.dumps(
+                {
+                    "tag": tag,
+                    "revision": revision,
+                    "checklist": CHECKLIST,
+                    "bookmark_command": bookmark_command,
+                    "tag_command": tag_command,
+                    "push_command": push_command,
+                    "verify_github_release_command": verify_github_release_command,
+                    "update_homebrew_formula_command": update_homebrew_formula_command,
+                    "verify_homebrew_formula_command": verify_homebrew_formula_command,
+                },
+                indent=2,
             )
-            payload["review_command"] = review_command
-            payload["review_preview"] = review_preview
-        print(json.dumps(payload, indent=2))
+        )
         return 0
 
-    if not args.skip_review:
-        review_command = release_review_command(args, revision)
-        review_result = run_release_review(root, review_command)
-        warning_count = len(review_result.get("warnings", []))
-        print(json.dumps(review_result, indent=2))
+    if not args.yes:
+        prompt_checklist()
 
-        if warning_count > 0 and not args.yes:
-            prompt_to_continue(tag, warning_count)
-
-    run_checked(root, tag_command)
-    print(f"Created release tag {tag}")
+    run_step(root, "bookmark_main", bookmark_command, args)
+    run_step(root, "set_tag", tag_command, args)
+    run_step(root, "push_release", push_command, args)
+    wait_for_github_release(root, "verify_github_release", verify_github_release_command, args)
+    run_step(root, "update_homebrew_formula", update_homebrew_formula_command, args)
+    run_step(root, "verify_homebrew_formula", verify_homebrew_formula_command, args)
+    print(f"Published release {tag}")
     return 0
 
 

@@ -140,61 +140,6 @@ the local Python release-review and release-tagging scripts disable Python bytec
 */
 
 /**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.AUTO_RUNS_ONLY_FROM_RELEASE_TAG_FLOW
-special only auto-runs the Rust release review from the local release-tagging flow and does not wire it into CI workflows.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW
-special provides a dedicated local release-tagging script that runs the Rust release review before creating a release tag.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.PREVIOUS_TAG_DIFF
-the release-tagging script runs the Rust release review with the default previous-tag diff scope instead of forcing a full scan.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.DRY_RUN
-`special`'s release-tagging dry-run does not invoke a live Codex review or create a tag; it prints the planned review and tag actions plus a dry-run review preview.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.SKIP_REVIEW
-the release-tagging script accepts `--skip-review` to bypass the Rust release review and create or preview the tag directly.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.MODE_FLAGS
-the release-tagging script passes through the release review's `--fast` and `--smart` model-selection flags.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.SCOPE_OVERRIDES
-the release-tagging script passes through explicit release-review scope overrides such as `--full` and `--base`, while defaulting to the previous-tag diff when neither is provided.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.SURFACES_REVIEW_FAILURES
-when the release review exits unsuccessfully but still returns structured output, the release-tagging script prints that review payload before aborting instead of swallowing the failure details.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.PROMPTS_ON_WARNINGS
-when the Rust release review returns warnings, the release-tagging script prompts before creating the tag.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.NON_INTERACTIVE_WARNINGS_ABORT
-when the release review returns warnings and interactive confirmation is unavailable, the release-tagging script exits with an explicit error instead of crashing or creating the tag.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.MATCHES_MANIFEST_VERSION
-the release-tagging script requires the requested tag version to exactly match the current `Cargo.toml` package version.
-*/
-
-/**
-@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.RELEASE_TAG_FLOW.VALIDATES_REVIEW_PAYLOAD
-the release-tagging script validates structured review output before using it to decide whether tagging may proceed.
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.MANUAL_ONLY
+special keeps the Rust release review as a separate local quality tool and does not wire it into CI workflows or the release publication script.
 */

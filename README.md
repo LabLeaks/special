@@ -146,16 +146,22 @@ mise exec -- cargo run -- spec --all
 
 This repo carries its own release automation contract in `special` format.
 
-Create release tags through the local wrapper so the Rust release review runs first:
+Run the Rust code review separately when you want it:
+
+```sh
+python3 scripts/review-rust-release-style.py
+```
+
+Publish a release through the local wrapper so one process handles the release checklist, main bookmark push, release tag push, GitHub release verification, and Homebrew formula update:
 
 ```sh
 python3 scripts/tag-release.py 0.3.0
 ```
 
-If you intentionally need to bypass the review step, use:
+If you have already checked the release checklist items and want to bypass the interactive prompts, use:
 
 ```sh
-python3 scripts/tag-release.py 0.3.0 --skip-review
+python3 scripts/tag-release.py 0.3.0 --yes
 ```
 
 The current live distribution slice covers:

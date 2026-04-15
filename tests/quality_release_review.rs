@@ -640,8 +640,8 @@ fn release_python_entrypoints_disable_bytecode_writes() {
 }
 
 #[test]
-// @verifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.AUTO_RUNS_ONLY_FROM_RELEASE_TAG_FLOW
-fn release_review_is_not_wired_into_ci_workflows() {
+// @verifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.MANUAL_ONLY
+fn release_review_is_not_wired_into_ci_workflows_or_release_publication() {
     for workflow in workflow_files() {
         let contents =
             fs::read_to_string(&workflow).expect("workflow file should be readable as utf-8");
@@ -651,4 +651,12 @@ fn release_review_is_not_wired_into_ci_workflows() {
             workflow.display()
         );
     }
+
+    let tag_release =
+        fs::read_to_string(support::repo_root().join("scripts/tag-release.py"))
+            .expect("tag-release.py should be readable");
+    assert!(
+        !tag_release.contains("review-rust-release-style.py"),
+        "release publication should not invoke the local codex review script"
+    );
 }
