@@ -2,7 +2,7 @@
 @module SPECIAL.TESTS.CLI_SPEC
 `special spec` output and filtering tests in `tests/cli_spec.rs`.
 */
-// @implements SPECIAL.TESTS.CLI_SPEC
+// @fileimplements SPECIAL.TESTS.CLI_SPEC
 #[path = "support/cli.rs"]
 mod support;
 
@@ -11,7 +11,7 @@ use std::fs;
 use serde_json::Value;
 
 use support::{
-    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir,
+    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir, write_file_verify_fixture,
     write_live_and_planned_fixture, write_planned_release_fixture,
     write_special_toml_dot_root_fixture, write_special_toml_root_fixture,
     write_unsupported_live_fixture,
@@ -294,6 +294,22 @@ fn spec_verbose_includes_verify_bodies() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(stdout.contains("body at:"));
+    assert!(stdout.contains("fn verifies_demo_root() {}"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.VERBOSE
+fn spec_verbose_includes_file_verify_bodies() {
+    let root = temp_repo_dir("special-cli-file-verbose");
+    write_file_verify_fixture(&root);
+
+    let output = run_special(&root, &["spec", "--verbose"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("@fileverifies"));
     assert!(stdout.contains("fn verifies_demo_root() {}"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

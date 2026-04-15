@@ -2,7 +2,7 @@
 @module SPECIAL.CONFIG.ROOT_DISCOVERY
 Resolves the active project root from `special.toml`, VCS markers, or the current directory. This module does not parse `special.toml` key syntax.
 */
-// @implements SPECIAL.CONFIG.ROOT_DISCOVERY
+// @fileimplements SPECIAL.CONFIG.ROOT_DISCOVERY
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -44,6 +44,7 @@ pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
                 version: config.version,
                 version_explicit: config.version_explicit,
                 config_path: Some(config_path),
+                ignore_patterns: config.ignore_patterns,
             });
         }
     }
@@ -56,6 +57,7 @@ pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
                 version: SpecialVersion::V0,
                 version_explicit: false,
                 config_path: None,
+                ignore_patterns: Vec::new(),
             });
         }
     }
@@ -66,5 +68,6 @@ pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
         version: SpecialVersion::V0,
         version_explicit: false,
         config_path: None,
+        ignore_patterns: Vec::new(),
     })
 }

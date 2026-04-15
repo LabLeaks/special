@@ -2,7 +2,7 @@
 @module SPECIAL.SKILLS
 Bundled skill catalog in `src/skills.rs`.
 */
-// @implements SPECIAL.SKILLS
+// @fileimplements SPECIAL.SKILLS
 mod install;
 
 use anyhow::Result;

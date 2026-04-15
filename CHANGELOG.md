@@ -4,7 +4,7 @@
 
 - Added plural primary command surfaces: `special specs` and `special modules`, while keeping singular aliases for compatibility.
 - Added architecture annotations and materialization: `@module`, `@area`, and `@implements`, plus `special modules` text/JSON/HTML/verbose views and matching lint support.
-- Moved toward distributed authoring by supporting source-local module declarations and implementation ownership markers, with `_project/ARCHITECTURE.md` reduced to project-specific rationale and cross-cutting structure.
+- Moved toward distributed authoring by supporting source-local module declarations and implementation ownership markers, with `ARCHITECTURE.md` reduced to project-specific rationale and cross-cutting structure.
 - Added versioned `@planned` parsing rules with explicit `special.toml` `version` support, legacy compatibility fallback with warnings, and optional planned release metadata surfaced in spec and module views.
 - Reworked `special skills` so `special skills` prints overview help, `special skills SKILL_ID` prints a specific skill to stdout, and `special skills install [SKILL_ID]` supports project/global/custom destinations, overwrite handling, and non-interactive destination flags.
 - Split product-contract validation from architecture validation by shipping a dedicated `validate-architecture-implementation` skill alongside the existing product-spec workflow skills.

@@ -2,7 +2,7 @@
 @module SPECIAL.PARSER.ATTESTATION
 Attestation metadata parsing in `src/parser/attestation.rs`.
 */
-// @implements SPECIAL.PARSER.ATTESTATION
+// @fileimplements SPECIAL.PARSER.ATTESTATION
 use chrono::NaiveDate;
 
 use crate::model::{CommentBlock, ParsedRepo};

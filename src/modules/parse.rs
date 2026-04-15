@@ -1,16 +1,14 @@
 /**
 @module SPECIAL.MODULES.PARSE
-Parses architecture declarations from `_project/ARCHITECTURE.md` and source-local comments, including `@implements` attachments and planned module metadata.
+Parses architecture declarations from ordinary markdown files and source-local comments, including `@implements`, `@fileimplements`, and planned module metadata.
 */
-// @implements SPECIAL.MODULES.PARSE
-use std::fs;
-use std::path::{Path, PathBuf};
+// @fileimplements SPECIAL.MODULES.PARSE
+use std::path::Path;
 
 use anyhow::Result;
 
 use crate::annotation_syntax::{
-    ReservedSpecialAnnotation, is_any_tag_boundary, is_reserved_special_annotation,
-    reserved_special_annotation_rest,
+    ReservedSpecialAnnotation, is_any_tag_boundary, reserved_special_annotation_rest,
 };
 use crate::extractor::collect_comment_blocks;
 use crate::model::{
@@ -22,89 +20,25 @@ use crate::planned_syntax::{
     parse_decl_header, parse_planned_annotation,
 };
 
+use super::parse_markdown::parse_markdown_architecture_decls as parse_markdown_architecture_nodes;
+
 pub(super) fn parse_architecture(
-    architecture_doc_path: PathBuf,
     root: &Path,
+    ignore_patterns: &[String],
 ) -> Result<ParsedArchitecture> {
     let mut parsed = ParsedArchitecture::default();
-    parse_architecture_doc(architecture_doc_path, &mut parsed)?;
-    parse_source_module_decls(root, &mut parsed)?;
-    parse_implements_refs(root, &mut parsed)?;
+    parse_markdown_architecture_nodes(root, ignore_patterns, &mut parsed)?;
+    parse_source_module_decls(root, ignore_patterns, &mut parsed)?;
+    parse_implements_refs(root, ignore_patterns, &mut parsed)?;
     Ok(parsed)
 }
 
-fn parse_architecture_doc(path: PathBuf, parsed: &mut ParsedArchitecture) -> Result<()> {
-    if !path.is_file() {
-        return Ok(());
-    }
-
-    let content = fs::read_to_string(&path)?;
-    let lines: Vec<&str> = content.lines().collect();
-    let mut index = 0;
-
-    while index < lines.len() {
-        let Some((kind, raw_decl)) = normalized_architecture_heading(lines[index]) else {
-            index += 1;
-            continue;
-        };
-
-        let line_number = index + 1;
-        let Some((id, inline_release, inline_planned)) =
-            parse_module_header(kind, raw_decl, parsed, &path, line_number)
-        else {
-            index += 1;
-            continue;
-        };
-
-        let mut cursor = skip_blank_doc_lines(&lines, index + 1);
-        let (planned, planned_release, next_cursor) = maybe_consume_doc_planned(
-            kind,
-            &lines,
-            cursor,
-            parsed,
-            &path,
-            inline_planned,
-            inline_release,
-        );
-        cursor = next_cursor;
-        let (description_lines, cursor) = collect_doc_description_lines(&lines, cursor);
-
-        let module = match ModuleDecl::new(
-            id,
-            kind,
-            description_lines.join(" "),
-            if planned {
-                PlanState::planned(planned_release)
-            } else {
-                PlanState::live()
-            },
-            SourceLocation {
-                path: path.clone(),
-                line: line_number,
-            },
-        ) {
-            Ok(module) => module,
-            Err(err) => {
-                parsed.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    path: path.clone(),
-                    line: line_number,
-                    message: err.to_string(),
-                });
-                index = cursor;
-                continue;
-            }
-        };
-        parsed.modules.push(module);
-
-        index = cursor;
-    }
-
-    Ok(())
-}
-
-fn parse_source_module_decls(root: &Path, parsed: &mut ParsedArchitecture) -> Result<()> {
-    for block in collect_comment_blocks(root)? {
+fn parse_source_module_decls(
+    root: &Path,
+    ignore_patterns: &[String],
+    parsed: &mut ParsedArchitecture,
+) -> Result<()> {
+    for block in collect_comment_blocks(root, ignore_patterns)? {
         let mut index = 0;
 
         while index < block.lines.len() {
@@ -170,17 +104,27 @@ fn parse_source_module_decls(root: &Path, parsed: &mut ParsedArchitecture) -> Re
     Ok(())
 }
 
-fn parse_implements_refs(root: &Path, parsed: &mut ParsedArchitecture) -> Result<()> {
-    for block in collect_comment_blocks(root)? {
-        let file_scoped = is_file_scoped_implements_block(&block);
+fn parse_implements_refs(
+    root: &Path,
+    ignore_patterns: &[String],
+    parsed: &mut ParsedArchitecture,
+) -> Result<()> {
+    for block in collect_comment_blocks(root, ignore_patterns)? {
         for entry in &block.lines {
             let trimmed = entry.text.trim();
-            let Some(rest) =
+            let (rest, file_scoped, annotation) = if let Some(rest) =
                 reserved_special_annotation_rest(trimmed, ReservedSpecialAnnotation::Implements)
-            else {
+            {
+                (rest, false, "@implements")
+            } else if let Some(rest) =
+                reserved_special_annotation_rest(trimmed, ReservedSpecialAnnotation::FileImplements)
+            {
+                (rest, true, "@fileimplements")
+            } else {
                 continue;
             };
-            let Some(module_id) = parse_implements_module_id(rest, parsed, &block.path, entry.line)
+            let Some(module_id) =
+                parse_implements_module_id(rest, annotation, parsed, &block.path, entry.line)
             else {
                 continue;
             };
@@ -213,6 +157,7 @@ fn parse_implements_refs(root: &Path, parsed: &mut ParsedArchitecture) -> Result
 
 fn parse_implements_module_id(
     rest: &str,
+    annotation: &str,
     parsed: &mut ParsedArchitecture,
     path: &Path,
     line: usize,
@@ -223,7 +168,7 @@ fn parse_implements_module_id(
             severity: DiagnosticSeverity::Error,
             path: path.to_path_buf(),
             line,
-            message: "missing module id after @implements".to_string(),
+            message: format!("missing module id after {annotation}"),
         });
         return None;
     };
@@ -233,7 +178,7 @@ fn parse_implements_module_id(
             severity: DiagnosticSeverity::Error,
             path: path.to_path_buf(),
             line,
-            message: "unexpected trailing content after @implements module id".to_string(),
+            message: format!("unexpected trailing content after {annotation} module id"),
         });
         return None;
     }
@@ -241,8 +186,11 @@ fn parse_implements_module_id(
     Some(module_id.to_string())
 }
 
-fn normalized_architecture_heading(line: &str) -> Option<(ArchitectureKind, &str)> {
-    let trimmed = line.trim();
+pub(super) fn normalized_architecture_heading(line: &str) -> Option<(ArchitectureKind, &str)> {
+    if !line.trim_start().starts_with('#') {
+        return None;
+    }
+    let trimmed = normalize_markdown_annotation_line(line)?;
     let trimmed = trimmed.trim_start_matches('#').trim();
     let trimmed = trimmed.strip_prefix('`').unwrap_or(trimmed);
     let trimmed = trimmed.strip_suffix('`').unwrap_or(trimmed);
@@ -256,13 +204,10 @@ fn normalized_architecture_heading(line: &str) -> Option<(ArchitectureKind, &str
 }
 
 fn normalized_annotation_line(line: Option<&str>) -> Option<&str> {
-    let trimmed = line?.trim();
-    let trimmed = trimmed.strip_prefix('`').unwrap_or(trimmed);
-    let trimmed = trimmed.strip_suffix('`').unwrap_or(trimmed);
-    Some(trimmed)
+    line.and_then(normalize_markdown_annotation_line)
 }
 
-fn skip_blank_doc_lines(lines: &[&str], mut index: usize) -> usize {
+pub(super) fn skip_blank_doc_lines(lines: &[&str], mut index: usize) -> usize {
     while index < lines.len() && lines[index].trim().is_empty() {
         index += 1;
     }
@@ -276,7 +221,7 @@ fn skip_blank_block_lines(block: &crate::model::CommentBlock, mut index: usize) 
     index
 }
 
-fn maybe_consume_doc_planned(
+pub(super) fn maybe_consume_doc_planned(
     kind: ArchitectureKind,
     lines: &[&str],
     cursor: usize,
@@ -337,7 +282,10 @@ fn maybe_consume_block_planned(
     (planned, planned_release, cursor)
 }
 
-fn collect_doc_description_lines(lines: &[&str], mut cursor: usize) -> (Vec<String>, usize) {
+pub(super) fn collect_doc_description_lines(
+    lines: &[&str],
+    mut cursor: usize,
+) -> (Vec<String>, usize) {
     let mut description_lines = Vec::new();
     while cursor < lines.len() {
         if normalized_architecture_heading(lines[cursor]).is_some() {
@@ -391,7 +339,7 @@ fn parse_source_architecture_decl(trimmed: &str) -> Option<(ArchitectureKind, &s
     }
 }
 
-fn parse_module_header(
+pub(super) fn parse_module_header(
     kind: ArchitectureKind,
     rest: &str,
     parsed: &mut ParsedArchitecture,
@@ -514,10 +462,21 @@ fn strip_markdown_prefix(text: &str) -> &str {
         .unwrap_or(text)
 }
 
-fn is_file_scoped_implements_block(block: &crate::model::CommentBlock) -> bool {
-    block
-        .lines
-        .first()
-        .map(|line| line.line <= 2 && is_reserved_special_annotation(line.text.trim()))
-        .unwrap_or(false)
+fn normalize_markdown_annotation_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let trimmed = trimmed
+        .strip_prefix('>')
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let trimmed = trimmed.trim_start_matches('#').trim_start();
+    let trimmed = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix('`').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_suffix('`').unwrap_or(trimmed);
+    Some(trimmed.trim())
 }

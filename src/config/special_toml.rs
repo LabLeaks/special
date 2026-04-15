@@ -1,8 +1,8 @@
 /**
 @module SPECIAL.CONFIG.SPECIAL_TOML
-Parses and loads `special.toml` root and version settings. This module does not choose VCS or current-directory fallbacks when config is absent.
+Parses and loads `special.toml` root, version, and shared discovery ignore settings. This module does not choose VCS or current-directory fallbacks when config is absent.
 */
-// @implements SPECIAL.CONFIG.SPECIAL_TOML
+// @fileimplements SPECIAL.CONFIG.SPECIAL_TOML
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +17,7 @@ use super::{SpecialToml, SpecialVersion};
 struct RawSpecialToml {
     root: Option<String>,
     version: Option<String>,
+    ignore: Option<Vec<String>>,
 }
 
 pub(super) fn load_special_toml(path: &Path) -> Result<SpecialToml> {
@@ -32,7 +33,7 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
     let key_lines = collect_top_level_key_lines(content);
 
     for key in table.keys() {
-        if key != "root" && key != "version" {
+        if key != "root" && key != "version" && key != "ignore" {
             let line = key_lines.get(key.as_str()).copied().unwrap_or(1);
             bail!("line {} uses unknown key `{key}`", line);
         }
@@ -55,6 +56,17 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
         let line = key_lines.get("version").copied().unwrap_or(1);
         config.version = SpecialVersion::parse(&version, Some(line))?;
         config.version_explicit = true;
+    }
+
+    if let Some(ignore_patterns) = raw.ignore {
+        let line = key_lines.get("ignore").copied().unwrap_or(1);
+        if ignore_patterns
+            .iter()
+            .any(|pattern| pattern.trim().is_empty())
+        {
+            bail!("line {} must not contain an empty ignore pattern", line);
+        }
+        config.ignore_patterns = ignore_patterns;
     }
 
     Ok(config)

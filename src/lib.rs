@@ -2,10 +2,11 @@
 @module SPECIAL
 Repository root application surface for `special`.
 */
-// @implements SPECIAL
+// @fileimplements SPECIAL
 mod annotation_syntax;
 mod cli;
 mod config;
+mod discovery;
 mod extractor;
 mod index;
 mod model;

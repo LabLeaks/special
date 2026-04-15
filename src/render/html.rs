@@ -2,235 +2,794 @@
 @module SPECIAL.RENDER.HTML
 Renders projected specs and modules into HTML views with shared styling and best-effort code highlighting.
 */
-// @implements SPECIAL.RENDER.HTML
-use crate::model::{ArchitectureKind, ModuleDocument, ModuleNode, SpecDocument, SpecNode};
+// @fileimplements SPECIAL.RENDER.HTML
+use askama::Template;
+
+use crate::model::{
+    ArchitectureCoverageSummary, ArchitectureKind, ModuleDocument, ModuleNode, SpecDocument,
+    SpecNode,
+};
+use crate::modules::analyze::explain::{
+    MetricExplanation, MetricExplanationKey, metric_explanation,
+};
 
 use super::common::{
-    MODULES_HTML_EMPTY, SPEC_HTML_CLOSE, SPEC_HTML_EMPTY, SPEC_HTML_STYLE, SPEC_HTML_TREE_OPEN,
-    escape_html, highlight_code_html, language_name_for_path, planned_badge_text,
+    MODULES_HTML_EMPTY, SPEC_HTML_EMPTY, SPEC_HTML_STYLE, escape_html, highlight_code_html,
+    language_name_for_path, planned_badge_text,
 };
 use super::projection::{project_document, project_module_document};
+use super::templates::render_template;
 
-pub(super) fn render_spec_html(document: &SpecDocument, verbose: bool) -> String {
-    let document = project_document(document, verbose);
-    let mut html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>special specs</title><style>{}</style></head><body><main><h1>special specs</h1><p class=\"lede\">Materialized semantic spec view for the current repository.</p>",
-        SPEC_HTML_STYLE
-    );
-
-    if document.nodes.is_empty() {
-        html.push_str(SPEC_HTML_EMPTY);
-        return html;
-    }
-
-    html.push_str(SPEC_HTML_TREE_OPEN);
-    for node in &document.nodes {
-        render_node_html(node, verbose, &mut html);
-    }
-    html.push_str(SPEC_HTML_CLOSE);
-    html
+#[derive(Clone)]
+struct HtmlCount {
+    label: &'static str,
+    value: String,
 }
 
-pub(super) fn render_module_html(document: &ModuleDocument, verbose: bool) -> String {
-    let document = project_module_document(document, verbose);
-    let mut html = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>special modules</title><style>{}</style></head><body><main><h1>special modules</h1><p class=\"lede\">Materialized architecture module view for the current repository.</p>",
-        SPEC_HTML_STYLE
-    );
-
-    if document.nodes.is_empty() {
-        html.push_str(MODULES_HTML_EMPTY);
-        return html;
-    }
-
-    html.push_str(SPEC_HTML_TREE_OPEN);
-    for node in &document.nodes {
-        render_module_node_html(node, verbose, &mut html);
-    }
-    html.push_str(SPEC_HTML_CLOSE);
-    html
+#[derive(Clone)]
+struct HtmlDetailSection {
+    label: &'static str,
+    location: String,
+    body_at: Option<String>,
+    body_html: Option<String>,
+    language_class: String,
 }
 
-fn render_node_html(node: &SpecNode, verbose: bool, html: &mut String) {
-    html.push_str("<li><div class=\"node\"><div class=\"node-header\"><span class=\"node-id\">");
-    html.push_str(&escape_html(&node.id));
-    html.push_str("</span>");
-    if node.kind() == crate::model::NodeKind::Group {
-        html.push_str("<span class=\"badge badge-group\">group</span>");
-    }
-    if node.is_planned() {
-        html.push_str("<span class=\"badge badge-planned\">");
-        html.push_str(&escape_html(&planned_badge_text(node.planned_release())));
-        html.push_str("</span>");
-    }
-    if node.is_unsupported() {
-        html.push_str("<span class=\"badge badge-unsupported\">unsupported</span>");
-    }
-    html.push_str("</div>");
+#[derive(Clone)]
+struct HtmlMetaLine {
+    label: &'static str,
+    value: String,
+}
 
-    if !node.text.is_empty() {
-        html.push_str("<div class=\"node-text\">");
-        html.push_str(&escape_html(&node.text));
-        html.push_str("</div>");
+#[derive(Clone)]
+struct HtmlExplanationSection {
+    label: &'static str,
+    plain: String,
+    precise: String,
+}
+
+#[derive(Template)]
+#[template(path = "render/counts_section.html")]
+struct CountsSectionHtmlTemplate<'a> {
+    counts: &'a [HtmlCount],
+}
+
+#[derive(Template)]
+#[template(path = "render/detail_sections.html")]
+struct DetailSectionsHtmlTemplate<'a> {
+    details: &'a [HtmlDetailSection],
+}
+
+#[derive(Template)]
+#[template(path = "render/meta_lines.html")]
+struct MetaLinesHtmlTemplate<'a> {
+    lines: &'a [HtmlMetaLine],
+}
+
+#[derive(Template)]
+#[template(path = "render/explanations.html")]
+struct ExplanationsHtmlTemplate<'a> {
+    explanations: &'a [HtmlExplanationSection],
+}
+
+#[derive(Template)]
+#[template(path = "render/spec_verbose.html")]
+struct SpecVerboseHtmlTemplate {
+    declared_at: String,
+    verifies_html: String,
+    attests_html: String,
+}
+
+#[derive(Template)]
+#[template(path = "render/module_verbose.html")]
+struct ModuleVerboseHtmlTemplate {
+    implementations_html: String,
+    meta_lines_html: String,
+    explanations_html: String,
+}
+
+#[derive(Template)]
+#[template(path = "render/coverage_section.html")]
+struct CoverageSectionHtmlTemplate<'a> {
+    counts_html: String,
+    verbose: bool,
+    uncovered_paths: &'a [String],
+    weak_paths: &'a [String],
+}
+
+#[derive(Template)]
+#[template(path = "render/spec_page.html")]
+struct SpecPageHtmlTemplate<'a> {
+    nodes: &'a [SpecNode],
+    verbose: bool,
+    style: &'static str,
+}
+
+impl SpecPageHtmlTemplate<'_> {
+    fn tree_html(&self) -> String {
+        self.nodes
+            .iter()
+            .map(|node| {
+                render_template(&SpecNodeHtmlTemplate {
+                    node,
+                    verbose: self.verbose,
+                })
+            })
+            .collect()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "render/spec_node.html")]
+struct SpecNodeHtmlTemplate<'a> {
+    node: &'a SpecNode,
+    verbose: bool,
+}
+
+impl SpecNodeHtmlTemplate<'_> {
+    fn node_id(&self) -> String {
+        self.node.id.clone()
     }
 
-    html.push_str("<div class=\"meta counts\">");
-    html.push_str(&format!("<span>verifies: {}</span>", node.verifies.len()));
-    html.push_str(&format!("<span>attests: {}</span>", node.attests.len()));
-    html.push_str("</div>");
+    fn node_text(&self) -> String {
+        self.node.text.clone()
+    }
 
-    if verbose {
-        html.push_str("<div class=\"meta\">declared at ");
-        html.push_str(&escape_html(&format!(
+    fn is_group(&self) -> bool {
+        self.node.kind() == crate::model::NodeKind::Group
+    }
+
+    fn planned_badge(&self) -> String {
+        planned_badge_text(self.node.planned_release())
+    }
+
+    fn declared_at(&self) -> String {
+        format!(
             "{}:{}",
-            node.location.path.display(),
-            node.location.line
-        )));
-        html.push_str("</div>");
+            self.node.location.path.display(),
+            self.node.location.line
+        )
+    }
 
-        for verify in &node.verifies {
-            html.push_str("<details><summary>@verifies ");
-            html.push_str(&escape_html(&format!(
-                "{}:{}",
-                verify.location.path.display(),
-                verify.location.line
-            )));
-            html.push_str("</summary>");
-            if let Some(body_location) = &verify.body_location {
-                html.push_str("<div class=\"meta\">body at ");
-                html.push_str(&escape_html(&format!(
+    fn verbose_section(&self) -> String {
+        if !self.verbose {
+            return String::new();
+        }
+        let verifies = self
+            .node
+            .verifies
+            .iter()
+            .map(|verify| HtmlDetailSection {
+                label: verify_label(verify),
+                location: format!(
                     "{}:{}",
-                    body_location.path.display(),
-                    body_location.line
-                )));
-                html.push_str("</div>");
-            }
-            if let Some(body) = &verify.body {
-                let language = language_name_for_path(
+                    verify.location.path.display(),
+                    verify.location.line
+                ),
+                body_at: verify
+                    .body_location
+                    .as_ref()
+                    .map(|location| format!("{}:{}", location.path.display(), location.line)),
+                body_html: verify.body.as_ref().map(|body| {
+                    let language = language_name_for_path(
+                        verify
+                            .body_location
+                            .as_ref()
+                            .map(|location| location.path.as_path())
+                            .unwrap_or(verify.location.path.as_path()),
+                    );
+                    highlight_code_html(body, language)
+                }),
+                language_class: language_name_for_path(
                     verify
                         .body_location
                         .as_ref()
                         .map(|location| location.path.as_path())
                         .unwrap_or(verify.location.path.as_path()),
-                );
-                html.push_str("<pre class=\"code-block\"><code class=\"language-");
-                html.push_str(language);
-                html.push_str("\">");
-                html.push_str(&highlight_code_html(body, language));
-                html.push_str("</code></pre>");
-            }
-            html.push_str("</details>");
-        }
+                )
+                .to_string(),
+            })
+            .collect::<Vec<_>>();
+        let attests = self
+            .node
+            .attests
+            .iter()
+            .map(|attest| HtmlDetailSection {
+                label: "@attests",
+                location: format!(
+                    "{}:{}",
+                    attest.location.path.display(),
+                    attest.location.line
+                ),
+                body_at: None,
+                body_html: attest.body.as_ref().map(|body| escape_html(body)),
+                language_class: "text".to_string(),
+            })
+            .collect::<Vec<_>>();
 
-        for attest in &node.attests {
-            html.push_str("<details><summary>@attests ");
-            html.push_str(&escape_html(&format!(
-                "{}:{}",
-                attest.location.path.display(),
-                attest.location.line
-            )));
-            html.push_str("</summary>");
-            if let Some(body) = &attest.body {
-                html.push_str("<pre class=\"code-block\"><code class=\"language-text\">");
-                html.push_str(&escape_html(body));
-                html.push_str("</code></pre>");
-            }
-            html.push_str("</details>");
-        }
+        render_template(&SpecVerboseHtmlTemplate {
+            declared_at: self.declared_at(),
+            verifies_html: render_template(&DetailSectionsHtmlTemplate { details: &verifies }),
+            attests_html: render_template(&DetailSectionsHtmlTemplate { details: &attests }),
+        })
     }
 
-    if !node.children.is_empty() {
-        html.push_str("<ul>");
-        for child in &node.children {
-            render_node_html(child, verbose, html);
+    fn children_section(&self) -> String {
+        if self.node.children.is_empty() {
+            return String::new();
         }
-        html.push_str("</ul>");
-    }
 
-    html.push_str("</div></li>");
+        let children: String = self
+            .node
+            .children
+            .iter()
+            .map(|child| {
+                render_template(&SpecNodeHtmlTemplate {
+                    node: child,
+                    verbose: self.verbose,
+                })
+            })
+            .collect();
+        format!("<ul>{children}</ul>")
+    }
 }
 
-fn render_module_node_html(node: &ModuleNode, verbose: bool, html: &mut String) {
-    html.push_str("<li><div class=\"node\"><div class=\"node-header\"><span class=\"node-id\">");
-    html.push_str(&escape_html(&node.id));
-    html.push_str("</span>");
-    if node.kind() == ArchitectureKind::Area {
-        html.push_str("<span class=\"badge badge-group\">area</span>");
-    }
-    if node.is_planned() {
-        html.push_str("<span class=\"badge badge-planned\">");
-        html.push_str(&escape_html(&planned_badge_text(node.planned_release())));
-        html.push_str("</span>");
-    }
-    if node.is_unsupported() {
-        html.push_str("<span class=\"badge badge-unsupported\">unsupported</span>");
-    }
-    html.push_str("</div>");
+#[derive(Template)]
+#[template(path = "render/module_page.html")]
+struct ModulePageHtmlTemplate<'a> {
+    document: &'a ModuleDocument,
+    verbose: bool,
+    style: &'static str,
+}
 
-    if !node.text.is_empty() {
-        html.push_str("<div class=\"node-text\">");
-        html.push_str(&escape_html(&node.text));
-        html.push_str("</div>");
+impl ModulePageHtmlTemplate<'_> {
+    fn coverage_section(&self) -> String {
+        self.document
+            .analysis
+            .as_ref()
+            .and_then(|analysis| analysis.coverage.as_ref())
+            .map(|coverage| format_architecture_coverage_html(coverage, self.verbose))
+            .unwrap_or_default()
     }
 
-    html.push_str("<div class=\"meta counts\">");
-    html.push_str(&format!(
-        "<span>implements: {}</span>",
-        node.implements.len()
-    ));
-    html.push_str("</div>");
+    fn tree_html(&self) -> String {
+        self.document
+            .nodes
+            .iter()
+            .map(|node| {
+                render_template(&ModuleNodeHtmlTemplate {
+                    node,
+                    verbose: self.verbose,
+                })
+            })
+            .collect()
+    }
+}
 
-    if verbose {
-        html.push_str("<div class=\"meta\">declared at ");
-        html.push_str(&escape_html(&format!(
+#[derive(Template)]
+#[template(path = "render/module_node.html")]
+struct ModuleNodeHtmlTemplate<'a> {
+    node: &'a ModuleNode,
+    verbose: bool,
+}
+
+impl ModuleNodeHtmlTemplate<'_> {
+    fn node_id(&self) -> String {
+        self.node.id.clone()
+    }
+
+    fn node_text(&self) -> String {
+        self.node.text.clone()
+    }
+
+    fn is_area(&self) -> bool {
+        self.node.kind() == ArchitectureKind::Area
+    }
+
+    fn planned_badge(&self) -> String {
+        planned_badge_text(self.node.planned_release())
+    }
+
+    fn declared_at(&self) -> String {
+        format!(
             "{}:{}",
-            node.location.path.display(),
-            node.location.line
-        )));
-        html.push_str("</div>");
+            self.node.location.path.display(),
+            self.node.location.line
+        )
+    }
 
-        for implementation in &node.implements {
-            html.push_str("<details><summary>@implements ");
-            html.push_str(&escape_html(&format!(
-                "{}:{}",
-                implementation.location.path.display(),
-                implementation.location.line
-            )));
-            html.push_str("</summary>");
-            if let Some(body_location) = &implementation.body_location {
-                html.push_str("<div class=\"meta\">body at ");
-                html.push_str(&escape_html(&format!(
-                    "{}:{}",
-                    body_location.path.display(),
-                    body_location.line
-                )));
-                html.push_str("</div>");
+    fn counts_section(&self) -> String {
+        let mut counts = vec![HtmlCount {
+            label: "implements",
+            value: self.node.implements.len().to_string(),
+        }];
+
+        if let Some(analysis) = &self.node.analysis {
+            if let Some(coverage) = &analysis.coverage {
+                counts.push(HtmlCount {
+                    label: "covered files",
+                    value: coverage.covered_files.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "weak files",
+                    value: coverage.weak_files.to_string(),
+                });
             }
-            if let Some(body) = &implementation.body {
-                let language = language_name_for_path(
-                    implementation
+            if let Some(metrics) = &analysis.metrics {
+                counts.push(HtmlCount {
+                    label: "owned lines",
+                    value: metrics.owned_lines.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "public items",
+                    value: metrics.public_items.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "internal items",
+                    value: metrics.internal_items.to_string(),
+                });
+            }
+            if let Some(complexity) = &analysis.complexity {
+                counts.push(HtmlCount {
+                    label: "complexity functions",
+                    value: complexity.function_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "cyclomatic total",
+                    value: complexity.total_cyclomatic.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "cyclomatic max",
+                    value: complexity.max_cyclomatic.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "cognitive total",
+                    value: complexity.total_cognitive.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "cognitive max",
+                    value: complexity.max_cognitive.to_string(),
+                });
+            }
+            if let Some(quality) = &analysis.quality {
+                counts.push(HtmlCount {
+                    label: "quality public functions",
+                    value: quality.public_function_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "quality parameters",
+                    value: quality.parameter_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "quality bool params",
+                    value: quality.bool_parameter_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "quality raw string params",
+                    value: quality.raw_string_parameter_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "quality panic sites",
+                    value: quality.panic_site_count.to_string(),
+                });
+            }
+            if let Some(item_signals) = &analysis.item_signals {
+                counts.push(HtmlCount {
+                    label: "item signals analyzed",
+                    value: item_signals.analyzed_items.to_string(),
+                });
+            }
+            if let Some(coupling) = &analysis.coupling {
+                counts.push(HtmlCount {
+                    label: "fan in",
+                    value: coupling.fan_in.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "fan out",
+                    value: coupling.fan_out.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "afferent coupling",
+                    value: coupling.afferent_coupling.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "efferent coupling",
+                    value: coupling.efferent_coupling.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "instability",
+                    value: format!("{:.2}", coupling.instability),
+                });
+                counts.push(HtmlCount {
+                    label: "external dependency targets",
+                    value: coupling.external_target_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "unresolved internal dependency targets",
+                    value: coupling.unresolved_internal_target_count.to_string(),
+                });
+            }
+            if let Some(dependencies) = &analysis.dependencies {
+                counts.push(HtmlCount {
+                    label: "dependency refs",
+                    value: dependencies.reference_count.to_string(),
+                });
+                counts.push(HtmlCount {
+                    label: "dependency targets",
+                    value: dependencies.distinct_targets.to_string(),
+                });
+            }
+        }
+
+        render_template(&CountsSectionHtmlTemplate { counts: &counts })
+    }
+
+    fn verbose_section(&self) -> String {
+        let implementations = if self.verbose {
+            self.node
+                .implements
+                .iter()
+                .map(|implementation| HtmlDetailSection {
+                    label: implementation_label(implementation),
+                    location: format!(
+                        "{}:{}",
+                        implementation.location.path.display(),
+                        implementation.location.line
+                    ),
+                    body_at: implementation
                         .body_location
                         .as_ref()
-                        .map(|location| location.path.as_path())
-                        .unwrap_or(implementation.location.path.as_path()),
-                );
-                html.push_str("<pre class=\"code-block\"><code class=\"language-");
-                html.push_str(language);
-                html.push_str("\">");
-                html.push_str(&highlight_code_html(body, language));
-                html.push_str("</code></pre>");
+                        .map(|location| format!("{}:{}", location.path.display(), location.line)),
+                    body_html: implementation.body.as_ref().map(|body| {
+                        let language = language_name_for_path(
+                            implementation
+                                .body_location
+                                .as_ref()
+                                .map(|location| location.path.as_path())
+                                .unwrap_or(implementation.location.path.as_path()),
+                        );
+                        highlight_code_html(body, language)
+                    }),
+                    language_class: language_name_for_path(
+                        implementation
+                            .body_location
+                            .as_ref()
+                            .map(|location| location.path.as_path())
+                            .unwrap_or(implementation.location.path.as_path()),
+                    )
+                    .to_string(),
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let mut meta_lines = if self.verbose {
+            vec![HtmlMetaLine {
+                label: "declared at",
+                value: self.declared_at(),
+            }]
+        } else {
+            Vec::new()
+        };
+        let mut explanations = Vec::new();
+        if let Some(analysis) = &self.node.analysis {
+            if self.verbose
+                && let Some(coverage) = &analysis.coverage
+            {
+                meta_lines.extend(coverage.covered_paths.iter().map(|path| HtmlMetaLine {
+                    label: "covered file",
+                    value: path.display().to_string(),
+                }));
+                meta_lines.extend(coverage.weak_paths.iter().map(|path| HtmlMetaLine {
+                    label: "weak file",
+                    value: path.display().to_string(),
+                }));
             }
-            html.push_str("</details>");
+            if self.verbose
+                && let Some(dependencies) = &analysis.dependencies
+            {
+                meta_lines.extend(dependencies.targets.iter().map(|target| HtmlMetaLine {
+                    label: "dependency target",
+                    value: format!("{} ({})", target.path, target.count),
+                }));
+            }
+            if self.verbose
+                && let Some(item_signals) = &analysis.item_signals
+            {
+                meta_lines.extend(
+                    item_signals
+                        .connected_items
+                        .iter()
+                        .map(|item| HtmlMetaLine {
+                            label: "connected item",
+                            value: format_item_signal(item),
+                        }),
+                );
+                meta_lines.extend(item_signals.outbound_heavy_items.iter().map(|item| {
+                    HtmlMetaLine {
+                        label: "outbound-heavy item",
+                        value: format_item_signal(item),
+                    }
+                }));
+                meta_lines.extend(item_signals.isolated_items.iter().map(|item| HtmlMetaLine {
+                    label: "isolated item",
+                    value: format_item_signal(item),
+                }));
+                meta_lines.extend(item_signals.highest_complexity_items.iter().map(|item| {
+                    HtmlMetaLine {
+                        label: "highest complexity item",
+                        value: format_item_signal(item),
+                    }
+                }));
+                meta_lines.extend(item_signals.parameter_heavy_items.iter().map(|item| {
+                    HtmlMetaLine {
+                        label: "parameter-heavy item",
+                        value: format_item_signal(item),
+                    }
+                }));
+                meta_lines.extend(item_signals.stringly_boundary_items.iter().map(|item| {
+                    HtmlMetaLine {
+                        label: "stringly boundary item",
+                        value: format_item_signal(item),
+                    }
+                }));
+                meta_lines.extend(
+                    item_signals
+                        .panic_heavy_items
+                        .iter()
+                        .map(|item| HtmlMetaLine {
+                            label: "panic-heavy item",
+                            value: format_item_signal(item),
+                        }),
+                );
+            }
+            if analysis.complexity.is_some() {
+                explanations.push(explanation_section(
+                    "cyclomatic total",
+                    MetricExplanationKey::CyclomaticTotal,
+                ));
+                explanations.push(explanation_section(
+                    "cyclomatic max",
+                    MetricExplanationKey::CyclomaticMax,
+                ));
+                explanations.push(explanation_section(
+                    "cognitive total",
+                    MetricExplanationKey::CognitiveTotal,
+                ));
+                explanations.push(explanation_section(
+                    "cognitive max",
+                    MetricExplanationKey::CognitiveMax,
+                ));
+            }
+            if analysis.quality.is_some() {
+                explanations.push(explanation_section(
+                    "quality public functions",
+                    MetricExplanationKey::QualityPublicFunctions,
+                ));
+                explanations.push(explanation_section(
+                    "quality parameters",
+                    MetricExplanationKey::QualityParameters,
+                ));
+                explanations.push(explanation_section(
+                    "quality bool params",
+                    MetricExplanationKey::QualityBoolParameters,
+                ));
+                explanations.push(explanation_section(
+                    "quality raw string params",
+                    MetricExplanationKey::QualityRawStringParameters,
+                ));
+                explanations.push(explanation_section(
+                    "quality panic sites",
+                    MetricExplanationKey::QualityPanicSites,
+                ));
+            }
+            if let Some(item_signals) = &analysis.item_signals {
+                if !item_signals.connected_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "connected item",
+                        MetricExplanationKey::ConnectedItem,
+                    ));
+                }
+                if !item_signals.outbound_heavy_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "outbound-heavy item",
+                        MetricExplanationKey::OutboundHeavyItem,
+                    ));
+                }
+                if !item_signals.isolated_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "isolated item",
+                        MetricExplanationKey::IsolatedItem,
+                    ));
+                }
+                if !item_signals.highest_complexity_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "highest complexity item",
+                        MetricExplanationKey::HighestComplexityItem,
+                    ));
+                }
+                if !item_signals.parameter_heavy_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "parameter-heavy item",
+                        MetricExplanationKey::ParameterHeavyItem,
+                    ));
+                }
+                if !item_signals.stringly_boundary_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "stringly boundary item",
+                        MetricExplanationKey::StringlyBoundaryItem,
+                    ));
+                }
+                if !item_signals.panic_heavy_items.is_empty() {
+                    explanations.push(explanation_section(
+                        "panic-heavy item",
+                        MetricExplanationKey::PanicHeavyItem,
+                    ));
+                }
+            }
+            if analysis.coupling.is_some() {
+                explanations.push(explanation_section("fan in", MetricExplanationKey::FanIn));
+                explanations.push(explanation_section("fan out", MetricExplanationKey::FanOut));
+                explanations.push(explanation_section(
+                    "afferent coupling",
+                    MetricExplanationKey::AfferentCoupling,
+                ));
+                explanations.push(explanation_section(
+                    "efferent coupling",
+                    MetricExplanationKey::EfferentCoupling,
+                ));
+                explanations.push(explanation_section(
+                    "instability",
+                    MetricExplanationKey::Instability,
+                ));
+            }
         }
+
+        render_template(&ModuleVerboseHtmlTemplate {
+            implementations_html: render_template(&DetailSectionsHtmlTemplate {
+                details: &implementations,
+            }),
+            meta_lines_html: render_template(&MetaLinesHtmlTemplate { lines: &meta_lines }),
+            explanations_html: render_template(&ExplanationsHtmlTemplate {
+                explanations: &explanations,
+            }),
+        })
     }
 
-    if !node.children.is_empty() {
-        html.push_str("<ul>");
-        for child in &node.children {
-            render_module_node_html(child, verbose, html);
+    fn children_section(&self) -> String {
+        if self.node.children.is_empty() {
+            return String::new();
         }
-        html.push_str("</ul>");
+
+        let children: String = self
+            .node
+            .children
+            .iter()
+            .map(|child| {
+                render_template(&ModuleNodeHtmlTemplate {
+                    node: child,
+                    verbose: self.verbose,
+                })
+            })
+            .collect();
+        format!("<ul>{children}</ul>")
+    }
+}
+
+pub(super) fn render_spec_html(document: &SpecDocument, verbose: bool) -> String {
+    let document = project_document(document, verbose);
+    if document.nodes.is_empty() {
+        return format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>special specs</title><style>{}</style></head><body><main><h1>special specs</h1><p class=\"lede\">Materialized semantic spec view for the current repository.</p>{}",
+            SPEC_HTML_STYLE, SPEC_HTML_EMPTY
+        );
     }
 
-    html.push_str("</div></li>");
+    render_template(&SpecPageHtmlTemplate {
+        nodes: &document.nodes,
+        verbose,
+        style: SPEC_HTML_STYLE,
+    })
+}
+
+pub(super) fn render_module_html(document: &ModuleDocument, verbose: bool) -> String {
+    let document = project_module_document(document, verbose);
+    if document.nodes.is_empty() {
+        return format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>special modules</title><style>{}</style></head><body><main><h1>special modules</h1><p class=\"lede\">Materialized architecture module view for the current repository.</p>{}",
+            SPEC_HTML_STYLE, MODULES_HTML_EMPTY
+        );
+    }
+
+    render_template(&ModulePageHtmlTemplate {
+        document: &document,
+        verbose,
+        style: SPEC_HTML_STYLE,
+    })
+}
+
+fn format_architecture_coverage_html(
+    coverage: &ArchitectureCoverageSummary,
+    verbose: bool,
+) -> String {
+    let counts = vec![
+        HtmlCount {
+            label: "analyzed files",
+            value: coverage.analyzed_files.to_string(),
+        },
+        HtmlCount {
+            label: "covered files",
+            value: coverage.covered_files.to_string(),
+        },
+        HtmlCount {
+            label: "uncovered files",
+            value: coverage.uncovered_files.to_string(),
+        },
+        HtmlCount {
+            label: "weak files",
+            value: coverage.weak_files.to_string(),
+        },
+    ];
+    let uncovered_paths = coverage
+        .uncovered_paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    let weak_paths = coverage
+        .weak_paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    render_template(&CoverageSectionHtmlTemplate {
+        counts_html: render_template(&CountsSectionHtmlTemplate { counts: &counts }),
+        verbose,
+        uncovered_paths: &uncovered_paths,
+        weak_paths: &weak_paths,
+    })
+}
+
+fn explanation_section(label: &'static str, key: MetricExplanationKey) -> HtmlExplanationSection {
+    let explanation: MetricExplanation = metric_explanation(key);
+    HtmlExplanationSection {
+        label,
+        plain: explanation.plain.to_string(),
+        precise: explanation.precise.to_string(),
+    }
+}
+
+fn format_item_signal(item: &crate::model::ModuleItemSignal) -> String {
+    format!(
+        "{} [{}; params {} (bool {}, raw string {}), internal refs {}, inbound {}, external refs {}, cyclomatic {}, cognitive {}, panic sites {}]",
+        item.name,
+        match item.kind {
+            crate::model::ModuleItemKind::Function => "function",
+            crate::model::ModuleItemKind::Method => "method",
+        },
+        item.parameter_count,
+        item.bool_parameter_count,
+        item.raw_string_parameter_count,
+        item.internal_refs,
+        item.inbound_internal_refs,
+        item.external_refs,
+        item.cyclomatic,
+        item.cognitive,
+        item.panic_site_count,
+    )
+}
+
+fn verify_label(verify: &crate::model::VerifyRef) -> &'static str {
+    if verify.body_location.is_none() && verify.body.is_some() {
+        "@fileverifies"
+    } else {
+        "@verifies"
+    }
+}
+
+fn implementation_label(implementation: &crate::model::ImplementRef) -> &'static str {
+    if implementation.body_location.is_none() {
+        "@fileimplements"
+    } else {
+        "@implements"
+    }
 }

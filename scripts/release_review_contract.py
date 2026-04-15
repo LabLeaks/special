@@ -1,6 +1,6 @@
 # @module SPECIAL.RELEASE_REVIEW.CONTRACT
 # Structured payload validation in `scripts/release_review_contract.py`.
-# @implements SPECIAL.RELEASE_REVIEW.CONTRACT
+# @fileimplements SPECIAL.RELEASE_REVIEW.CONTRACT
 from __future__ import annotations
 
 

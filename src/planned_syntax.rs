@@ -2,7 +2,7 @@
 @module SPECIAL.PLANNED_SYNTAX
 Shared parsing rules for `@planned` annotations, including exact boundary handling for standalone and inline forms.
 */
-// @implements SPECIAL.PLANNED_SYNTAX
+// @fileimplements SPECIAL.PLANNED_SYNTAX
 use crate::model::PlannedRelease;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

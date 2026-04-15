@@ -1,6 +1,6 @@
 # @module SPECIAL.RELEASE_REVIEW.PIPELINE.CONTEXT
 # Diff parsing and local code-context extraction for release review. This module does not choose review passes or build prompts.
-# @implements SPECIAL.RELEASE_REVIEW.PIPELINE.CONTEXT
+# @fileimplements SPECIAL.RELEASE_REVIEW.PIPELINE.CONTEXT
 from __future__ import annotations
 
 import re

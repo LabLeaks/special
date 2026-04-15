@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # @module SPECIAL.RELEASE_REVIEW
 # Local-only code-quality review entrypoint that invokes Codex, merges review results, and surfaces release warnings for tagging. Context planning and payload validation live in dedicated helper modules.
-# @implements SPECIAL.RELEASE_REVIEW
-# @verifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SPEC_OWNED
+# @fileimplements SPECIAL.RELEASE_REVIEW
+# @fileverifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SPEC_OWNED
 
 from __future__ import annotations
 

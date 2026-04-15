@@ -1,8 +1,26 @@
 /**
 @module SPECIAL.INDEX
 Coordinates dialect selection, lint assembly, and spec-tree materialization over parsed repo annotations.
+
+@spec SPECIAL.PARSE.MULTI_FILE_TREE
+special builds one spec tree from declarations spread across multiple files.
+
+@spec SPECIAL.PARSE.MULTI_FILE_TREE.MIXED_FILE_TYPES
+special builds one spec tree from declarations spread across supported file types.
+
+@spec SPECIAL.GROUPS
+special supports structural group nodes that organize claims without making direct claims of their own.
+
+@spec SPECIAL.GROUPS.STRUCTURAL_ONLY
+special treats @group as structure-only and does not require verifies, attests, or planned markers on group nodes.
+
+@spec SPECIAL.GROUPS.SPEC_MAY_HAVE_CHILDREN
+special allows @spec nodes to have children while still remaining direct claims that need their own verifies, attests, or planned marker.
+
+@spec SPECIAL.GROUPS.MUTUALLY_EXCLUSIVE
+special does not allow the same node id to be declared as both @spec and @group.
 */
-// @implements SPECIAL.INDEX
+// @fileimplements SPECIAL.INDEX
 use std::path::Path;
 
 use anyhow::Result;
@@ -19,17 +37,22 @@ use self::materialize::materialize_spec;
 
 pub fn build_spec_document(
     root: &Path,
+    ignore_patterns: &[String],
     version: SpecialVersion,
     filter: SpecFilter,
 ) -> Result<(SpecDocument, LintReport)> {
-    let parsed = parse_repo(root, parse_dialect(version))?;
+    let parsed = parse_repo(root, ignore_patterns, parse_dialect(version))?;
     let lint = lint_from_parsed(&parsed);
     let document = materialize_spec(&parsed, filter);
     Ok((document, lint))
 }
 
-pub fn build_lint_report(root: &Path, version: SpecialVersion) -> Result<LintReport> {
-    let parsed = parse_repo(root, parse_dialect(version))?;
+pub fn build_lint_report(
+    root: &Path,
+    ignore_patterns: &[String],
+    version: SpecialVersion,
+) -> Result<LintReport> {
+    let parsed = parse_repo(root, ignore_patterns, parse_dialect(version))?;
     Ok(lint_from_parsed(&parsed))
 }
 
@@ -463,6 +486,7 @@ Demo child.
 
         let (document, lint) = build_spec_document(
             &root,
+            &[],
             SpecialVersion::V1,
             SpecFilter {
                 include_planned: false,
@@ -519,6 +543,7 @@ Child claim.
 
         let (document, lint) = build_spec_document(
             &root,
+            &[],
             SpecialVersion::V1,
             SpecFilter {
                 include_planned: false,
@@ -570,6 +595,7 @@ Demo root.
 
         let (document, lint) = build_spec_document(
             &root,
+            &[],
             SpecialVersion::V1,
             SpecFilter {
                 include_planned: false,

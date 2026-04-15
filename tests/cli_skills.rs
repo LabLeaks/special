@@ -1,8 +1,89 @@
 /**
+@group SPECIAL.SKILLS.COMMAND
+Structure for the `special skills` command contract surface.
+
+@spec SPECIAL.SKILLS.COMMAND.HELP
+`special skills` prints the bundled skills overview, command shapes, and install guidance without mutating the repo.
+
+@spec SPECIAL.SKILLS.COMMAND.HELP.NO_ROOT_WARNING
+`special skills` does not emit project-root/config warnings when only printing the overview.
+
+@spec SPECIAL.SKILLS.COMMAND.HELP.INSTALL_DESTINATION_GUIDANCE
+`special skills` describes project, global, and custom install destinations without probing or requiring a valid destination up front.
+
+@spec SPECIAL.SKILLS.COMMAND.EMITS_SKILL_TO_STDOUT
+`special skills SKILL_ID` writes the bundled skill markdown to stdout without installing it.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND
+`special skills install` is the install entrypoint for bundled skills.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.ALL_SKILLS_DEFAULT
+without a skill id, `special skills install` installs every bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.ONE_SKILL
+with a skill id, `special skills install SKILL_ID` installs only that bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.VALIDATES_SKILL_ID_BEFORE_PROMPT
+`special skills install SKILL_ID` validates the skill id before prompting for a destination.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.PROMPTS_FOR_DESTINATION
+without an explicit destination flag, `special skills install` prompts for the destination.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.REJECTS_UNKNOWN_PROMPT_CHOICES
+the interactive destination prompt rejects unknown choices and reprompts.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.NON_INTERACTIVE_DESTINATION
+`special skills install` accepts `--destination` so installs can run non-interactively.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.FORCE_OVERWRITE
+`special skills install --force` overwrites conflicting installed skills without interactive confirmation.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.PROJECT_DESTINATION
+the `project` destination installs into the current repository’s `.agents/skills/` directory.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.GLOBAL_DESTINATION
+the `global` destination installs into `$CODEX_HOME/skills`, or `~/.codex/skills` when `CODEX_HOME` is unset.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.CUSTOM_DESTINATION
+the `custom` destination installs into a user-provided path.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALL_SUBCOMMAND.OVERWRITE_PROMPT
+without `--force`, `special skills install` prompts before overwriting an installed skill.
+
+@spec SPECIAL.SKILLS.COMMAND.WRITES_PROJECT_SKILLS_DIRECTORY
+project installs create the repo-local `.agents/skills/` directory when needed.
+
+@spec SPECIAL.SKILLS.COMMAND.USES_AGENT_SKILLS_LAYOUT
+installed bundled skills use the `.agents/skills/SKILL_ID/SKILL.md` layout.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_SHIP_CHANGE_SKILL
+`special skills install` includes the `ship-product-change` bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_DEFINE_PRODUCT_SPECS_SKILL
+`special skills install` includes the `define-product-specs` bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_VALIDATE_PRODUCT_CONTRACT_SKILL
+`special skills install` includes the `validate-product-contract` bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_VALIDATE_ARCHITECTURE_IMPLEMENTATION_SKILL
+`special skills install` includes the `validate-architecture-implementation` bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_LIVE_STATE_SKILL
+`special skills install` includes the `live-state` bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_PLANNED_WORK_SKILL
+`special skills install` includes the `planned-work` bundled skill.
+
+@spec SPECIAL.SKILLS.COMMAND.BUNDLES_REFERENCES_FOR_PROGRESSIVE_DISCLOSURE
+installed bundled skills keep their reference files for progressive disclosure.
+
+@spec SPECIAL.SKILLS.COMMAND.INCLUDES_TRIGGER_EVAL_FIXTURES
+installed bundled skills include trigger-eval fixtures where the bundled skill ships them.
+
 @module SPECIAL.TESTS.CLI_SKILLS
 `special skills` command tests in `tests/cli_skills.rs`.
 */
-// @implements SPECIAL.TESTS.CLI_SKILLS
+// @fileimplements SPECIAL.TESTS.CLI_SKILLS
 #[path = "support/cli.rs"]
 mod support;
 

@@ -2,12 +2,14 @@
 @module SPECIAL.MODULES.MATERIALIZE
 Builds the visible architecture tree from parsed module declarations and `@implements` attachments. This module does not read source files or emit diagnostics.
 */
-// @implements SPECIAL.MODULES.MATERIALIZE
+// @fileimplements SPECIAL.MODULES.MATERIALIZE
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
     ImplementRef, ModuleDecl, ModuleDocument, ModuleFilter, ModuleNode, ParsedArchitecture,
 };
+
+use super::analyze::ArchitectureAnalysis;
 
 #[derive(Debug, Clone)]
 struct FlatModuleNode {
@@ -18,6 +20,7 @@ struct FlatModuleNode {
 pub(super) fn build_module_document(
     parsed: &ParsedArchitecture,
     filter: ModuleFilter,
+    analysis: Option<&ArchitectureAnalysis>,
 ) -> ModuleDocument {
     let mut flat_nodes: BTreeMap<String, FlatModuleNode> = BTreeMap::new();
 
@@ -71,12 +74,15 @@ pub(super) fn build_module_document(
         children.sort();
     }
 
-    let mut nodes = build_children(None, &children_map, &flat_nodes);
+    let mut nodes = build_children(None, &children_map, &flat_nodes, analysis);
     if let Some(scope) = filter.scope.as_deref() {
         nodes = scoped_nodes(nodes, scope);
     }
 
-    ModuleDocument { nodes }
+    ModuleDocument {
+        nodes,
+        analysis: analysis.map(|analysis| analysis.summary.clone()),
+    }
 }
 
 impl ModuleFilter {
@@ -102,6 +108,7 @@ fn build_children(
     parent: Option<String>,
     children_map: &BTreeMap<Option<String>, Vec<String>>,
     flat_nodes: &BTreeMap<String, FlatModuleNode>,
+    analysis: Option<&ArchitectureAnalysis>,
 ) -> Vec<ModuleNode> {
     let mut result = Vec::new();
 
@@ -111,7 +118,10 @@ fn build_children(
                 result.push(ModuleNode::new(
                     node.decl.clone(),
                     node.implements.clone(),
-                    build_children(Some(child_id.clone()), children_map, flat_nodes),
+                    analysis
+                        .and_then(|analysis| analysis.modules.get(child_id))
+                        .cloned(),
+                    build_children(Some(child_id.clone()), children_map, flat_nodes, analysis),
                 ));
             }
         }

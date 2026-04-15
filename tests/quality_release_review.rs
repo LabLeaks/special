@@ -1,8 +1,74 @@
 /**
+@group SPECIAL.QUALITY.RUST
+Rust quality contract surface for clippy and release-review tooling.
+
+@group SPECIAL.QUALITY.RUST.RELEASE_REVIEW
+Rust release-review contract surface.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SPEC_OWNED
+the release-review wrapper script carries the proving surface for the release-review contract.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.DEFAULT_MODEL
+the default release-review mode uses `gpt-5.3-codex`.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.FAST_MODEL
+the fast release-review mode uses `gpt-5.3-codex-spark`.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SMART_MODEL
+the smart release-review mode uses `gpt-5.4`.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.STRUCTURED_OUTPUT
+the release-review wrapper validates structured warning output against the review contract.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.CODE_ONLY_SURFACE
+release review operates only on the repo’s code/tooling surface, not general product/spec/architecture prose.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.READ_ONLY_SANDBOX
+release review invokes Codex in a read-only sandbox.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.NO_WEB
+release review disables web access.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.PROJECT_ROOT_READ_SCOPE
+release review grants read access only to the project root.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.DIFF_SCOPED_BY_DEFAULT
+without `--full`, release review is diff-scoped against the baseline tag.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.JJ_LATEST_TAG_BASELINE
+release review uses the latest reachable semver tag as the default baseline.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SYNTAX_AWARE_CHANGED_CONTEXT
+release review extracts syntax-aware changed context for supported languages.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.INPUT_BUDGET
+release review budgets prompt input before invoking Codex.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.CHUNKED_CONTEXT
+release review splits review context into chunks when needed to fit the input budget.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SKIPPED_CHUNK_WARNINGS
+release review emits runner warnings when it must skip or degrade chunk context.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.FULL_SCAN_MODE
+`--full` makes release review operate on the full supported review surface instead of the diff-scoped default.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.WARN_ONLY
+release review reports findings as warnings rather than failing the wrapper on model findings alone.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.LOCAL_ONLY
+release review runs locally and does not publish findings to external services.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.NO_BYTECODE_ARTIFACTS
+release review does not leave Python bytecode artifacts in the repo.
+
+@spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.MANUAL_ONLY
+release review runs only when invoked manually.
+
 @module SPECIAL.TESTS.QUALITY_RELEASE_REVIEW
 Release-review wrapper tests in `tests/quality_release_review.rs`.
 */
-// @implements SPECIAL.TESTS.QUALITY_RELEASE_REVIEW
+// @fileimplements SPECIAL.TESTS.QUALITY_RELEASE_REVIEW
 #[path = "support/quality.rs"]
 mod support;
 
@@ -652,9 +718,8 @@ fn release_review_is_not_wired_into_ci_workflows_or_release_publication() {
         );
     }
 
-    let tag_release =
-        fs::read_to_string(support::repo_root().join("scripts/tag-release.py"))
-            .expect("tag-release.py should be readable");
+    let tag_release = fs::read_to_string(support::repo_root().join("scripts/tag-release.py"))
+        .expect("tag-release.py should be readable");
     assert!(
         !tag_release.contains("review-rust-release-style.py"),
         "release publication should not invoke the local codex review script"

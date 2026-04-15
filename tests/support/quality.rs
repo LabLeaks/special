@@ -3,15 +3,18 @@
 @module SPECIAL.TESTS.SUPPORT.QUALITY
 Release-review/tag-flow test helpers in `tests/support/quality.rs`.
 */
-// @implements SPECIAL.TESTS.SUPPORT.QUALITY
+// @fileimplements SPECIAL.TESTS.SUPPORT.QUALITY
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+static RELEASE_MOCK_LOG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -482,7 +485,11 @@ fn release_mock_log_path() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    repo_root().join(format!(".tmp-release-mock-log-{nanos}"))
+    let counter = RELEASE_MOCK_LOG_COUNTER.fetch_add(1, Ordering::Relaxed);
+    repo_root().join(format!(
+        ".tmp-release-mock-log-{}-{nanos}-{counter}",
+        std::process::id()
+    ))
 }
 
 fn read_release_tag_mock_log(path: &PathBuf) -> Vec<Value> {

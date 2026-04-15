@@ -1,6 +1,6 @@
 # @module SPECIAL.RELEASE_REVIEW.TOOLING
 # Shared release-tool helpers in `scripts/release_tooling.py`.
-# @implements SPECIAL.RELEASE_REVIEW.TOOLING
+# @fileimplements SPECIAL.RELEASE_REVIEW.TOOLING
 from __future__ import annotations
 
 import re

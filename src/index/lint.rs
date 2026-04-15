@@ -2,7 +2,7 @@
 @module SPECIAL.INDEX.LINT
 Builds spec lint diagnostics from parsed annotations. This module does not choose parser dialects or materialize spec trees.
 */
-// @implements SPECIAL.INDEX.LINT
+// @fileimplements SPECIAL.INDEX.LINT
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{Diagnostic, DiagnosticSeverity, LintReport, NodeKind, ParsedRepo};

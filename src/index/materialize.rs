@@ -2,7 +2,7 @@
 @module SPECIAL.INDEX.MATERIALIZE
 Builds the visible spec tree from parsed annotations and support attachments. This module does not parse source files or emit lint diagnostics.
 */
-// @implements SPECIAL.INDEX.MATERIALIZE
+// @fileimplements SPECIAL.INDEX.MATERIALIZE
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{NodeKind, ParsedRepo, SpecDecl, SpecDocument, SpecFilter, SpecNode, VerifyRef};

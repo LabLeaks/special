@@ -77,7 +77,7 @@ special lint reports `@implements` references to unknown module ids.
 @spec SPECIAL.LINT_COMMAND.INTERMEDIATE_MODULES
 special lint reports missing intermediate module ids in dot-path hierarchies.
 */
-// @implements SPECIAL.CLI.SPEC
+// @fileimplements SPECIAL.CLI.SPEC
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -118,6 +118,7 @@ pub(super) fn execute_spec(args: SpecArgs, current_dir: &Path) -> Result<ExitCod
     let root = resolution.root.clone();
     let (document, mut lint) = build_spec_document(
         &root,
+        &resolution.ignore_patterns,
         resolution.version,
         SpecFilter {
             include_planned: args.include_all,
@@ -151,10 +152,10 @@ pub(super) fn execute_lint(current_dir: &Path) -> Result<ExitCode> {
         eprintln!("{warning}");
     }
     let root = resolution.root.clone();
-    let mut report = build_lint_report(&root, resolution.version)?;
+    let mut report = build_lint_report(&root, &resolution.ignore_patterns, resolution.version)?;
     report
         .diagnostics
-        .extend(build_module_lint_report(&root)?.diagnostics);
+        .extend(build_module_lint_report(&root, &resolution.ignore_patterns)?.diagnostics);
     add_config_lint_warnings(&mut report, &resolution);
     normalize_report(&mut report);
     let clean = !report.has_errors();

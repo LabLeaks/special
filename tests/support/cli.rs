@@ -3,7 +3,7 @@
 @module SPECIAL.TESTS.SUPPORT.CLI
 CLI test helpers and fixture writers in `tests/support/cli.rs`.
 */
-// @implements SPECIAL.TESTS.SUPPORT.CLI
+// @fileimplements SPECIAL.TESTS.SUPPORT.CLI
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -122,6 +122,21 @@ pub fn write_planned_release_fixture(root: &Path) {
         include_str!("../fixtures/cli/planned_release/specs.txt"),
     )
     .expect("planned release fixture should be written");
+}
+
+pub fn write_file_verify_fixture(root: &Path) {
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("specs.rs"),
+        "/**\n@spec DEMO\nDemo root claim.\n*/\n",
+    )
+    .expect("file verify spec fixture should be written");
+    fs::write(
+        root.join("checks.rs"),
+        "// @fileverifies DEMO\nfn verifies_demo_root() {}\n",
+    )
+    .expect("file verify fixture should be written");
 }
 
 pub fn write_lint_error_fixture(root: &Path) {
@@ -253,9 +268,192 @@ pub fn write_modules_fixture(root: &Path) {
     .expect("architecture fixture should be written");
     fs::write(
         root.join("main.rs"),
-        "// @implements DEMO\n\n// @implements DEMO.LIVE\nfn implements_demo_live() {}\n",
+        "// @fileimplements DEMO\n\n// @implements DEMO.LIVE\nfn implements_demo_live() {}\n",
     )
     .expect("module implementation fixture should be written");
+}
+
+pub fn write_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn demo_public() {}\n\nfn demo_private() {}\n",
+    )
+    .expect("main module implementation fixture should be written");
+    fs::write(root.join("hidden.rs"), "fn hidden_subsystem() {}\n")
+        .expect("hidden subsystem fixture should be written");
+}
+
+pub fn write_item_scoped_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "const BEFORE: usize = 1;\n\n// @implements DEMO\npub fn demo_public() {}\n\nfn hidden_helper() {}\n",
+    )
+    .expect("item-scoped module analysis fixture should be written");
+}
+
+pub fn write_source_local_module_analysis_fixture(root: &Path) {
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("main.rs"),
+        "/**\n@module DEMO\nDemo module.\n*/\n// @fileimplements DEMO\npub fn demo_public() {}\n\nfn demo_private() {}\n",
+    )
+    .expect("source-local module analysis fixture should be written");
+}
+
+pub fn write_dependency_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\nuse crate::shared::util::helper;\nuse serde_json::Value;\n\npub fn demo_public() -> Value {\n    helper()\n}\n",
+    )
+    .expect("dependency analysis fixture should be written");
+}
+
+pub fn write_complexity_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn simple() {}\n\nfn branchy(a: bool, b: bool) {\n    if a && b {\n        for _i in 0..1 {}\n    } else if a || b {\n        while a {\n            break;\n        }\n    }\n}\n",
+    )
+    .expect("complexity analysis fixture should be written");
+}
+
+pub fn write_cognitive_complexity_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn simple() {}\n\nfn nested(flag: bool) {\n    if flag {\n        for _i in 0..1 {}\n    }\n}\n",
+    )
+    .expect("cognitive complexity analysis fixture should be written");
+}
+
+pub fn write_quality_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn open_widget(id: &str, name: String, force: bool) {\n    if force {\n        panic!(\"forced\");\n    }\n}\n",
+    )
+    .expect("quality analysis fixture should be written");
+}
+
+pub fn write_coupling_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@area DEMO`\nDemo root.\n\n### `@module DEMO.API`\nAPI module.\n\n### `@module DEMO.SHARED`\nShared module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("api.rs"),
+        "// @fileimplements DEMO.API\nuse crate::shared::helper;\n\npub fn run() {\n    helper();\n}\n",
+    )
+    .expect("api analysis fixture should be written");
+    fs::write(
+        root.join("shared.rs"),
+        "// @fileimplements DEMO.SHARED\npub fn helper() {}\n",
+    )
+    .expect("shared analysis fixture should be written");
+}
+
+pub fn write_item_signals_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn entry() {\n    core_helper();\n}\n\nfn core_helper() {\n    helper_leaf();\n    helper_leaf();\n}\n\nfn helper_leaf() {}\n\npub fn outbound_heavy(id: &str, path: String, force: bool) {\n    helper_leaf();\n    if force && id.is_empty() {\n        panic!(\"forced\");\n    }\n    std::env::var(\"X\").ok();\n    std::fs::read_to_string(path).ok();\n}\n\nfn complex_hotspot(flag: bool, extra: bool) {\n    if flag {\n        for _i in 0..1 {\n            if extra || flag {\n                helper_leaf();\n            }\n        }\n    } else if extra {\n        while flag {\n            break;\n        }\n    }\n}\n\nfn isolated_external() {\n    std::process::id();\n}\n",
+    )
+    .expect("item signals analysis fixture should be written");
+}
+
+pub fn write_item_scoped_item_signals_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @implements DEMO\nfn connected() {\n    shared();\n}\n\n// @implements DEMO\nfn shared() {}\n\n// @implements DEMO\nfn isolated_external() {\n    std::process::id();\n}\n",
+    )
+    .expect("item-scoped item signals fixture should be written");
+}
+
+pub fn write_markdown_declarations_fixture(root: &Path) {
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::create_dir_all(root.join("docs")).expect("docs dir should be created");
+
+    fs::write(
+        root.join("docs/specs.md"),
+        "### `@group DEMO`\nDemo root group.\n\n### `@spec DEMO.MARKDOWN`\nDemo root claim.\n",
+    )
+    .expect("markdown specs fixture should be written");
+    fs::write(
+        root.join("docs/architecture.md"),
+        "### `@area DEMO`\nDemo architecture root.\n\n### `@area DEMO.AREA`\nDemo architecture area.\n\n### `@module DEMO.MODULE`\nDemo architecture module.\n",
+    )
+    .expect("markdown modules fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO.MODULE\nfn implements_demo_module() {}\n",
+    )
+    .expect("markdown module implementation fixture should be written");
 }
 
 pub fn write_unsupported_module_fixture(root: &Path) {
@@ -269,7 +467,7 @@ pub fn write_unsupported_module_fixture(root: &Path) {
     .expect("architecture fixture should be written");
     fs::write(
         root.join("main.rs"),
-        "// @implements DEMO\nfn implements_demo() {}\n",
+        "// @fileimplements DEMO\nfn implements_demo() {}\n",
     )
     .expect("module implementation fixture should be written");
 }
@@ -301,7 +499,7 @@ pub fn write_area_implements_fixture(root: &Path) {
     .expect("architecture fixture should be written");
     fs::write(
         root.join("main.rs"),
-        "// @implements DEMO\nfn implements_demo() {}\n",
+        "// @fileimplements DEMO\nfn implements_demo() {}\n",
     )
     .expect("area implementation fixture should be written");
 }
@@ -366,7 +564,7 @@ pub fn write_implements_with_trailing_content_fixture(root: &Path) {
     .expect("architecture fixture should be written");
     fs::write(
         root.join("main.rs"),
-        "// @implements DEMO extra\nfn implements_demo() {}\n",
+        "// @implements DEMO extra\n// @fileimplements DEMO extra\nfn implements_demo() {}\n",
     )
     .expect("trailing implementation fixture should be written");
 }
@@ -393,7 +591,7 @@ pub fn write_duplicate_file_scoped_implements_fixture(root: &Path) {
     .expect("architecture fixture should be written");
     fs::write(
         root.join("main.rs"),
-        "// @implements DEMO\n// @implements DEMO.OTHER\nfn implements_demo() {}\n",
+        "// @fileimplements DEMO\n// @fileimplements DEMO.OTHER\nfn implements_demo() {}\n",
     )
     .expect("duplicate file-scoped implementation fixture should be written");
 }
@@ -419,7 +617,7 @@ pub fn write_source_local_modules_fixture(root: &Path) {
         .expect("special.toml should be written");
     fs::write(
         root.join("feature.rs"),
-        "/**\n@module DEMO\nDemo root module.\n*/\n// @implements DEMO\n\n/**\n@module DEMO.LOCAL\nLocal child module.\n*/\n// @implements DEMO.LOCAL\nfn implements_demo_local() {}\n",
+        "/**\n@module DEMO\nDemo root module.\n*/\n// @fileimplements DEMO\n\n/**\n@module DEMO.LOCAL\nLocal child module.\n*/\n// @implements DEMO.LOCAL\nfn implements_demo_local() {}\n",
     )
     .expect("source-local architecture fixture should be written");
 }
@@ -429,7 +627,7 @@ pub fn write_mixed_purpose_source_local_module_fixture(root: &Path) {
         .expect("special.toml should be written");
     fs::write(
         root.join("feature.rs"),
-        "/**\nHuman overview for maintainers.\n@module DEMO\nRenders the demo export surface.\n@param file output path\n*/\n// @implements DEMO\nfn implements_demo() {}\n",
+        "/**\nHuman overview for maintainers.\n@module DEMO\nRenders the demo export surface.\n@param file output path\n*/\n// @fileimplements DEMO\nfn implements_demo() {}\n",
     )
     .expect("mixed-purpose source-local architecture fixture should be written");
 }

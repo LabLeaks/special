@@ -2,7 +2,7 @@
 @module SPECIAL.MODULES.LINT
 Builds module lint diagnostics from parsed architecture declarations and implementation attachments. This module does not read source files or materialize the module tree.
 */
-// @implements SPECIAL.MODULES.LINT
+// @fileimplements SPECIAL.MODULES.LINT
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -57,7 +57,7 @@ pub(super) fn build_module_lint_report(parsed: &ParsedArchitecture) -> LintRepor
                 path: implementation.location.path.clone(),
                 line: implementation.location.line,
                 message: format!(
-                    "unknown module id `{}` referenced by @implements",
+                    "unknown module id `{}` referenced by @implements or @fileimplements",
                     implementation.module_id
                 ),
             }),
@@ -66,7 +66,7 @@ pub(super) fn build_module_lint_report(parsed: &ParsedArchitecture) -> LintRepor
                 path: implementation.location.path.clone(),
                 line: implementation.location.line,
                 message: format!(
-                    "@implements may only reference @module ids; `{}` is declared as @area",
+                    "@implements and @fileimplements may only reference @module ids; `{}` is declared as @area",
                     implementation.module_id
                 ),
             }),
@@ -99,7 +99,7 @@ pub(super) fn build_module_lint_report(parsed: &ParsedArchitecture) -> LintRepor
                     path: implementation.location.path.clone(),
                     line: implementation.location.line,
                     message: format!(
-                        "duplicate file-scoped @implements; first declared on line {}",
+                        "duplicate @fileimplements; first declared on line {}",
                         previous_line
                     ),
                 });
@@ -120,7 +120,7 @@ pub(super) fn build_module_lint_report(parsed: &ParsedArchitecture) -> LintRepor
                 path: module.location.path.clone(),
                 line: module.location.line,
                 message: format!(
-                    "live module `{}` has no direct @implements attachment",
+                    "live module `{}` has no direct @implements or @fileimplements attachment",
                     module.id
                 ),
             });

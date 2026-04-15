@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @module SPECIAL.DISTRIBUTION.RELEASE_FLOW
 # Local release publication flow in `scripts/tag-release.py`.
-# @implements SPECIAL.DISTRIBUTION.RELEASE_FLOW
+# @fileimplements SPECIAL.DISTRIBUTION.RELEASE_FLOW
 
 from __future__ import annotations
 

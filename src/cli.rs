@@ -17,7 +17,7 @@ special help text presents the architecture module command as `special modules`.
 @spec SPECIAL.HELP.SKILLS_COMMAND_SHAPES
 special help text explains the `skills`, `skills SKILL_ID`, and `skills install [SKILL_ID]` command shapes.
 */
-// @implements SPECIAL.CLI
+// @fileimplements SPECIAL.CLI
 use std::env;
 use std::process::ExitCode;
 

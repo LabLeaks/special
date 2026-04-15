@@ -2,7 +2,7 @@
 @module SPECIAL.CONFIG
 Coordinates `special.toml` parsing and project-root discovery for the rest of the application.
 */
-// @implements SPECIAL.CONFIG
+// @fileimplements SPECIAL.CONFIG
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -56,6 +56,7 @@ pub struct RootResolution {
     pub version: SpecialVersion,
     pub version_explicit: bool,
     pub config_path: Option<PathBuf>,
+    pub ignore_patterns: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -63,6 +64,7 @@ pub(super) struct SpecialToml {
     root: Option<PathBuf>,
     version: SpecialVersion,
     version_explicit: bool,
+    ignore_patterns: Vec<String>,
 }
 
 impl RootResolution {

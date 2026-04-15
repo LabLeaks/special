@@ -2,7 +2,7 @@
 @module SPECIAL.SKILLS.INSTALL
 Resolves install destinations and executes staged bundled-skill filesystem installs with overwrite and rollback handling. This module does not define the bundled skill catalog or command help text.
 */
-// @implements SPECIAL.SKILLS.INSTALL
+// @fileimplements SPECIAL.SKILLS.INSTALL
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

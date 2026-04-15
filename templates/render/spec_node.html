@@ -1,0 +1,17 @@
+<li>
+  <div class="node">
+    <div class="node-header">
+      <span class="node-id">{{ self.node_id() }}</span>
+      {% if self.is_group() %}<span class="badge badge-group">group</span>{% endif %}
+      {% if node.is_planned() %}<span class="badge badge-planned">{{ self.planned_badge() }}</span>{% endif %}
+      {% if node.is_unsupported() %}<span class="badge badge-unsupported">unsupported</span>{% endif %}
+    </div>
+    {% if !node.text.is_empty() %}<div class="node-text">{{ self.node_text() }}</div>{% endif %}
+    <div class="meta counts">
+      <span>verifies: {{ node.verifies.len() }}</span>
+      <span>attests: {{ node.attests.len() }}</span>
+    </div>
+    {{ self.verbose_section()|safe }}
+    {{ self.children_section()|safe }}
+  </div>
+</li>

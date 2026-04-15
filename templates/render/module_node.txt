@@ -1,0 +1,4 @@
+{{ self.indent() }}{{ node.id }}{% if self.is_area() %} [area]{% endif %}{% if node.is_planned() %} [{{ self.planned_badge() }}]{% endif %}{% if node.is_unsupported() %} [unsupported]{% endif %}
+{% if !node.text.is_empty() %}{{ self.indent() }}  {{ node.text }}
+{% endif %}{{ self.indent() }}  implements: {{ node.implements.len() }}
+{{ self.analysis_section() }}{{ self.verbose_section() }}{{ self.children_section() }}

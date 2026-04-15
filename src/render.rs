@@ -2,7 +2,7 @@
 @module SPECIAL.RENDER
 Coordinates shared projection policy and output backends for text, JSON, and HTML views over specs, modules, and lint diagnostics.
 */
-// @implements SPECIAL.RENDER
+// @fileimplements SPECIAL.RENDER
 use anyhow::Result;
 
 use crate::model::{LintReport, ModuleDocument, SpecDocument};
@@ -11,6 +11,7 @@ mod common;
 mod html;
 mod json;
 mod projection;
+mod templates;
 mod text;
 
 pub fn render_spec_text(document: &SpecDocument, verbose: bool) -> String {

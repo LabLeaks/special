@@ -1,16 +1,40 @@
 /**
+@group SPECIAL.DISTRIBUTION.RELEASE_FLOW
+special local release publication flow.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.CHECKLIST
+before publishing, the release script interactively confirms easy-to-forget release tasks such as updating `README.md` and `CHANGELOG.md`.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.YES_BYPASSES_CHECKLIST
+the release script accepts `--yes` to bypass the interactive release checklist.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.DRY_RUN
+the release script dry-run prints the planned checklist and publication commands without creating a tag, moving the main bookmark, pushing to origin, or updating Homebrew.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.MATCHES_MANIFEST_VERSION
+the release script requires the requested tag version to exactly match the current `Cargo.toml` package version.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.PUSHES_MAIN_AND_TAG
+the release script publishes the release revision by pushing both the `main` bookmark and the release tag to origin.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.VERIFIES_GITHUB_RELEASE
+after pushing the release tag, the release script waits for the GitHub release artifacts to publish and verifies the release asset set.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.UPDATES_HOMEBREW
+after the GitHub release is published, the release script updates the Homebrew tap formula for the current version and verifies the published formula against the release assets.
+
 @module SPECIAL.TESTS.QUALITY_TAG_RELEASE
 Release publication flow tests in `tests/quality_tag_release.rs`.
 */
-// @implements SPECIAL.TESTS.QUALITY_TAG_RELEASE
+// @fileimplements SPECIAL.TESTS.QUALITY_TAG_RELEASE
 #[path = "support/quality.rs"]
 mod support;
 
 use serde_json::Value;
 
 use support::{
-    current_package_version, current_python_executable, release_tag_command_output, release_tag_dry_run,
-    release_tag_live_output, release_tag_live_output_with_input,
+    current_package_version, current_python_executable, release_tag_command_output,
+    release_tag_dry_run, release_tag_live_output, release_tag_live_output_with_input,
 };
 
 #[test]
@@ -22,7 +46,9 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
 
     assert_eq!(payload["tag"], Value::String(format!("v{version}")));
     assert!(
-        payload["revision"].as_str().is_some_and(|value| !value.is_empty()),
+        payload["revision"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
         "revision should be a non-empty string"
     );
     assert_eq!(

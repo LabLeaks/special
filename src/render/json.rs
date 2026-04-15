@@ -2,7 +2,7 @@
 @module SPECIAL.RENDER.JSON
 Renders projected specs and modules into structured JSON output.
 */
-// @implements SPECIAL.RENDER.JSON
+// @fileimplements SPECIAL.RENDER.JSON
 use anyhow::Result;
 
 use crate::model::{ModuleDocument, SpecDocument};

@@ -2,17 +2,19 @@
 @module SPECIAL.ANNOTATION_SYNTAX
 Shared recognition rules for reserved `special` annotations and foreign tag boundaries inside ordinary comments. This module does not extract comments or build spec or module trees.
 */
-// @implements SPECIAL.ANNOTATION_SYNTAX
+// @fileimplements SPECIAL.ANNOTATION_SYNTAX
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReservedSpecialAnnotation {
     Spec,
     Group,
     Planned,
     Verifies,
+    FileVerifies,
     Attests,
     Module,
     Area,
     Implements,
+    FileImplements,
 }
 
 impl ReservedSpecialAnnotation {
@@ -22,10 +24,12 @@ impl ReservedSpecialAnnotation {
             Self::Group => "@group",
             Self::Planned => "@planned",
             Self::Verifies => "@verifies",
+            Self::FileVerifies => "@fileverifies",
             Self::Attests => "@attests",
             Self::Module => "@module",
             Self::Area => "@area",
             Self::Implements => "@implements",
+            Self::FileImplements => "@fileimplements",
         }
     }
 }
@@ -35,10 +39,12 @@ const RESERVED_SPECIAL_ANNOTATIONS: &[ReservedSpecialAnnotation] = &[
     ReservedSpecialAnnotation::Group,
     ReservedSpecialAnnotation::Planned,
     ReservedSpecialAnnotation::Verifies,
+    ReservedSpecialAnnotation::FileVerifies,
     ReservedSpecialAnnotation::Attests,
     ReservedSpecialAnnotation::Module,
     ReservedSpecialAnnotation::Area,
     ReservedSpecialAnnotation::Implements,
+    ReservedSpecialAnnotation::FileImplements,
 ];
 
 pub(crate) fn reserved_special_annotation(text: &str) -> Option<ReservedSpecialAnnotation> {
@@ -104,6 +110,10 @@ mod tests {
         assert!(is_reserved_special_annotation("@planned 0.4.0"));
         assert!(is_reserved_special_annotation("@module SPECIAL.RENDER"));
         assert!(is_reserved_special_annotation("@implements SPECIAL.RENDER"));
+        assert!(is_reserved_special_annotation(
+            "@fileimplements SPECIAL.RENDER"
+        ));
+        assert!(is_reserved_special_annotation("@fileverifies EXPORT.CSV"));
         assert!(!is_reserved_special_annotation("@param file output path"));
         assert!(!is_reserved_special_annotation("\\param file output path"));
     }

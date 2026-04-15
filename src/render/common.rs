@@ -32,8 +32,6 @@ summary::marker{color:#9ca3af}
 .code-block{margin:8px 0 0;white-space:pre-wrap;background:var(--code-bg);padding:12px;border-radius:8px;overflow:auto;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}"#;
 
 pub(super) const SPEC_HTML_EMPTY: &str = "<p>No specs found.</p></main></body></html>";
-pub(super) const SPEC_HTML_TREE_OPEN: &str = "<ul class=\"tree\">";
-pub(super) const SPEC_HTML_CLOSE: &str = "</ul></main></body></html>";
 pub(super) const MODULES_HTML_EMPTY: &str = "<p>No modules found.</p></main></body></html>";
 
 pub(super) fn escape_html(input: &str) -> String {

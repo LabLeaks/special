@@ -2,7 +2,7 @@
 @module SPECIAL.CLI.INIT
 Initialization command behavior in `src/cli/init.rs`.
 */
-// @implements SPECIAL.CLI.INIT
+// @fileimplements SPECIAL.CLI.INIT
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;

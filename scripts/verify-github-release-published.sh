@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # @module SPECIAL.DISTRIBUTION.GITHUB_RELEASE_CHECK
 # GitHub release publication verification in `scripts/verify-github-release-published.sh`.
-# @implements SPECIAL.DISTRIBUTION.GITHUB_RELEASE_CHECK
-# @verifies SPECIAL.DISTRIBUTION.GITHUB_RELEASES.PUBLISHED
+# @fileimplements SPECIAL.DISTRIBUTION.GITHUB_RELEASE_CHECK
+# @fileverifies SPECIAL.DISTRIBUTION.GITHUB_RELEASES.PUBLISHED
 
 set -euo pipefail
 

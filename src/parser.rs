@@ -1,10 +1,86 @@
 /**
+@spec SPECIAL.PARSE
+special parses annotated comment blocks into structured spec records.
+
+@group SPECIAL.PARSE.RESERVED_TAGS
+reserved special annotation shape and validation.
+
+@spec SPECIAL.PARSE.RESERVED_TAGS.REQUIRE_DIRECTIVE_SHAPE
+special reports malformed reserved annotations when a reserved tag appears at line start but omits the required directive shape, instead of silently treating it as foreign syntax.
+
+@spec SPECIAL.PARSE.FOREIGN_TAG_BOUNDARIES
+special treats foreign line-start `@...` and `\\...` tags as block boundaries for attached annotation text without treating them as special annotations.
+
+@spec SPECIAL.PARSE.PLANNED
+special records @planned on the owning @spec according to the configured `special.toml` version.
+
+@spec SPECIAL.PARSE.PLANNED.LEGACY_V0
+without `version = "1"` in `special.toml`, special preserves the legacy backward-looking `@planned` association within an annotation block.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1
+with `version = "1"` in `special.toml`, special requires `@planned` to be adjacent to its owning `@spec`.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1.INLINE
+with `version = "1"` in `special.toml`, special accepts `@spec ID @planned` on one line.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1.NEXT_LINE
+with `version = "1"` in `special.toml`, special accepts `@planned` on the line immediately after `@spec` and before the claim text.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1.EXACT_INLINE_MARKER
+with `version = "1"` in `special.toml`, special only accepts an exact trailing `@planned` marker in `@spec` headers.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1.EXACT_STANDALONE_MARKER
+with `version = "1"` in `special.toml`, special only accepts an exact standalone `@planned` marker on the adjacent next line.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1.REJECTS_DUPLICATE_MARKERS
+with `version = "1"` in `special.toml`, special rejects duplicate inline and adjacent `@planned` markers on the same `@spec`.
+
+@spec SPECIAL.PARSE.PLANNED.ADJACENT_V1.REJECTS_BACKWARD_FORM
+with `version = "1"` in `special.toml`, special rejects non-adjacent backward-looking `@planned` markers later in the annotation block.
+
+@spec SPECIAL.PARSE.PLANNED.RELEASE_TARGET
+special parses an optional release string after `@planned` and records it on the owning spec as planned release metadata.
+
+@spec SPECIAL.PARSE.VERIFIES
+special parses @verifies references from annotation blocks.
+
+@spec SPECIAL.PARSE.VERIFIES.ONE_PER_BLOCK
+special allows at most one @verifies or @fileverifies per annotation block.
+
+@spec SPECIAL.PARSE.VERIFIES.FILE_SCOPE
+special parses @fileverifies references as file-scoped verification attachments over the containing file.
+
+@spec SPECIAL.PARSE.VERIFIES.ONLY_ATTACHED_SUPPORT_COUNTS
+special counts a @verifies reference as support only when it successfully attaches to an owned item.
+
+@spec SPECIAL.PARSE.ATTESTS
+special parses @attests records from annotation blocks.
+
+@spec SPECIAL.PARSE.ATTESTS.REQUIRED_FIELDS
+special requires the mandatory metadata fields for @attests.
+
+@spec SPECIAL.PARSE.ATTESTS.ALLOWED_FIELDS
+special rejects unknown metadata keys on @attests records.
+
+@spec SPECIAL.PARSE.ATTESTS.DATE_FORMAT
+special requires last_reviewed to use YYYY-MM-DD format.
+
+@spec SPECIAL.PARSE.ATTESTS.REVIEW_INTERVAL_DAYS
+special requires review_interval_days to be a positive integer when present.
+
+@spec SPECIAL.PARSE.ARCH_ANNOTATIONS_RESERVED
+special reserves `@module`, `@area`, `@implements`, and `@fileimplements` for architecture metadata and does not report them as unknown spec annotations.
+
 @module SPECIAL.PARSER
 Interprets reserved spec annotations from extracted comment blocks, applies dialect-specific ownership rules, and emits parsed specs, verifies, attests, and diagnostics. This module does not own filesystem comment extraction or final tree materialization.
 */
-// @implements SPECIAL.PARSER
+// @fileimplements SPECIAL.PARSER
 mod attestation;
+mod markdown;
 mod planned;
+
+use std::fs;
+use std::path::Path;
 
 use anyhow::Result;
 
@@ -19,6 +95,7 @@ use crate::model::{
 };
 use crate::planned_syntax::{PlannedAnnotationError, PlannedSyntax};
 use attestation::parse_attestation_metadata;
+use markdown::parse_markdown_declarations;
 use planned::{
     AdjacentPlanned, DeclHeader, DeclHeaderError, consume_adjacent_planned,
     parse_standalone_planned,
@@ -31,13 +108,42 @@ pub enum ParseDialect {
 }
 
 // @implements SPECIAL.PARSER
-pub fn parse_repo(root: &std::path::Path, dialect: ParseDialect) -> Result<ParsedRepo> {
+pub fn parse_repo(
+    root: &Path,
+    ignore_patterns: &[String],
+    dialect: ParseDialect,
+) -> Result<ParsedRepo> {
     let rules = ParseRules::for_dialect(dialect);
     let mut parsed = ParsedRepo::default();
-    for block in collect_comment_blocks(root)? {
+    for block in collect_comment_blocks(root, ignore_patterns)? {
         parse_block(&block, &mut parsed, rules);
     }
+    parse_markdown_declarations(root, ignore_patterns, &mut parsed, rules)?;
     Ok(parsed)
+}
+
+pub(super) fn normalize_markdown_annotation_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let trimmed = trimmed
+        .strip_prefix('>')
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let trimmed = trimmed.trim_start_matches('#').trim_start();
+    let trimmed = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix('`').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_suffix('`').unwrap_or(trimmed);
+    Some(trimmed.trim())
+}
+
+pub(super) fn starts_markdown_fence(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("```") || trimmed.starts_with("~~~")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -376,6 +482,47 @@ fn parse_block(block: &CommentBlock, parsed: &mut ParsedRepo, rules: ParseRules)
         }
 
         if let Some(rest) =
+            reserved_special_annotation_rest(trimmed, ReservedSpecialAnnotation::FileVerifies)
+        {
+            if seen_verifies {
+                push_diag(
+                    parsed,
+                    block,
+                    entry.line,
+                    "annotation block may contain only one @verifies or @fileverifies",
+                );
+                index += 1;
+                continue;
+            }
+
+            let id = rest.trim();
+            if id.is_empty() {
+                push_diag(
+                    parsed,
+                    block,
+                    entry.line,
+                    "missing spec id after @fileverifies",
+                );
+            } else {
+                let body = fs::read_to_string(&block.path)
+                    .ok()
+                    .map(|body| body.trim_end().to_string());
+                parsed.verifies.push(VerifyRef {
+                    spec_id: id.to_string(),
+                    location: SourceLocation {
+                        path: block.path.clone(),
+                        line: entry.line,
+                    },
+                    body_location: None,
+                    body,
+                });
+                seen_verifies = true;
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(rest) =
             reserved_special_annotation_rest(trimmed, ReservedSpecialAnnotation::Attests)
         {
             let id = rest.trim();
@@ -443,6 +590,7 @@ fn is_reserved_arch_annotation(text: &str) -> bool {
     matches!(
         reserved_special_annotation(text),
         Some(ReservedSpecialAnnotation::Implements)
+            | Some(ReservedSpecialAnnotation::FileImplements)
             | Some(ReservedSpecialAnnotation::Module)
             | Some(ReservedSpecialAnnotation::Area)
     )
@@ -459,6 +607,7 @@ fn push_diag(parsed: &mut ParsedRepo, block: &CommentBlock, line: usize, message
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
 
     use crate::config::SpecialVersion;
@@ -964,6 +1113,36 @@ mod tests {
     }
 
     #[test]
+    // @verifies SPECIAL.PARSE.VERIFIES.FILE_SCOPE
+    fn parses_file_verify_reference() {
+        let root = std::env::temp_dir().join(format!("special-fileverify-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("temp dir should be created");
+        let path = root.join("example.rs");
+        let content = "// @fileverifies EXPORT.DOESNTCRASH\nfn verifies_export_doesnt_crash() {}\n";
+        fs::write(&path, content).expect("fixture should be written");
+
+        let block = CommentBlock {
+            path: path.clone(),
+            lines: vec![BlockLine {
+                line: 1,
+                text: "@fileverifies EXPORT.DOESNTCRASH".to_string(),
+            }],
+            owned_item: None,
+        };
+
+        let parsed = parse_current(&block);
+
+        assert_eq!(parsed.verifies.len(), 1);
+        assert_eq!(parsed.verifies[0].spec_id, "EXPORT.DOESNTCRASH");
+        assert!(parsed.verifies[0].body_location.is_none());
+        assert_eq!(parsed.verifies[0].body.as_deref(), Some(content.trim_end()));
+        assert!(parsed.diagnostics.is_empty());
+
+        fs::remove_file(path).expect("fixture should be removed");
+        let _ = fs::remove_dir(root);
+    }
+
+    #[test]
     // @verifies SPECIAL.PARSE.ATTESTS
     fn parses_attestation_blocks() {
         let block = CommentBlock {
@@ -1455,13 +1634,17 @@ mod tests {
                     line: 3,
                     text: "@attests".to_string(),
                 },
+                BlockLine {
+                    line: 4,
+                    text: "@fileverifies".to_string(),
+                },
             ],
             owned_item: None,
         };
 
         let parsed = parse_current(&block);
 
-        assert_eq!(parsed.diagnostics.len(), 3);
+        assert_eq!(parsed.diagnostics.len(), 4);
         assert!(
             parsed.diagnostics[0]
                 .message
@@ -1476,6 +1659,11 @@ mod tests {
             parsed.diagnostics[2]
                 .message
                 .contains("missing spec id after @attests")
+        );
+        assert!(
+            parsed.diagnostics[3]
+                .message
+                .contains("missing spec id after @fileverifies")
         );
     }
 
@@ -1525,6 +1713,10 @@ mod tests {
                 BlockLine {
                     line: 3,
                     text: "@area SPECIAL.PARSER".to_string(),
+                },
+                BlockLine {
+                    line: 4,
+                    text: "@fileimplements SPECIAL.PARSER".to_string(),
                 },
             ],
             owned_item: None,

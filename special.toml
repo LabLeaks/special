@@ -1,2 +1,6 @@
 version = "1"
 root = "."
+ignore = [
+  "CHANGELOG.md",
+  "README.md",
+]

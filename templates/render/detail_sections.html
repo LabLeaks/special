@@ -1,0 +1,1 @@
+{% for detail in details %}<details><summary>{{ detail.label }} {{ detail.location }}</summary>{% if let Some(body_at) = detail.body_at %}<div class="meta">body at {{ body_at }}</div>{% endif %}{% if let Some(body_html) = detail.body_html %}<pre class="code-block"><code class="language-{{ detail.language_class }}">{{ body_html|safe }}</code></pre>{% endif %}</details>{% endfor %}

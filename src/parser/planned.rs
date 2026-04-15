@@ -2,7 +2,7 @@
 @module SPECIAL.PARSER.PLANNED
 Planned-marker syntax parsing in `src/parser/planned.rs`.
 */
-// @implements SPECIAL.PARSER.PLANNED
+// @fileimplements SPECIAL.PARSER.PLANNED
 use crate::model::{CommentBlock, NodeKind, PlannedRelease};
 pub(super) use crate::planned_syntax::DeclHeaderError;
 use crate::planned_syntax::{

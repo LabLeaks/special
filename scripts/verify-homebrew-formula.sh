@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # @module SPECIAL.DISTRIBUTION.HOMEBREW_CHECK
 # Homebrew release/install verification in `scripts/verify-homebrew-formula.sh`.
-# @implements SPECIAL.DISTRIBUTION.HOMEBREW_CHECK
-# @verifies SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA
+# @fileimplements SPECIAL.DISTRIBUTION.HOMEBREW_CHECK
+# @fileverifies SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA
 
 set -euo pipefail
 

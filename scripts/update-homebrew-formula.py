@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @module SPECIAL.DISTRIBUTION.HOMEBREW_UPDATE
 # Homebrew formula update in `scripts/update-homebrew-formula.py`.
-# @implements SPECIAL.DISTRIBUTION.HOMEBREW_UPDATE
+# @fileimplements SPECIAL.DISTRIBUTION.HOMEBREW_UPDATE
 
 from __future__ import annotations
 

@@ -1,18 +1,49 @@
 /**
+@spec SPECIAL.PARSE.LINE_COMMENTS
+special parses annotation blocks from contiguous line comments.
+
+@spec SPECIAL.PARSE.BLOCK_COMMENTS
+special parses annotation blocks from block comments.
+
+@spec SPECIAL.PARSE.GO_LINE_COMMENTS
+special parses annotation blocks from Go line comments in `.go` files.
+
+@spec SPECIAL.PARSE.TYPESCRIPT_LINE_COMMENTS
+special parses annotation blocks from TypeScript line comments in `.ts` files.
+
+@spec SPECIAL.PARSE.TYPESCRIPT_BLOCK_COMMENTS
+special parses annotation blocks from TypeScript block comments in `.ts` files.
+
+@spec SPECIAL.PARSE.MIXED_PURPOSE_COMMENTS
+special parses reserved annotations from ordinary mixed-purpose comment blocks without requiring the whole block to be special-only.
+
+@spec SPECIAL.PARSE.LINE_START_RESERVED_TAGS
+special interprets reserved annotations only when they begin the normalized comment line after comment markers and leading whitespace are stripped.
+
+@spec SPECIAL.PARSE.FOREIGN_TAGS_NOT_ERRORS
+special does not report foreign line-start `@...` and `\\...` tags as lint errors inside mixed-purpose comment blocks.
+
+@spec SPECIAL.PARSE.SHELL_COMMENTS
+special parses annotation blocks from shell-style line comments in .sh files.
+
+@spec SPECIAL.PARSE.PYTHON_LINE_COMMENTS
+special parses annotation blocks from Python `#` comments in `.py` files instead of docstring ownership.
+
+@spec SPECIAL.PARSE.VERIFIES.ATTACHES_TO_NEXT_ITEM
+special attaches a @verifies annotation block to the next supported item in comment-based languages.
+
 @module SPECIAL.EXTRACTOR
 Collects contiguous supported source comment blocks, normalizes comment syntax, and captures the next owned code item for attachment. This module does not interpret `special` tag semantics or build spec or module trees.
 */
-// @implements SPECIAL.EXTRACTOR
+// @fileimplements SPECIAL.EXTRACTOR
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use ignore::WalkBuilder;
 
 use crate::annotation_syntax::is_reserved_special_annotation;
+use crate::discovery::{DiscoveryConfig, discover_annotation_files};
 use crate::model::{BlockLine, CommentBlock, OwnedItem, SourceLocation};
-
-const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "go", "ts", "tsx", "sh", "py"];
 
 #[derive(Clone, Copy)]
 enum LineCommentStyle {
@@ -20,43 +51,23 @@ enum LineCommentStyle {
     Hash,
 }
 
-pub fn collect_comment_blocks(root: &Path) -> Result<Vec<CommentBlock>> {
+pub fn collect_comment_blocks(
+    root: &Path,
+    ignore_patterns: &[String],
+) -> Result<Vec<CommentBlock>> {
     let mut blocks = Vec::new();
-
-    let walker = WalkBuilder::new(root)
-        .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .build();
-
-    for entry in walker {
-        let entry = entry?;
-        let path = entry.path();
-        if !entry
-            .file_type()
-            .map(|kind| kind.is_file())
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        if !is_supported(path) {
-            continue;
-        }
-
-        let content = fs::read_to_string(path)
+    for path in discover_annotation_files(DiscoveryConfig {
+        root,
+        ignore_patterns,
+    })?
+    .source_files
+    {
+        let content = fs::read_to_string(&path)
             .with_context(|| format!("reading source file {}", path.display()))?;
-        blocks.extend(extract_blocks_from_text(path.to_path_buf(), &content));
+        blocks.extend(extract_blocks_from_text(path, &content));
     }
 
     Ok(blocks)
-}
-
-fn is_supported(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext))
-        .unwrap_or(false)
 }
 
 fn extract_blocks_from_text(path: PathBuf, content: &str) -> Vec<CommentBlock> {
@@ -522,13 +533,13 @@ mod tests {
     fn extracts_shell_comment_blocks() {
         let blocks = extract_blocks_from_text(
             PathBuf::from("scripts/verify.sh"),
-            "#!/usr/bin/env bash\n# @verifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED\nset -euo pipefail\n\nexec mise exec -- cargo clippy --all-targets --all-features -- -D warnings\n",
+            "#!/usr/bin/env bash\n# @fileverifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED\nset -euo pipefail\n\nexec mise exec -- cargo clippy --all-targets --all-features -- -D warnings\n",
         );
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(
             blocks[0].lines[1].text,
-            "@verifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED"
+            "@fileverifies SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED"
         );
         assert_eq!(
             blocks[0]

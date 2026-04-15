@@ -1,0 +1,16 @@
+<section class="node">
+  <div class="node-header">
+    <span class="node-id">coverage</span>
+  </div>
+  <div class="meta counts">
+    {{ counts_html|safe }}
+  </div>
+  {% if verbose %}
+  {% for path in uncovered_paths %}
+  <div class="meta">uncovered path {{ path }}</div>
+  {% endfor %}
+  {% for path in weak_paths %}
+  <div class="meta">weak path {{ path }}</div>
+  {% endfor %}
+  {% endif %}
+</section>

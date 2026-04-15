@@ -2,7 +2,7 @@
 @module SPECIAL.MODEL
 Canonical Rust domain types in `src/model.rs`.
 */
-// @implements SPECIAL.MODEL
+// @fileimplements SPECIAL.MODEL
 use std::fmt;
 use std::path::PathBuf;
 
@@ -315,6 +315,146 @@ pub struct ImplementRef {
     pub body: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ArchitectureCoverageSummary {
+    pub analyzed_files: usize,
+    pub covered_files: usize,
+    pub uncovered_files: usize,
+    pub weak_files: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub uncovered_paths: Vec<PathBuf>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub weak_paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleMetricsSummary {
+    pub owned_lines: usize,
+    pub public_items: usize,
+    pub internal_items: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleComplexitySummary {
+    pub function_count: usize,
+    pub total_cyclomatic: usize,
+    pub max_cyclomatic: usize,
+    pub total_cognitive: usize,
+    pub max_cognitive: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleQualitySummary {
+    pub public_function_count: usize,
+    pub parameter_count: usize,
+    pub bool_parameter_count: usize,
+    pub raw_string_parameter_count: usize,
+    pub panic_site_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModuleItemKind {
+    Function,
+    Method,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModuleItemSignal {
+    pub name: String,
+    pub kind: ModuleItemKind,
+    pub public: bool,
+    pub parameter_count: usize,
+    pub bool_parameter_count: usize,
+    pub raw_string_parameter_count: usize,
+    pub internal_refs: usize,
+    pub inbound_internal_refs: usize,
+    pub external_refs: usize,
+    pub cyclomatic: usize,
+    pub cognitive: usize,
+    pub panic_site_count: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleItemSignalsSummary {
+    pub analyzed_items: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub connected_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outbound_heavy_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub isolated_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub highest_complexity_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parameter_heavy_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub stringly_boundary_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub panic_heavy_items: Vec<ModuleItemSignal>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleCouplingSummary {
+    pub fan_in: usize,
+    pub fan_out: usize,
+    pub afferent_coupling: usize,
+    pub efferent_coupling: usize,
+    pub instability: f64,
+    pub external_target_count: usize,
+    pub unresolved_internal_target_count: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleDependencyTargetSummary {
+    pub path: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleDependencySummary {
+    pub reference_count: usize,
+    pub distinct_targets: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<ModuleDependencyTargetSummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleCoverageSummary {
+    pub covered_files: usize,
+    pub weak_files: usize,
+    pub file_scoped_implements: usize,
+    pub item_scoped_implements: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub covered_paths: Vec<PathBuf>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub weak_paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleAnalysisSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<ModuleCoverageSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<ModuleMetricsSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complexity: Option<ModuleComplexitySummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<ModuleQualitySummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_signals: Option<ModuleItemSignalsSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coupling: Option<ModuleCouplingSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<ModuleDependencySummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ArchitectureAnalysisSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<ArchitectureCoverageSummary>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SpecNode {
     pub id: String,
@@ -374,11 +514,17 @@ pub struct ModuleNode {
     plan: PlanState,
     pub location: SourceLocation,
     pub implements: Vec<ImplementRef>,
+    pub analysis: Option<ModuleAnalysisSummary>,
     pub children: Vec<ModuleNode>,
 }
 
 impl ModuleNode {
-    pub fn new(decl: ModuleDecl, implements: Vec<ImplementRef>, children: Vec<ModuleNode>) -> Self {
+    pub fn new(
+        decl: ModuleDecl,
+        implements: Vec<ImplementRef>,
+        analysis: Option<ModuleAnalysisSummary>,
+        children: Vec<ModuleNode>,
+    ) -> Self {
         Self {
             id: decl.id,
             kind: decl.kind,
@@ -386,6 +532,7 @@ impl ModuleNode {
             plan: decl.plan,
             location: decl.location,
             implements,
+            analysis,
             children,
         }
     }
@@ -459,14 +606,7 @@ impl Serialize for ModuleNode {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct(
-            "ModuleNode",
-            if self.planned_release().is_some() {
-                8
-            } else {
-                7
-            },
-        )?;
+        let mut state = serializer.serialize_struct("ModuleNode", 9)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("kind", &self.kind)?;
         state.serialize_field("text", &self.text)?;
@@ -476,6 +616,9 @@ impl Serialize for ModuleNode {
         }
         state.serialize_field("location", &self.location)?;
         state.serialize_field("implements", &self.implements)?;
+        if let Some(analysis) = &self.analysis {
+            state.serialize_field("analysis", analysis)?;
+        }
         state.serialize_field("children", &self.children)?;
         state.end()
     }
@@ -495,6 +638,18 @@ pub struct ModuleFilter {
     pub scope: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModuleAnalysisOptions {
+    pub coverage: bool,
+    pub metrics: bool,
+}
+
+impl ModuleAnalysisOptions {
+    pub fn any(self) -> bool {
+        self.coverage || self.metrics
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SpecDocument {
     pub nodes: Vec<SpecNode>,
@@ -503,6 +658,8 @@ pub struct SpecDocument {
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleDocument {
     pub nodes: Vec<ModuleNode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<ArchitectureAnalysisSummary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -578,7 +735,7 @@ mod tests {
             "Structural area.".to_string(),
             PlanState::planned(None),
             SourceLocation {
-                path: "_project/ARCHITECTURE.md".into(),
+                path: "ARCHITECTURE.md".into(),
                 line: 1,
             },
         )

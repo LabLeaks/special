@@ -14,6 +14,10 @@ This repo is intentionally split into a few broad responsibilities:
   Comment extraction is separate from annotation interpretation.
 - domain and materialization
   Parsed records become typed domain nodes before text, JSON, or HTML rendering.
+- architecture analysis
+  `special modules --metrics` should keep a shared analysis core and hang
+  language-specific analyzers beneath it rather than letting one parser model
+  define the whole feature.
 - boundary commands
   CLI modules should stay thin and orchestrate work rather than own deep policy.
 - release tooling

@@ -2,7 +2,7 @@
 @module SPECIAL.CLI.MODULES
 Architecture module command behavior.
 */
-// @implements SPECIAL.CLI.MODULES
+// @fileimplements SPECIAL.CLI.MODULES
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -10,7 +10,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::config::resolve_project_root;
-use crate::model::ModuleFilter;
+use crate::model::{ModuleAnalysisOptions, ModuleFilter};
 use crate::modules::build_module_document;
 use crate::render::{render_module_html, render_module_json, render_module_text};
 
@@ -32,6 +32,9 @@ pub(super) struct ModulesArgs {
 
     #[arg(long = "verbose")]
     verbose: bool,
+
+    #[arg(long = "metrics")]
+    metrics: bool,
 }
 
 pub(super) fn execute_modules(args: ModulesArgs, current_dir: &Path) -> Result<ExitCode> {
@@ -43,10 +46,15 @@ pub(super) fn execute_modules(args: ModulesArgs, current_dir: &Path) -> Result<E
     let root = resolution.root.clone();
     let (document, lint) = build_module_document(
         &root,
+        &resolution.ignore_patterns,
         ModuleFilter {
             include_planned: args.include_planned,
             unsupported_only: args.unsupported_only,
             scope: args.module_id,
+        },
+        ModuleAnalysisOptions {
+            coverage: args.metrics,
+            metrics: args.metrics,
         },
     )?;
 

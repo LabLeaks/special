@@ -1,6 +1,6 @@
 # @module SPECIAL.RELEASE_REVIEW.PIPELINE.PLANNING
 # Review-pass selection, prompt construction, and chunk budgeting for release review. This module does not parse diffs or extract source snippets on its own.
-# @implements SPECIAL.RELEASE_REVIEW.PIPELINE.PLANNING
+# @fileimplements SPECIAL.RELEASE_REVIEW.PIPELINE.PLANNING
 from __future__ import annotations
 
 from pathlib import Path

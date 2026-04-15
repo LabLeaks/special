@@ -1,6 +1,6 @@
 # @module SPECIAL.RELEASE_REVIEW.PIPELINE
 # Facade over release-review context extraction and planning helpers.
-# @implements SPECIAL.RELEASE_REVIEW.PIPELINE
+# @fileimplements SPECIAL.RELEASE_REVIEW.PIPELINE
 from __future__ import annotations
 
 from release_review_context import (

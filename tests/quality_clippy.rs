@@ -1,8 +1,32 @@
 /**
+@group SPECIAL.QUALITY.RUST.CLIPPY
+Pinned clippy contract for the Rust quality tooling surface.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS
+the pinned clippy verification surface succeeds only when the repo uses the canonical clippy command shape.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS.MISE_EXEC
+the pinned clippy verification surface runs clippy through `mise exec --`.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS.CARGO_CLIPPY
+the pinned clippy verification surface invokes `cargo clippy`.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS.ALL_TARGETS
+the pinned clippy verification surface passes `--all-targets`.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS.ALL_FEATURES
+the pinned clippy verification surface passes `--all-features`.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.PINNED_FLAGS.DENY_WARNINGS
+the pinned clippy verification surface denies warnings.
+
+@spec SPECIAL.QUALITY.RUST.CLIPPY.SPEC_OWNED
+the clippy verification script carries the proving surface for the pinned clippy contract.
+
 @module SPECIAL.TESTS.QUALITY_CLIPPY
 Pinned clippy-contract tests in `tests/quality_clippy.rs`.
 */
-// @implements SPECIAL.TESTS.QUALITY_CLIPPY
+// @fileimplements SPECIAL.TESTS.QUALITY_CLIPPY
 #[path = "support/quality.rs"]
 mod support;
 

@@ -2,17 +2,18 @@
 @module SPECIAL.CLI.SKILLS
 User-facing `special skills` command behavior in `src/cli/skills.rs`.
 */
-// @implements SPECIAL.CLI.SKILLS
+// @fileimplements SPECIAL.CLI.SKILLS
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
+use askama::Template;
 use clap::{Args, Subcommand};
 
 use crate::config::resolve_project_root;
 use crate::skills::{
-    bundled_skill, bundled_skills, conflicting_skill_paths, install_bundled_skills,
+    BundledSkill, bundled_skill, bundled_skills, conflicting_skill_paths, install_bundled_skills,
     primary_skill_contents, resolve_global_skills_root,
 };
 
@@ -174,6 +175,15 @@ const SKILLS_INSTALL_DESTINATIONS: [(&str, &str); 3] = [
     ),
 ];
 
+#[derive(Template)]
+#[template(path = "cli/skills_overview.txt", escape = "none")]
+struct SkillsOverviewTemplate<'a> {
+    intro: &'a [&'a str; 2],
+    command_shapes: &'a [(&'a str, &'a str); 5],
+    destinations: &'a [(&'a str, &'a str); 3],
+    skills: &'a [BundledSkill],
+}
+
 impl InstallDestination {
     fn parse_cli_value(value: &str) -> Result<Self> {
         match value.trim() {
@@ -282,31 +292,14 @@ fn resolve_global_skills_destination() -> GlobalSkillsDestination {
 }
 
 fn render_skills_overview() -> String {
-    let mut output = String::new();
-    output.push_str(SKILLS_OVERVIEW_INTRO[0]);
-    output.push_str("\n\n");
-    output.push_str(SKILLS_OVERVIEW_INTRO[1]);
-    output.push_str("\n\nCommand shapes:\n");
-    for (command, description) in SKILLS_COMMAND_SHAPES {
-        output.push_str("  ");
-        output.push_str(command);
-        output.push_str("\n    ");
-        output.push_str(description);
-        output.push('\n');
+    SkillsOverviewTemplate {
+        intro: &SKILLS_OVERVIEW_INTRO,
+        command_shapes: &SKILLS_COMMAND_SHAPES,
+        destinations: &SKILLS_INSTALL_DESTINATIONS,
+        skills: bundled_skills(),
     }
-    output.push_str("\nAvailable skill ids:\n");
-    for skill in bundled_skills() {
-        output.push_str(&format!("  {}  {}\n", skill.id, skill.summary));
-    }
-    output.push_str("\nInstall destinations:\n");
-    for (name, description) in SKILLS_INSTALL_DESTINATIONS {
-        output.push_str("  ");
-        output.push_str(name);
-        output.push_str("  ");
-        output.push_str(description);
-        output.push('\n');
-    }
-    output
+    .render()
+    .expect("skills overview template should render")
 }
 
 fn prompt_install_destination(
