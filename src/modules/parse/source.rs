@@ -14,7 +14,9 @@ use crate::model::{
     PlannedRelease, SourceLocation,
 };
 
-use super::{StandalonePlanned, maybe_consume_standalone_planned, parse_module_header};
+use super::declarations::{
+    StandalonePlanned, maybe_consume_standalone_planned, parse_module_header,
+};
 
 pub(super) fn parse_source_module_decls(
     root: &Path,

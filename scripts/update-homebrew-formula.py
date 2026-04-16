@@ -21,7 +21,7 @@ from release_tooling import normalize_tag, package_version, run_checked
 
 REPOSITORY = "LabLeaks/special"
 TAP_REPOSITORY = "LabLeaks/homebrew-tap"
-FORMULA_PATH = "special.rb"
+FORMULA_PATH = "Formula/special.rb"
 FORMULA_DESC = "Repo-native semantic spec tool"
 FORMULA_HOMEPAGE = "https://github.com/LabLeaks/special"
 ARCHIVE_ORDER = [
@@ -84,44 +84,30 @@ class Special < Formula
   homepage "{FORMULA_HOMEPAGE}"
   version "{version}"
 
-  on_macos do
-    if Hardware::CPU.intel?
-      url "{archive_url('special-cli-x86_64-apple-darwin.tar.xz')}"
-      sha256 "{archive_sha('special-cli-x86_64-apple-darwin.tar.xz')}"
+  archive = on_system_conditional(
+    macos: on_arch_conditional(
+      arm: "special-cli-aarch64-apple-darwin.tar.xz",
+      intel: "special-cli-x86_64-apple-darwin.tar.xz",
+    ),
+    linux: on_arch_conditional(
+      arm: "special-cli-aarch64-unknown-linux-gnu.tar.xz",
+      intel: "special-cli-x86_64-unknown-linux-gnu.tar.xz",
+    ),
+  )
+  url "https://github.com/LabLeaks/special/releases/download/v{version}/#{{archive}}"
+  sha256 on_system_conditional(
+    macos: on_arch_conditional(
+      arm: "{archive_sha('special-cli-aarch64-apple-darwin.tar.xz')}",
+      intel: "{archive_sha('special-cli-x86_64-apple-darwin.tar.xz')}",
+    ),
+    linux: on_arch_conditional(
+      arm: "{archive_sha('special-cli-aarch64-unknown-linux-gnu.tar.xz')}",
+      intel: "{archive_sha('special-cli-x86_64-unknown-linux-gnu.tar.xz')}",
+    ),
+  )
 
-      define_method(:install) do
-        bin.install "special"
-      end
-    end
-
-    if Hardware::CPU.arm?
-      url "{archive_url('special-cli-aarch64-apple-darwin.tar.xz')}"
-      sha256 "{archive_sha('special-cli-aarch64-apple-darwin.tar.xz')}"
-
-      define_method(:install) do
-        bin.install "special"
-      end
-    end
-  end
-
-  on_linux do
-    if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "{archive_url('special-cli-x86_64-unknown-linux-gnu.tar.xz')}"
-      sha256 "{archive_sha('special-cli-x86_64-unknown-linux-gnu.tar.xz')}"
-
-      define_method(:install) do
-        bin.install "special"
-      end
-    end
-
-    if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "{archive_url('special-cli-aarch64-unknown-linux-gnu.tar.xz')}"
-      sha256 "{archive_sha('special-cli-aarch64-unknown-linux-gnu.tar.xz')}"
-
-      define_method(:install) do
-        bin.install "special"
-      end
-    end
+  def install
+    bin.install "special"
   end
 
   test do
@@ -153,7 +139,7 @@ def main() -> int:
             "--method",
             "PUT",
             "-f",
-            f"message=Update special.rb for {tag}",
+            f"message=Update Formula/special.rb for {tag}",
             "-f",
             f"content={encoded}",
             "-f",

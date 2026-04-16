@@ -11,8 +11,8 @@ use std::fs;
 use serde_json::Value;
 
 use support::{
-    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir, write_file_verify_fixture,
-    write_live_and_planned_fixture, write_planned_release_fixture,
+    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir, write_file_attest_fixture,
+    write_file_verify_fixture, write_live_and_planned_fixture, write_planned_release_fixture,
     write_special_toml_dot_root_fixture, write_special_toml_root_fixture,
     write_unsupported_live_fixture,
 };
@@ -316,6 +316,22 @@ fn spec_verbose_includes_file_verify_bodies() {
 }
 
 #[test]
+// @verifies SPECIAL.SPEC_COMMAND.VERBOSE
+fn spec_verbose_includes_file_attest_bodies() {
+    let root = temp_repo_dir("special-cli-file-attest-verbose");
+    write_file_attest_fixture(&root);
+
+    let output = run_special(&root, &["spec", "--verbose"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("@fileattests"));
+    assert!(stdout.contains("# Review Notes"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
 // @verifies SPECIAL.SPEC_COMMAND.VERBOSE.JSON
 fn spec_verbose_json_includes_support_bodies() {
     let root = temp_repo_dir("special-cli-json-verbose");
@@ -341,6 +357,36 @@ fn spec_verbose_json_includes_support_bodies() {
     assert_eq!(
         verify["body_location"]["line"],
         Value::Number(serde_json::Number::from(2))
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.VERBOSE.JSON
+fn spec_verbose_json_includes_file_attest_scope() {
+    let root = temp_repo_dir("special-cli-file-attest-json");
+    write_file_attest_fixture(&root);
+
+    let output = run_special(&root, &["spec", "--json", "--verbose"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let demo = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
+        .expect("DEMO node should be present");
+    let attest = demo["attests"]
+        .as_array()
+        .and_then(|attests| attests.first())
+        .expect("attest should be present");
+    assert_eq!(attest["scope"], Value::String("file".to_string()));
+    assert!(
+        attest["body"]
+            .as_str()
+            .expect("attest body should be present")
+            .contains("# Review Notes")
     );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

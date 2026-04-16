@@ -1,6 +1,6 @@
 /**
 @module SPECIAL.CLI.MODULES
-Architecture module command behavior.
+Architecture module command boundary. This module resolves the active project root, selects module filters and analysis options from CLI flags, and renders the resulting module view without owning module parsing or analysis rules.
 */
 // @fileimplements SPECIAL.CLI.MODULES
 use std::path::Path;

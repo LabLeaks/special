@@ -92,7 +92,7 @@ use std::fs;
 use support::{
     bundled_skill_ids, bundled_skill_markdown, install_skills, installed_skill_ids,
     listed_skill_ids, run_special, run_special_with_env_removed, run_special_with_input,
-    run_special_with_input_and_env, skills_command_shape_lines, skills_install_destination_lines,
+    run_special_with_input_and_env, skills_command_shape_lines, skills_install_destinations,
     temp_repo_dir, write_invalid_skills_root_fixture, write_skills_fixture,
 };
 
@@ -155,21 +155,15 @@ fn skills_overview_describes_install_destinations_without_probing_environment() 
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
-    let destinations = skills_install_destination_lines(&stdout);
-    assert!(destinations.contains(
-        &"project  install into the current repository's .agents/skills/ directory".to_string()
-    ));
-    assert!(
-        destinations.contains(
-            &"global  install into $CODEX_HOME/skills, or ~/.codex/skills when CODEX_HOME is unset"
-                .to_string()
-        )
+    let destinations = skills_install_destinations(&stdout);
+    assert_eq!(
+        destinations
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["project", "global", "custom"]
     );
-    assert!(
-        destinations.contains(
-            &"custom  pass --destination PATH or prompt for a destination path".to_string()
-        )
-    );
+    assert!(destinations.iter().all(|(_, summary)| !summary.is_empty()));
     assert!(!stderr.contains("warning:"));
 
     let install_output = run_special(

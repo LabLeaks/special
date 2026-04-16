@@ -1,6 +1,6 @@
 /**
 @module SPECIAL.CLI.INIT
-Initialization command behavior in `src/cli/init.rs`.
+Initialization command boundary in `src/cli/init.rs`. This module creates starter `special.toml` files while refusing to overwrite existing config or silently create nested config beneath an active ancestor root.
 */
 // @fileimplements SPECIAL.CLI.INIT
 use std::fs;

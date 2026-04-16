@@ -1,3 +1,4 @@
+mod attests;
 /**
 @module SPECIAL.PARSER.BLOCK
 Scans extracted source comment blocks, routes reserved annotation lines to their owning handlers, and coordinates block-local attachment semantics.
@@ -8,15 +9,14 @@ mod verifies;
 
 use crate::annotation_syntax::{
     ReservedSpecialAnnotation, is_any_tag_boundary, reserved_special_annotation,
-    reserved_special_annotation_rest,
 };
-use crate::model::{AttestRef, CommentBlock, ParsedRepo, SourceLocation};
+use crate::model::{CommentBlock, ParsedRepo};
 use crate::planned_syntax::PlannedSyntax;
 
+use self::attests::handle_attest_line;
 use self::declarations::{BlockState, handle_decl_line, handle_standalone_planned_line};
 use self::verifies::handle_verify_line;
-use super::attestation::parse_attestation_metadata;
-use super::{ParseDialect, push_diag};
+use super::ParseDialect;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ParseRules {
@@ -76,48 +76,6 @@ pub(super) fn parse_block(block: &CommentBlock, parsed: &mut ParsedRepo, rules: 
 
         index += 1;
     }
-}
-
-fn handle_attest_line(
-    block: &CommentBlock,
-    parsed: &mut ParsedRepo,
-    index: usize,
-    line: usize,
-    trimmed: &str,
-) -> Option<usize> {
-    let rest = reserved_special_annotation_rest(trimmed, ReservedSpecialAnnotation::Attests)?;
-    let id = rest.trim();
-    if id.is_empty() {
-        push_diag(parsed, block, line, "missing spec id after @attests");
-        return Some(index + 1);
-    }
-
-    let (attestation, cursor) = parse_attestation_metadata(parsed, block, line, index + 1);
-    if let Some(attestation) = attestation {
-        parsed.attests.push(AttestRef {
-            spec_id: id.to_string(),
-            artifact: attestation.artifact,
-            owner: attestation.owner,
-            last_reviewed: attestation.last_reviewed,
-            review_interval_days: attestation.review_interval_days,
-            location: SourceLocation {
-                path: block.path.clone(),
-                line,
-            },
-            body: Some(
-                block
-                    .lines
-                    .iter()
-                    .map(|line| line.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-                    .trim()
-                    .to_string(),
-            ),
-        });
-    }
-
-    Some(cursor)
 }
 
 pub(super) fn collect_description_lines(block: &CommentBlock, cursor: &mut usize) -> Vec<String> {

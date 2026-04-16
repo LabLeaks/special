@@ -14,7 +14,7 @@ use crate::model::{
     SourceLocation,
 };
 
-use super::parse::{
+use super::parse::declarations::{
     collect_doc_description_lines, maybe_consume_doc_planned, normalized_architecture_heading,
     parse_module_header, skip_blank_doc_lines,
 };

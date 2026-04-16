@@ -11,6 +11,7 @@ pub(crate) enum ReservedSpecialAnnotation {
     Verifies,
     FileVerifies,
     Attests,
+    FileAttests,
     Module,
     Area,
     Implements,
@@ -26,6 +27,7 @@ impl ReservedSpecialAnnotation {
             Self::Verifies => "@verifies",
             Self::FileVerifies => "@fileverifies",
             Self::Attests => "@attests",
+            Self::FileAttests => "@fileattests",
             Self::Module => "@module",
             Self::Area => "@area",
             Self::Implements => "@implements",
@@ -41,6 +43,7 @@ const RESERVED_SPECIAL_ANNOTATIONS: &[ReservedSpecialAnnotation] = &[
     ReservedSpecialAnnotation::Verifies,
     ReservedSpecialAnnotation::FileVerifies,
     ReservedSpecialAnnotation::Attests,
+    ReservedSpecialAnnotation::FileAttests,
     ReservedSpecialAnnotation::Module,
     ReservedSpecialAnnotation::Area,
     ReservedSpecialAnnotation::Implements,
@@ -114,6 +117,7 @@ mod tests {
             "@fileimplements SPECIAL.RENDER"
         ));
         assert!(is_reserved_special_annotation("@fileverifies EXPORT.CSV"));
+        assert!(is_reserved_special_annotation("@fileattests EXPORT.CSV"));
         assert!(!is_reserved_special_annotation("@param file output path"));
         assert!(!is_reserved_special_annotation("\\param file output path"));
     }

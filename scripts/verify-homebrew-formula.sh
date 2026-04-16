@@ -18,7 +18,7 @@ PY
 )"
 
 release_json="$(gh release view "v${version}" --repo LabLeaks/special --json assets)"
-formula="$(gh api repos/LabLeaks/homebrew-tap/contents/special.rb --jq .content | base64 --decode)"
+formula="$(gh api repos/LabLeaks/homebrew-tap/contents/Formula/special.rb --jq .content | base64 --decode)"
 
 FORMULA_TEXT="$formula" python3 - "$version" "$release_json" <<'PY'
 import json
@@ -47,6 +47,9 @@ if f'version "{version}"' not in formula:
     fail("formula version mismatch", version)
 if 'bin.install "special"' not in formula:
     fail("formula no longer installs special", formula)
+for helper in ('on_system_conditional(', 'on_arch_conditional('):
+    if helper not in formula:
+        fail("formula is missing platform selection helper", helper)
 
 for name in sorted(required):
     asset = assets[name]

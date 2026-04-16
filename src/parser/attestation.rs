@@ -3,11 +3,11 @@
 Attestation metadata parsing in `src/parser/attestation.rs`.
 */
 // @fileimplements SPECIAL.PARSER.ATTESTATION
+use std::path::Path;
+
 use chrono::NaiveDate;
 
-use crate::model::{CommentBlock, ParsedRepo};
-
-use super::push_diag;
+use crate::model::{CommentBlock, Diagnostic, DiagnosticSeverity, ParsedRepo};
 
 #[derive(Debug, Clone)]
 pub(super) struct AttestationMetadata {
@@ -40,17 +40,11 @@ impl AttestationMetadataDraft {
         }
     }
 
-    fn collect_line(
-        &mut self,
-        parsed: &mut ParsedRepo,
-        block: &CommentBlock,
-        line: usize,
-        text: &str,
-    ) {
+    fn collect_line(&mut self, parsed: &mut ParsedRepo, path: &Path, line: usize, text: &str) {
         let Some((key, value)) = text.split_once(':') else {
-            push_diag(
+            push_attestation_diag(
                 parsed,
-                block,
+                path,
                 line,
                 "attestation metadata must use key: value format",
             );
@@ -66,9 +60,9 @@ impl AttestationMetadataDraft {
             "last_reviewed" => &mut self.last_reviewed,
             "review_interval_days" => &mut self.review_interval_days,
             _ => {
-                push_diag(
+                push_attestation_diag(
                     parsed,
-                    block,
+                    path,
                     line,
                     &format!("unknown attestation metadata `{key}`"),
                 );
@@ -78,9 +72,9 @@ impl AttestationMetadataDraft {
         };
 
         if let Some(first) = slot.as_ref() {
-            push_diag(
+            push_attestation_diag(
                 parsed,
-                block,
+                path,
                 line,
                 &format!(
                     "duplicate attestation metadata `{key}`; first declared on line {}",
@@ -97,7 +91,7 @@ impl AttestationMetadataDraft {
     fn finalize(
         self,
         parsed: &mut ParsedRepo,
-        block: &CommentBlock,
+        path: &Path,
         header_line: usize,
     ) -> Option<AttestationMetadata> {
         let mut valid = self.valid;
@@ -108,31 +102,31 @@ impl AttestationMetadataDraft {
             .unwrap_or(header_line);
         let artifact = required_attestation_value(
             parsed,
-            block,
+            path,
             header_line,
             self.artifact,
             "artifact",
             &mut valid,
         );
         let owner =
-            required_attestation_value(parsed, block, header_line, self.owner, "owner", &mut valid);
+            required_attestation_value(parsed, path, header_line, self.owner, "owner", &mut valid);
         let last_reviewed = required_attestation_value(
             parsed,
-            block,
+            path,
             header_line,
             self.last_reviewed,
             "last_reviewed",
             &mut valid,
         );
         let review_interval_days =
-            optional_review_interval(parsed, block, self.review_interval_days, &mut valid);
+            optional_review_interval(parsed, path, self.review_interval_days, &mut valid);
 
         if let Some(date) = last_reviewed.as_deref()
             && NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err()
         {
-            push_diag(
+            push_attestation_diag(
                 parsed,
-                block,
+                path,
                 last_reviewed_line,
                 "last_reviewed must use YYYY-MM-DD format",
             );
@@ -166,17 +160,72 @@ pub(super) fn parse_attestation_metadata(
             break;
         }
         if !text.is_empty() {
-            metadata.collect_line(parsed, block, block.lines[cursor].line, text);
+            metadata.collect_line(parsed, &block.path, block.lines[cursor].line, text);
         }
         cursor += 1;
     }
 
-    (metadata.finalize(parsed, block, header_line), cursor)
+    (metadata.finalize(parsed, &block.path, header_line), cursor)
+}
+
+pub(super) fn parse_markdown_attestation_metadata(
+    parsed: &mut ParsedRepo,
+    path: &Path,
+    header_line: usize,
+    lines: &[&str],
+    start_index: usize,
+    normalize_line: impl Fn(&str) -> Option<&str>,
+    starts_fence: impl Fn(&str) -> bool,
+) -> (Option<AttestationMetadata>, usize) {
+    let mut metadata = AttestationMetadataDraft::new();
+    let mut cursor = start_index;
+    let mut seen_metadata_line = false;
+    let mut in_code_fence = false;
+
+    while cursor < lines.len() {
+        let raw = lines[cursor];
+        if raw.trim().is_empty() {
+            if seen_metadata_line {
+                break;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        if starts_fence(raw) {
+            if seen_metadata_line {
+                break;
+            }
+            in_code_fence = !in_code_fence;
+            cursor += 1;
+            continue;
+        }
+        if in_code_fence {
+            cursor += 1;
+            continue;
+        }
+
+        let line_number = cursor + 1;
+        let Some(text) = normalize_line(raw).map(str::trim) else {
+            cursor += 1;
+            continue;
+        };
+
+        if text.starts_with('@') || text.starts_with('\\') {
+            break;
+        }
+
+        seen_metadata_line = true;
+        metadata.collect_line(parsed, path, line_number, text);
+        cursor += 1;
+    }
+
+    (metadata.finalize(parsed, path, header_line), cursor)
 }
 
 fn required_attestation_value(
     parsed: &mut ParsedRepo,
-    block: &CommentBlock,
+    path: &Path,
     header_line: usize,
     value: Option<MetadataValue>,
     key: &str,
@@ -185,9 +234,9 @@ fn required_attestation_value(
     match value {
         Some(MetadataValue { value, .. }) if !value.is_empty() => Some(value),
         Some(MetadataValue { line, .. }) => {
-            push_diag(
+            push_attestation_diag(
                 parsed,
-                block,
+                path,
                 line,
                 &format!("missing required attestation metadata `{key}`"),
             );
@@ -195,9 +244,9 @@ fn required_attestation_value(
             None
         }
         None => {
-            push_diag(
+            push_attestation_diag(
                 parsed,
-                block,
+                path,
                 header_line,
                 &format!("missing required attestation metadata `{key}`"),
             );
@@ -209,7 +258,7 @@ fn required_attestation_value(
 
 fn optional_review_interval(
     parsed: &mut ParsedRepo,
-    block: &CommentBlock,
+    path: &Path,
     value: Option<MetadataValue>,
     valid: &mut bool,
 ) -> Option<u32> {
@@ -221,9 +270,9 @@ fn optional_review_interval(
     match value.parse::<u32>() {
         Ok(days) if days > 0 => Some(days),
         Ok(_) | Err(_) => {
-            push_diag(
+            push_attestation_diag(
                 parsed,
-                block,
+                path,
                 diagnostic_line,
                 "review_interval_days must be a positive integer",
             );
@@ -231,4 +280,13 @@ fn optional_review_interval(
             None
         }
     }
+}
+
+fn push_attestation_diag(parsed: &mut ParsedRepo, path: &Path, line: usize, message: &str) {
+    parsed.diagnostics.push(Diagnostic {
+        severity: DiagnosticSeverity::Error,
+        path: path.to_path_buf(),
+        line,
+        message: message.to_string(),
+    });
 }

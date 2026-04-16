@@ -10,7 +10,15 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use toml::Table;
 
-use super::{SpecialToml, SpecialVersion};
+use super::SpecialVersion;
+
+#[derive(Debug, Default)]
+pub(super) struct SpecialToml {
+    pub(super) root: Option<PathBuf>,
+    pub(super) version: SpecialVersion,
+    pub(super) version_explicit: bool,
+    pub(super) ignore_patterns: Vec<String>,
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,4 +146,79 @@ fn line_for_offset(content: &str, offset: usize) -> usize {
         .filter(|byte| *byte == b'\n')
         .count()
         + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::parse_special_toml;
+    use crate::config::SpecialVersion;
+
+    #[test]
+    fn reports_unsupported_special_toml_versions_with_line_context() {
+        let err = parse_special_toml("root = \".\"\nversion = \"9\"\n")
+            .expect_err("unsupported versions should fail");
+
+        assert!(
+            err.to_string()
+                .contains("line 2 uses unsupported `special.toml` version `9`")
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.VERSION
+    fn parses_special_toml_version() {
+        let config =
+            parse_special_toml("version = \"1\"\nroot = \".\"\n").expect("config should parse");
+
+        assert_eq!(config.version, SpecialVersion::V1);
+        assert_eq!(config.root, Some(PathBuf::from(".")));
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.VERSION.DEFAULTS_TO_LEGACY
+    fn defaults_special_toml_version_to_legacy() {
+        let config =
+            parse_special_toml("root = \".\"\n").expect("config without version should parse");
+
+        assert_eq!(config.version, SpecialVersion::V0);
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.VERSION.UNKNOWN_REJECTED
+    fn rejects_unknown_special_toml_version() {
+        let err = parse_special_toml("version = \"2\"\n").expect_err("config should fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported `special.toml` version `2`")
+        );
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.DUPLICATE_KEYS_REJECTED
+    fn rejects_duplicate_special_toml_keys() {
+        let err = parse_special_toml("root = \".\"\nroot = \"workspace\"\n")
+            .expect_err("duplicate root should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("line 2"));
+        assert!(message.contains("root"));
+
+        let err = parse_special_toml("version = \"1\"\nversion = \"0\"\n")
+            .expect_err("duplicate version should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("line 2"));
+        assert!(message.contains("version"));
+    }
+
+    #[test]
+    // @verifies SPECIAL.CONFIG.SPECIAL_TOML.ROOT_MUST_NOT_BE_EMPTY
+    fn rejects_empty_special_toml_root() {
+        let err = parse_special_toml("root = \"\"\n").expect_err("empty root should fail");
+
+        assert!(err.to_string().contains("must not use an empty root path"));
+    }
 }

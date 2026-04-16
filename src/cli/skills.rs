@@ -1,6 +1,6 @@
 /**
 @module SPECIAL.CLI.SKILLS
-User-facing `special skills` command behavior in `src/cli/skills.rs`.
+User-facing `special skills` command boundary in `src/cli/skills.rs`. This module owns overview rendering, destination prompting, and install entrypoint behavior without owning the bundled skill catalog itself.
 */
 // @fileimplements SPECIAL.CLI.SKILLS
 use std::io::{self, Write};

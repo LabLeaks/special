@@ -3,6 +3,9 @@
 Renders projected specs, modules, and lint diagnostics into human-readable text output.
 */
 // @fileimplements SPECIAL.RENDER.TEXT
+mod analysis;
+mod attachments;
+
 use std::fmt::Write;
 
 use askama::Template;
@@ -12,10 +15,14 @@ use crate::model::{
     SpecNode,
 };
 
+use self::analysis::{format_architecture_coverage, render_projected_module_analysis};
+use self::attachments::{
+    render_attest_section, render_implementation_section, render_verify_section,
+};
 use super::common::planned_badge_text;
 use super::projection::{
-    ProjectedArchitectureCoverage, ProjectedModuleAnalysis, project_architecture_coverage_view,
-    project_document, project_module_analysis_view, project_module_document,
+    project_architecture_coverage_view, project_document, project_module_analysis_view,
+    project_module_document,
 };
 use super::templates::{render_template, text_indent};
 
@@ -84,44 +91,8 @@ impl SpecNodeTextTemplate<'_> {
         )
         .expect("string writes should succeed");
 
-        for verify in &self.node.verifies {
-            writeln!(
-                output,
-                "{}  {} {}:{}",
-                indent,
-                verify_label(verify),
-                verify.location.path.display(),
-                verify.location.line
-            )
-            .expect("string writes should succeed");
-            if let Some(body_location) = &verify.body_location {
-                writeln!(
-                    output,
-                    "{}    body at: {}:{}",
-                    indent,
-                    body_location.path.display(),
-                    body_location.line
-                )
-                .expect("string writes should succeed");
-            }
-            if let Some(body) = &verify.body {
-                write_block_text(&mut output, body, self.depth + 2);
-            }
-        }
-
-        for attest in &self.node.attests {
-            writeln!(
-                output,
-                "{}  @attests {}:{}",
-                indent,
-                attest.location.path.display(),
-                attest.location.line
-            )
-            .expect("string writes should succeed");
-            if let Some(body) = &attest.body {
-                write_block_text(&mut output, body, self.depth + 2);
-            }
-        }
+        render_verify_section(&mut output, &indent, self.depth, &self.node.verifies);
+        render_attest_section(&mut output, &indent, self.depth, &self.node.attests);
 
         output
     }
@@ -228,30 +199,7 @@ impl ModuleNodeTextTemplate<'_> {
         )
         .expect("string writes should succeed");
 
-        for implementation in &self.node.implements {
-            writeln!(
-                output,
-                "{}  {} {}:{}",
-                indent,
-                implementation_label(implementation),
-                implementation.location.path.display(),
-                implementation.location.line
-            )
-            .expect("string writes should succeed");
-            if let Some(body_location) = &implementation.body_location {
-                writeln!(
-                    output,
-                    "{}    body at: {}:{}",
-                    indent,
-                    body_location.path.display(),
-                    body_location.line
-                )
-                .expect("string writes should succeed");
-            }
-            if let Some(body) = &implementation.body {
-                write_block_text(&mut output, body, self.depth + 2);
-            }
-        }
+        render_implementation_section(&mut output, &indent, self.depth, &self.node.implements);
 
         output
     }
@@ -318,71 +266,4 @@ pub(super) fn render_lint_text(report: &LintReport) -> String {
     render_template(&LintTextTemplate { report })
         .trim_end()
         .to_string()
-}
-
-fn format_architecture_coverage(coverage: &ProjectedArchitectureCoverage) -> String {
-    let mut output = String::new();
-    writeln!(output, "coverage").expect("string writes should succeed");
-    for count in &coverage.counts {
-        writeln!(output, "  {}: {}", count.label, count.value)
-            .expect("string writes should succeed");
-    }
-    for path in &coverage.uncovered_paths {
-        writeln!(output, "  uncovered path: {path}").expect("string writes should succeed");
-    }
-    for path in &coverage.weak_paths {
-        writeln!(output, "  weak path: {path}").expect("string writes should succeed");
-    }
-
-    output
-}
-
-fn write_block_text(output: &mut String, body: &str, depth: usize) {
-    let indent = text_indent(depth);
-    for line in body.lines() {
-        writeln!(output, "{indent}{line}").expect("string writes should succeed");
-    }
-}
-
-fn render_projected_module_analysis(indent: &str, analysis: &ProjectedModuleAnalysis) -> String {
-    let mut output = String::new();
-    for count in &analysis.counts {
-        writeln!(output, "{}  {}: {}", indent, count.label, count.value)
-            .expect("string writes should succeed");
-    }
-    for explanation in &analysis.explanations {
-        writeln!(
-            output,
-            "{}  {} meaning: {}",
-            indent, explanation.label, explanation.plain
-        )
-        .expect("string writes should succeed");
-        writeln!(
-            output,
-            "{}  {} exact: {}",
-            indent, explanation.label, explanation.precise
-        )
-        .expect("string writes should succeed");
-    }
-    for line in &analysis.meta_lines {
-        writeln!(output, "{}  {}: {}", indent, line.label, line.value)
-            .expect("string writes should succeed");
-    }
-    output
-}
-
-fn verify_label(verify: &crate::model::VerifyRef) -> &'static str {
-    if verify.body_location.is_none() && verify.body.is_some() {
-        "@fileverifies"
-    } else {
-        "@verifies"
-    }
-}
-
-fn implementation_label(implementation: &crate::model::ImplementRef) -> &'static str {
-    if implementation.body_location.is_none() {
-        "@fileimplements"
-    } else {
-        "@implements"
-    }
 }

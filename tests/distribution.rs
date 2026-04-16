@@ -32,13 +32,19 @@ special GitHub release automation publishes checksums for its release archives.
 @spec SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA
 special ships a Homebrew formula in LabLeaks/homebrew-tap.
 
+@spec SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA.PATH
+special keeps its Homebrew formula at `Formula/special.rb` in LabLeaks/homebrew-tap.
+
+@spec SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA.PLATFORM_SELECTION
+special selects its platform-specific Homebrew archive URL and checksum with Homebrew's standard `on_system_conditional` and `on_arch_conditional` helpers.
+
 @spec SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
 special installs the `special` binary from LabLeaks/homebrew-tap.
 
 @attests SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
-artifact: brew upgrade special (confirmed local install for /opt/homebrew/bin/special at v0.2.0)
+artifact: brew install LabLeaks/homebrew-tap/special (confirmed local install for /opt/homebrew/bin/special at v0.4.0)
 owner: gk
-last_reviewed: 2026-04-13
+last_reviewed: 2026-04-16
 
 @module SPECIAL.TESTS.DISTRIBUTION
 Distribution/release asset integration tests in `tests/distribution.rs`.
@@ -212,6 +218,47 @@ fn github_release_workflow_is_committed_and_in_sync() {
         "stdout:\n{}\n\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA.PATH
+fn homebrew_formula_uses_the_standard_formula_path() {
+    let updater = read_repo_file("scripts/update-homebrew-formula.py");
+    assert!(
+        updater.contains("FORMULA_PATH = \"Formula/special.rb\""),
+        "Homebrew updater should target the standard Formula path"
+    );
+
+    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
+    assert!(
+        verifier.contains("contents/Formula/special.rb"),
+        "Homebrew verification should read the standard Formula path"
+    );
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA.PLATFORM_SELECTION
+fn homebrew_formula_uses_standard_platform_selection_helpers() {
+    let updater = read_repo_file("scripts/update-homebrew-formula.py");
+
+    assert!(
+        updater.contains("archive = on_system_conditional("),
+        "Homebrew updater should select the archive with on_system_conditional"
+    );
+    assert!(
+        updater.contains("sha256 on_system_conditional("),
+        "Homebrew updater should select sha256 with on_system_conditional"
+    );
+    assert!(
+        updater.contains("on_arch_conditional("),
+        "Homebrew updater should use on_arch_conditional for architecture-specific values"
+    );
+    assert!(
+        updater.contains(
+            "url \"https://github.com/LabLeaks/special/releases/download/v{version}/#{{archive}}\""
+        ),
+        "Homebrew updater should emit a single active url from the selected archive"
     );
 }
 

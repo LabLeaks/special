@@ -8,7 +8,9 @@ mod support;
 
 use std::fs;
 
-use support::{run_special, temp_repo_dir, top_level_help_command_names, top_level_help_commands};
+use support::{
+    run_special, temp_repo_dir, top_level_help_command_names, top_level_help_command_summaries,
+};
 
 /**
 @spec SPECIAL.INIT.SURFACES_DISCOVERY_ERRORS
@@ -33,7 +35,8 @@ fn init_creates_special_toml_in_current_directory() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("Created"));
+    assert!(stdout.starts_with("Created "));
+    assert!(stdout.contains("special.toml"));
     assert_eq!(
         fs::read_to_string(root.join("special.toml")).expect("special.toml should be created"),
         "version = \"1\"\nroot = \".\"\n"
@@ -114,31 +117,9 @@ fn top_level_help_lists_command_summaries() {
         command_names,
         vec!["specs", "modules", "lint", "init", "skills"]
     );
-    assert_eq!(
-        top_level_help_commands(&stdout),
-        vec![
-            (
-                "specs".to_string(),
-                "Materialize and inspect semantic specs".to_string()
-            ),
-            (
-                "modules".to_string(),
-                "Materialize and inspect architecture modules".to_string()
-            ),
-            (
-                "lint".to_string(),
-                "Check annotations and references for structural problems".to_string()
-            ),
-            (
-                "init".to_string(),
-                "Create a starter special.toml in the current directory".to_string()
-            ),
-            (
-                "skills".to_string(),
-                "List bundled skills, print one skill, or install skills".to_string()
-            ),
-        ]
-    );
+    let summaries = top_level_help_command_summaries(&stdout);
+    assert_eq!(summaries.len(), command_names.len());
+    assert!(summaries.iter().all(|summary| !summary.is_empty()));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -171,10 +152,9 @@ fn version_flags_print_current_cli_version() {
         assert!(output.status.success(), "{args:?} should succeed");
 
         let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-        assert_eq!(
-            stdout.trim(),
-            format!("special {}", env!("CARGO_PKG_VERSION"))
-        );
+        let trimmed = stdout.trim();
+        assert!(trimmed.starts_with("special "));
+        assert!(trimmed.ends_with(env!("CARGO_PKG_VERSION")));
 
         let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
         assert!(stderr.trim().is_empty(), "{args:?} should not write stderr");

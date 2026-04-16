@@ -1,6 +1,6 @@
 /**
 @module SPECIAL
-Repository root application surface for `special`.
+Repository root application surface for `special`. This module wires together the command boundary and the core spec, module, render, and discovery subsystems without owning their internal rules.
 */
 // @fileimplements SPECIAL
 mod annotation_syntax;

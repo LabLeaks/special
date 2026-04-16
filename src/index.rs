@@ -71,7 +71,8 @@ mod tests {
 
     use crate::config::SpecialVersion;
     use crate::model::{
-        AttestRef, NodeKind, ParsedRepo, PlanState, SourceLocation, SpecDecl, SpecFilter, VerifyRef,
+        AttestRef, AttestScope, NodeKind, ParsedRepo, PlanState, SourceLocation, SpecDecl,
+        SpecFilter, VerifyRef,
     };
 
     use super::{build_spec_document, lint_from_parsed, materialize_spec};
@@ -274,26 +275,47 @@ mod tests {
                 1,
             )],
             Vec::new(),
-            vec![AttestRef {
-                spec_id: "UNKNOWN".to_string(),
-                artifact: "docs/report.pdf".to_string(),
-                owner: "security".to_string(),
-                last_reviewed: "2026-04-12".to_string(),
-                review_interval_days: None,
-                location: SourceLocation {
-                    path: "docs/report.txt".into(),
-                    line: 10,
+            vec![
+                AttestRef {
+                    spec_id: "UNKNOWN".to_string(),
+                    artifact: "docs/report.pdf".to_string(),
+                    owner: "security".to_string(),
+                    last_reviewed: "2026-04-12".to_string(),
+                    review_interval_days: None,
+                    scope: AttestScope::Block,
+                    location: SourceLocation {
+                        path: "docs/report.txt".into(),
+                        line: 10,
+                    },
+                    body: Some("@attests UNKNOWN".to_string()),
                 },
-                body: Some("@attests UNKNOWN".to_string()),
-            }],
+                AttestRef {
+                    spec_id: "ALSO_UNKNOWN".to_string(),
+                    artifact: "docs/review.md".to_string(),
+                    owner: "security".to_string(),
+                    last_reviewed: "2026-04-12".to_string(),
+                    review_interval_days: None,
+                    scope: AttestScope::File,
+                    location: SourceLocation {
+                        path: "docs/review.md".into(),
+                        line: 1,
+                    },
+                    body: Some("# Review".to_string()),
+                },
+            ],
         );
 
         let lint = lint_from_parsed(&parsed);
-        assert_eq!(lint.diagnostics.len(), 1);
+        assert_eq!(lint.diagnostics.len(), 2);
         assert!(
             lint.diagnostics[0]
                 .message
                 .contains("unknown spec id `UNKNOWN` referenced by @attests")
+        );
+        assert!(
+            lint.diagnostics[1]
+                .message
+                .contains("unknown spec id `ALSO_UNKNOWN` referenced by @fileattests")
         );
     }
 

@@ -80,8 +80,9 @@ pub(super) fn lint_from_parsed(parsed: &ParsedRepo) -> LintReport {
                 path: attest.location.path.clone(),
                 line: attest.location.line,
                 message: format!(
-                    "unknown spec id `{}` referenced by @attests",
-                    attest.spec_id
+                    "unknown spec id `{}` referenced by {}",
+                    attest.spec_id,
+                    attest.scope.as_annotation()
                 ),
             });
         } else if kinds.get(attest.spec_id.as_str()) == Some(&NodeKind::Group) {
@@ -89,7 +90,11 @@ pub(super) fn lint_from_parsed(parsed: &ParsedRepo) -> LintReport {
                 severity: DiagnosticSeverity::Error,
                 path: attest.location.path.clone(),
                 line: attest.location.line,
-                message: format!("cannot reference @group `{}` from @attests", attest.spec_id),
+                message: format!(
+                    "cannot reference @group `{}` from {}",
+                    attest.spec_id,
+                    attest.scope.as_annotation()
+                ),
             });
         }
     }

@@ -274,6 +274,8 @@ mise exec -- cargo run -- modules --metrics
   Attaches one verification artifact to one claim.
 - `@attests ID`
   Attaches a manual or external attestation to one claim.
+- `@fileattests ID`
+  Attaches one file-scoped attestation artifact to one claim.
 - `@module ID`
   Concrete architecture module.
 - `@area ID`

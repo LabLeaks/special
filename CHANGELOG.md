@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-04-16
+
+- Added `@fileattests` as the file-scoped attestation companion to `@attests`, so long review artifacts can attach predictably without item-scope ambiguity.
+- Tightened the self-hosted architecture around the metrics POC by splitting the extractor, markdown declaration parsing, architecture declaration helpers, and skill-install transaction flow into clearer module boundaries.
+- Refreshed the Homebrew install support record for the current release line and relaxed help-surface verifies so they prove semantic command/help contracts instead of incidental prose.
+- Hardened the reusable spec and architecture audit skills so delegated fan-out reviews explicitly use `special spec ... --verbose` and `special modules ... --verbose/--metrics --verbose` as their primary evidence source.
+
 ## 0.4.0 - 2026-04-15
 
 - Added `special modules --metrics` as a Rust-first architecture-as-implemented view, including ownership coverage, complexity, dependency and coupling evidence, quality signals, and item-level outlier surfacing inside claimed module boundaries.

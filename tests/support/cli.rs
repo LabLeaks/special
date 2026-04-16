@@ -139,6 +139,16 @@ pub fn write_file_verify_fixture(root: &Path) {
     .expect("file verify fixture should be written");
 }
 
+pub fn write_file_attest_fixture(root: &Path) {
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("review.md"),
+        "### @spec DEMO\nDemo root claim.\n\n### @fileattests DEMO\nartifact: docs/review.md\nowner: qa\nlast_reviewed: 2026-04-16\n\n# Review Notes\n\nThe file-level review body stays attached to the whole markdown artifact.\n",
+    )
+    .expect("file attest fixture should be written");
+}
+
 pub fn write_lint_error_fixture(root: &Path) {
     fs::write(
         root.join("specs.rs"),
@@ -691,6 +701,13 @@ pub fn top_level_help_commands(output: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+pub fn top_level_help_command_summaries(output: &str) -> Vec<String> {
+    top_level_help_commands(output)
+        .into_iter()
+        .map(|(_, summary)| summary)
+        .collect()
+}
+
 pub fn skills_command_shape_lines(output: &str) -> Vec<String> {
     let mut lines = Vec::new();
     let mut in_section = false;
@@ -806,6 +823,19 @@ pub fn skills_install_destination_lines(output: &str) -> Vec<String> {
     }
 
     lines
+}
+
+pub fn skills_install_destinations(output: &str) -> Vec<(String, String)> {
+    skills_install_destination_lines(output)
+        .into_iter()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            let mut parts = trimmed.split_whitespace();
+            let name = parts.next()?;
+            let summary = trimmed[name.len()..].trim_start();
+            Some((name.to_string(), summary.to_string()))
+        })
+        .collect()
 }
 
 fn section_items(output: &str, section_heading: &str) -> Vec<String> {

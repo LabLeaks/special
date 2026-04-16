@@ -29,6 +29,21 @@ special supports diff views for spec graph changes.
 ### `@planned`
 special warns when the current project version exactly matches a planned spec's release target string.
 
+### `@spec SPECIAL.ROADMAP.FILE_ATTESTS`
+### `@planned`
+special supports explicit file-scoped attestation artifacts with `@fileattests`.
+
+### `@group SPECIAL.ROADMAP.MODULE_ANALYSIS`
+Future planned expansion of built-in language analysis providers.
+
+### `@spec SPECIAL.ROADMAP.MODULE_ANALYSIS.TYPESCRIPT`
+### `@planned`
+special modules --metrics surfaces built-in TypeScript implementation evidence for owned TypeScript code.
+
+### `@spec SPECIAL.ROADMAP.MODULE_ANALYSIS.GO`
+### `@planned`
+special modules --metrics surfaces built-in Go implementation evidence for owned Go code.
+
 ### `@group SPECIAL.QUALITY`
 special internal quality contracts.
 

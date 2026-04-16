@@ -20,5 +20,6 @@ Use this skill when a product change needs to stay aligned with the contract you
 11. Use `special modules` when the question is architectural: structure, ownership, missing implementation, whether code honestly implements a module, or refactor targets. Use `special specs` when the question is shipped behavior.
 12. Keep the contract on stable, externally meaningful invariants. Avoid promoting incidental implementation details or transient choices into product specs.
 13. When you add or revise verifies, prove observable behavior or other durable outcomes. Avoid tests that depend on internal sequencing unless side effects make that the real contract.
+14. If you delegate spec validation to subagents, explicitly require `special spec SPEC.ID --verbose` or `special spec --all` in the prompt and treat direct file reads as confirmation, not the primary source of truth.
 
 Read [references/change-workflow.md](references/change-workflow.md) for the detailed workflow and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.

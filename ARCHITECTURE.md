@@ -18,6 +18,8 @@ This repo is intentionally split into a few broad responsibilities:
   `special modules --metrics` should keep a shared analysis core and hang
   language-specific analyzers beneath it rather than letting one parser model
   define the whole feature.
+  The next provider expansions should validate that split with TypeScript and Go
+  rather than deepening Rust-only assumptions in the core.
 - boundary commands
   CLI modules should stay thin and orchestrate work rather than own deep policy.
 - release tooling

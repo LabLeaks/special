@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # @module SPECIAL.RELEASE_REVIEW
-# Local-only code-quality review entrypoint that invokes Codex, merges review results, and surfaces release warnings for tagging. Context planning and payload validation live in dedicated helper modules.
+# Local-only code-quality review entrypoint that orchestrates release review and surfaces release warnings for tagging. Context planning, payload validation, Codex invocation policy, and response merging live in dedicated helper modules.
 # @fileimplements SPECIAL.RELEASE_REVIEW
 # @fileverifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SPEC_OWNED
 
@@ -12,17 +12,25 @@ sys.dont_write_bytecode = True
 
 import argparse
 import concurrent.futures
-import hashlib
 import json
 import os
-import subprocess
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from release_review_contract import validate_review_payload
+from release_review_contract import validate_review_payload, validate_review_preview
+from release_review_invoke import (
+    DEFAULT_MODEL,
+    FAST_MODEL,
+    MOCK_ALLOW_ENV,
+    SMART_MODEL,
+    CodexInvocationError,
+    codex_invocation_config,
+    invoke_codex,
+)
+from release_review_merge import merge_pass_responses
 from release_review_pipeline import (
     MAX_CONCURRENT_REVIEW_CHUNKS,
     build_file_contexts,
@@ -39,16 +47,7 @@ from release_review_pipeline import (
 from release_tooling import package_version
 
 
-DEFAULT_MODEL = "gpt-5.3-codex"
-FAST_MODEL = "gpt-5.3-codex-spark"
-SMART_MODEL = "gpt-5.4"
-PERMISSIONS_PROFILE = "release_review"
-MOCK_ALLOW_ENV = "SPECIAL_RUST_RELEASE_REVIEW_ALLOW_MOCK"
 SCHEMA_PATH = Path(__file__).with_name("rust-release-review.schema.json")
-
-
-class CodexInvocationError(RuntimeError):
-    pass
 
 
 def repo_root() -> Path:
@@ -122,166 +121,6 @@ def validate_response_shape(response: dict) -> dict:
     return validate_review_payload(response, subject="review response")
 
 
-def quota_guidance(model_mode: str) -> str | None:
-    if model_mode == "fast":
-        return (
-            f"{FAST_MODEL} appears quota-limited. Rerun without --fast for the default "
-            f"{DEFAULT_MODEL} review, or use --smart for {SMART_MODEL}."
-        )
-    if model_mode == "smart":
-        return (
-            f"{SMART_MODEL} appears quota-limited. Rerun without --smart for the default "
-            f"{DEFAULT_MODEL} review, or use --fast if Spark quota is available."
-        )
-    return None
-
-
-def codex_invocation_config(model: str) -> dict[str, object]:
-    return {
-        "model": model,
-        "sandbox_mode": "read-only",
-        "web_search": "disabled",
-        "default_permissions": PERMISSIONS_PROFILE,
-        "filesystem_permissions": {
-            ":project_roots": {
-                ".": "read",
-            }
-        },
-    }
-
-
-def codex_exec_command(model: str) -> list[str]:
-    config = codex_invocation_config(model)
-    filesystem_toml = '{":project_roots"={"."="read"}}'
-    return [
-        "codex",
-        "exec",
-        "--ephemeral",
-        "--sandbox",
-        str(config["sandbox_mode"]),
-        "-c",
-        f'web_search="{config["web_search"]}"',
-        "-c",
-        f'default_permissions="{config["default_permissions"]}"',
-        "-c",
-        f"permissions.{config['default_permissions']}.filesystem={filesystem_toml}",
-        "--skip-git-repo-check",
-        "--model",
-        model,
-        "--output-schema",
-        str(SCHEMA_PATH),
-        "-",
-    ]
-
-
-def invoke_codex(root: Path, prompt: str, model: str, model_mode: str) -> dict:
-    mocked = os.environ.get("SPECIAL_RUST_RELEASE_REVIEW_MOCK_OUTPUT")
-    if mocked and os.environ.get(MOCK_ALLOW_ENV) == "1":
-        try:
-            return validate_response_shape(json.loads(mocked))
-        except (json.JSONDecodeError, SystemExit) as err:
-            raise CodexInvocationError(f"mocked review output was invalid: {err}") from err
-
-    result = subprocess.run(
-        codex_exec_command(model),
-        cwd=root,
-        input=prompt,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        lower = stderr.lower()
-        guidance = (
-            quota_guidance(model_mode)
-            if any(token in lower for token in ("quota", "rate limit", "usage limit", "5hr", "7day"))
-            else None
-        )
-        if guidance:
-            raise CodexInvocationError(f"{stderr}\n{guidance}")
-        raise CodexInvocationError(stderr or f"codex exited with status {result.returncode}")
-
-    try:
-        return validate_response_shape(json.loads(result.stdout))
-    except (json.JSONDecodeError, SystemExit) as err:
-        raise CodexInvocationError(f"codex returned invalid structured output: {err}") from err
-
-
-def merge_pass_responses(
-    base: str | None,
-    full_scan: bool,
-    responses: list[tuple[str, int, dict]],
-    runner_warnings: list[str],
-) -> dict:
-    warnings: list[dict] = []
-    seen: set[str] = set()
-
-    for pass_name, chunk_index, response in responses:
-        for warning in response.get("warnings", []):
-            dedupe_key = warning_dedupe_key(warning)
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-            merged = dict(warning)
-            merged["id"] = stable_warning_id(pass_name, warning)
-            warnings.append(merged)
-
-    warnings.sort(key=warning_sort_key)
-
-    if warnings:
-        summary = f"{len(warnings)} warn-level issue(s) found across {len(responses)} review chunk(s)."
-    else:
-        summary = "No warn-level issues found across release review chunks."
-    if runner_warnings:
-        summary += f" {len(runner_warnings)} runner warning(s) occurred."
-
-    return {
-        "baseline": base,
-        "full_scan": full_scan,
-        "summary": summary,
-        "warnings": warnings,
-    }
-
-
-def warning_dedupe_key(warning: dict) -> str:
-    evidence = [
-        {
-            "path": item.get("path"),
-            "line": item.get("line"),
-            "detail": item.get("detail"),
-        }
-        for item in warning.get("evidence", [])
-    ]
-    return json.dumps(
-        {
-            "category": warning.get("category"),
-            "title": warning.get("title"),
-            "evidence": evidence,
-        },
-        sort_keys=True,
-    )
-
-
-def stable_warning_id(pass_name: str, warning: dict) -> str:
-    digest = hashlib.sha1(warning_dedupe_key(warning).encode("utf-8")).hexdigest()[:12]
-    return f"{pass_name}:{warning['category']}:{digest}"
-
-
-def warning_sort_key(warning: dict) -> tuple[object, ...]:
-    anchors = []
-    for item in warning.get("evidence", []):
-        anchors.append((item.get("path") or "", item.get("line") or 0, item.get("detail") or ""))
-    anchors.sort()
-    first_anchor = anchors[0] if anchors else ("", 0, "")
-    return (
-        warning.get("category", ""),
-        first_anchor[0],
-        first_anchor[1],
-        warning.get("title", ""),
-        warning.get("id", ""),
-    )
-
-
 def main() -> int:
     args = parse_args()
     root = repo_root()
@@ -346,43 +185,42 @@ def main() -> int:
         chunk_records.extend(chunks)
 
     if args.dry_run:
-        print(
-            json.dumps(
-                {
-                    "model": model,
-                    "review_mode": review_mode,
-                    "codex_invocation": codex_invocation_config(model),
-                    "schema_path": str(SCHEMA_PATH),
-                    "backend": backend,
-                    "baseline": base,
-                    "head": head,
-                    "full_scan": args.full,
-                    "changed_files": review_files,
-                    "runner_warnings": runner_warnings,
-                    "review_passes": [
-                        {
-                            "name": review_pass["name"],
-                            "focus": review_pass["focus"],
-                            "files": review_pass["files"],
-                            "chunks": [
-                                {
-                                    "chunk_index": chunk["chunk_index"],
-                                    "chunk_count": chunk["chunk_count"],
-                                    "files": chunk["files"],
-                                    "estimated_chars": chunk["estimated_chars"],
-                                    "file_contexts": chunk["file_contexts"],
-                                    "prompt": chunk["prompt"],
-                                }
-                                for chunk in chunk_records
-                                if chunk["name"] == review_pass["name"]
-                            ],
-                        }
-                        for review_pass in review_passes
-                    ],
-                },
-                indent=2,
-            )
+        preview = validate_review_preview(
+            {
+                "model": model,
+                "review_mode": review_mode,
+                "codex_invocation": codex_invocation_config(model),
+                "schema_path": str(SCHEMA_PATH),
+                "backend": backend,
+                "baseline": base,
+                "head": head,
+                "full_scan": args.full,
+                "changed_files": review_files,
+                "runner_warnings": runner_warnings,
+                "review_passes": [
+                    {
+                        "name": review_pass["name"],
+                        "focus": review_pass["focus"],
+                        "files": review_pass["files"],
+                        "chunks": [
+                            {
+                                "chunk_index": chunk["chunk_index"],
+                                "chunk_count": chunk["chunk_count"],
+                                "files": chunk["files"],
+                                "estimated_chars": chunk["estimated_chars"],
+                                "file_contexts": chunk["file_contexts"],
+                                "prompt": chunk["prompt"],
+                            }
+                            for chunk in chunk_records
+                            if chunk["name"] == review_pass["name"]
+                        ],
+                    }
+                    for review_pass in review_passes
+                ],
+            },
+            subject="review dry-run preview",
         )
+        print(json.dumps(preview, indent=2))
         return 0
 
     if running_in_ci():
@@ -409,6 +247,8 @@ def main() -> int:
                 str(chunk["prompt"]),
                 model,
                 review_mode,
+                SCHEMA_PATH,
+                validate_response_shape,
             ): chunk
             for chunk in chunk_records
         }

@@ -193,7 +193,7 @@ impl SpecNodeHtmlTemplate<'_> {
             .attests
             .iter()
             .map(|attest| HtmlDetailSection {
-                label: "@attests",
+                label: attest_label(attest),
                 location: format!(
                     "{}:{}",
                     attest.location.path.display(),
@@ -481,4 +481,8 @@ fn implementation_label(implementation: &crate::model::ImplementRef) -> &'static
     } else {
         "@implements"
     }
+}
+
+fn attest_label(attest: &crate::model::AttestRef) -> &'static str {
+    attest.scope.as_annotation()
 }

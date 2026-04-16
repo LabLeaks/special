@@ -1,6 +1,6 @@
 /**
 @module SPECIAL.SKILLS
-Bundled skill catalog in `src/skills.rs`.
+Bundled skill catalog and install-facing asset definitions in `src/skills.rs`. This module owns which bundled skills ship with the binary and the files each skill installation materializes.
 */
 // @fileimplements SPECIAL.SKILLS
 mod install;

@@ -4,15 +4,13 @@ Handles spec and group declaration parsing, description ownership, and standalon
 */
 // @fileimplements SPECIAL.PARSER.BLOCK.DECLARATIONS
 use crate::annotation_syntax::{ReservedSpecialAnnotation, reserved_special_annotation_rest};
-use crate::model::{
-    CommentBlock, NodeKind, ParsedRepo, PlanState, PlannedRelease, SourceLocation, SpecDecl,
-};
+use crate::model::{CommentBlock, NodeKind, ParsedRepo, PlanState, PlannedRelease, SourceLocation};
 use crate::planned_syntax::{PlannedAnnotationError, PlannedSyntax};
 
-use super::super::planned::{
-    AdjacentPlanned, DeclHeader, DeclHeaderError, consume_adjacent_planned,
-    parse_standalone_planned,
+use super::super::declarations::{
+    AdjacentPlanned, build_spec_decl, parse_adjacent_spec_planned, parse_spec_decl_header,
 };
+use super::super::planned::parse_standalone_planned;
 use super::super::push_diag;
 use super::{ParseRules, collect_description_lines};
 
@@ -47,7 +45,16 @@ pub(super) fn handle_decl_line(
                 .map(|rest| (NodeKind::Group, rest))
         })?;
 
-    let header = parse_decl_header(kind, rest, parsed, block, line, rules)?;
+    let (header, header_diag) = match parse_spec_decl_header(kind, rest, rules.planned) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            push_diag(parsed, block, line, &message);
+            return None;
+        }
+    };
+    if let Some(message) = header_diag {
+        push_diag(parsed, block, line, &message);
+    }
     let (adjacent_planned, adjacent_planned_release, mut cursor) =
         adjacent_planned_state(block, parsed, kind, index, rules);
 
@@ -61,21 +68,12 @@ pub(super) fn handle_decl_line(
     }
 
     let description_lines = collect_description_lines(block, &mut cursor);
-    let planned_release = if header.planned {
-        header.planned_release
-    } else {
-        adjacent_planned_release
-    };
-    let plan = if header.planned || adjacent_planned {
-        PlanState::planned(planned_release)
-    } else {
-        PlanState::live()
-    };
-    let spec = match SpecDecl::new(
-        header.id.to_string(),
+    let spec = match build_spec_decl(
+        header,
         kind,
         description_lines.join(" "),
-        plan,
+        adjacent_planned,
+        adjacent_planned_release,
         SourceLocation {
             path: block.path.clone(),
             line,
@@ -132,84 +130,21 @@ fn adjacent_planned_state(
     index: usize,
     rules: ParseRules,
 ) -> (bool, Option<PlannedRelease>, usize) {
-    match consume_adjacent_planned(block, kind, index, rules.planned) {
-        AdjacentPlanned::Absent(cursor) => (false, None, cursor),
-        AdjacentPlanned::Parsed(release, cursor) => (true, release, cursor),
-        AdjacentPlanned::Invalid(message, cursor) => {
-            push_diag(parsed, block, block.lines[index + 1].line, message);
-            (false, None, cursor)
-        }
-    }
-}
-
-fn parse_decl_header<'a>(
-    kind: NodeKind,
-    rest: &'a str,
-    parsed: &mut ParsedRepo,
-    block: &CommentBlock,
-    line: usize,
-    rules: ParseRules,
-) -> Option<DeclHeader<'a>> {
-    let rest = rest.trim();
-    let mut header = match DeclHeader::parse(rest, rules.planned) {
-        Ok(header) => header,
-        Err(DeclHeaderError::MissingId) => {
-            let annotation = if kind == NodeKind::Spec {
-                "@spec"
-            } else {
-                "@group"
-            };
-            push_diag(
-                parsed,
-                block,
-                line,
-                &format!("missing spec id after {annotation}"),
-            );
-            return None;
-        }
-        Err(DeclHeaderError::InvalidTrailingContent) => {
-            push_diag(
-                parsed,
-                block,
-                line,
-                invalid_trailing_content_message(kind, rules.planned),
-            );
-            return None;
-        }
-        Err(DeclHeaderError::InvalidPlannedRelease) => {
-            push_diag(
-                parsed,
-                block,
-                line,
-                "planned release metadata must not be empty",
-            );
-            return None;
-        }
+    let next_index = index + 1;
+    let Some(next) = block.lines.get(next_index) else {
+        return (false, None, next_index);
     };
 
-    if header.planned && kind == NodeKind::Group {
-        push_diag(
-            parsed,
-            block,
-            line,
-            "@planned may only apply to @spec, not @group",
-        );
-        header.planned = false;
-    }
-
-    Some(header)
-}
-
-fn invalid_trailing_content_message(kind: NodeKind, planned: PlannedSyntax) -> &'static str {
-    match (kind, planned) {
-        (NodeKind::Group, _) => {
-            "unexpected trailing content after group id; only the id belongs on the @group line"
-        }
-        (NodeKind::Spec, PlannedSyntax::LegacyBackward) => {
-            "unexpected trailing content after spec id; compatibility parsing does not allow inline `@planned`"
-        }
-        (NodeKind::Spec, PlannedSyntax::AdjacentOwnedSpec) => {
-            "unexpected trailing content after spec id; use an exact trailing `@planned` marker if needed"
+    let (state, release, message) =
+        parse_adjacent_spec_planned(kind, next.text.trim(), rules.planned);
+    match state {
+        AdjacentPlanned::Absent => (false, None, next_index),
+        AdjacentPlanned::Parsed => (true, release, next_index + 1),
+        AdjacentPlanned::Invalid => {
+            if let Some(message) = message {
+                push_diag(parsed, block, next.line, message);
+            }
+            (false, None, next_index + 1)
         }
     }
 }

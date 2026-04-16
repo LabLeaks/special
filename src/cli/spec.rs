@@ -51,7 +51,7 @@ special lint reports annotation parsing and reference errors.
 special lint reports @verifies references to unknown spec ids.
 
 @spec SPECIAL.LINT_COMMAND.UNKNOWN_ATTEST_REFS
-special lint reports @attests references to unknown spec ids.
+special lint reports @attests and @fileattests references to unknown spec ids.
 
 @spec SPECIAL.LINT_COMMAND.INTERMEDIATE_SPECS
 special lint reports missing intermediate spec ids in dot-path hierarchies.

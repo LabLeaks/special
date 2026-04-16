@@ -56,6 +56,9 @@ special counts a @verifies reference as support only when it successfully attach
 @spec SPECIAL.PARSE.ATTESTS
 special parses @attests records from annotation blocks.
 
+@spec SPECIAL.PARSE.ATTESTS.FILE_SCOPE
+special parses @fileattests records as file-scoped attestation attachments over the containing file in source comments and markdown annotation files.
+
 @spec SPECIAL.PARSE.ATTESTS.REQUIRED_FIELDS
 special requires the mandatory metadata fields for @attests.
 
@@ -77,6 +80,7 @@ Interprets reserved spec annotations from extracted comment blocks, applies dial
 // @fileimplements SPECIAL.PARSER
 mod attestation;
 mod block;
+mod declarations;
 mod markdown;
 mod planned;
 
@@ -88,7 +92,6 @@ use crate::extractor::collect_comment_blocks;
 use crate::model::{CommentBlock, Diagnostic, DiagnosticSeverity, ParsedRepo};
 use block::{ParseRules, parse_block};
 use markdown::parse_markdown_declarations;
-use planned::{DeclHeader, DeclHeaderError, parse_standalone_planned};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseDialect {
@@ -150,7 +153,9 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::config::SpecialVersion;
-    use crate::model::{BlockLine, CommentBlock, NodeKind, OwnedItem, ParsedRepo, SourceLocation};
+    use crate::model::{
+        AttestScope, BlockLine, CommentBlock, NodeKind, OwnedItem, ParsedRepo, SourceLocation,
+    };
 
     use super::{ParseDialect, ParseRules, parse_block};
 
@@ -710,6 +715,7 @@ mod tests {
         let parsed = parse_current(&block);
 
         assert_eq!(parsed.attests.len(), 1);
+        assert_eq!(parsed.attests[0].scope, AttestScope::Block);
         assert!(
             parsed.attests[0]
                 .body
@@ -764,6 +770,61 @@ mod tests {
                 .any(|message| message.contains("missing required attestation metadata `owner`"))
         );
         assert_eq!(lines, vec![2, 1, 1]);
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.ATTESTS.FILE_SCOPE
+    fn parses_file_scoped_attestation_blocks() {
+        let path = std::env::temp_dir().join(format!(
+            "special-parser-file-attests-{}-{}.rs",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        fs::write(
+            &path,
+            "// @fileattests AUTH\n// artifact: docs/auth-review.md\n// owner: security\n// last_reviewed: 2026-04-16\nfn helper() {}\n",
+        )
+        .expect("fixture should be written");
+        let block = CommentBlock {
+            path: path.clone(),
+            lines: vec![
+                BlockLine {
+                    line: 1,
+                    text: "@fileattests AUTH".to_string(),
+                },
+                BlockLine {
+                    line: 2,
+                    text: "artifact: docs/auth-review.md".to_string(),
+                },
+                BlockLine {
+                    line: 3,
+                    text: "owner: security".to_string(),
+                },
+                BlockLine {
+                    line: 4,
+                    text: "last_reviewed: 2026-04-16".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+
+        let parsed = parse_current(&block);
+
+        assert_eq!(parsed.attests.len(), 1);
+        assert_eq!(parsed.attests[0].scope, AttestScope::File);
+        assert!(
+            parsed.attests[0]
+                .body
+                .as_deref()
+                .expect("attest body should be present")
+                .contains("fn helper() {}")
+        );
+        assert!(parsed.diagnostics.is_empty());
+
+        fs::remove_file(path).expect("fixture should be removed");
     }
 
     #[test]
@@ -1177,13 +1238,17 @@ mod tests {
                     line: 4,
                     text: "@fileverifies".to_string(),
                 },
+                BlockLine {
+                    line: 5,
+                    text: "@fileattests".to_string(),
+                },
             ],
             owned_item: None,
         };
 
         let parsed = parse_current(&block);
 
-        assert_eq!(parsed.diagnostics.len(), 4);
+        assert_eq!(parsed.diagnostics.len(), 5);
         assert!(
             parsed.diagnostics[0]
                 .message
@@ -1203,6 +1268,11 @@ mod tests {
             parsed.diagnostics[3]
                 .message
                 .contains("missing spec id after @fileverifies")
+        );
+        assert!(
+            parsed.diagnostics[4]
+                .message
+                .contains("missing spec id after @fileattests")
         );
     }
 

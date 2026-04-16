@@ -25,5 +25,6 @@ Use this skill when you need to judge whether a concrete architecture module is 
 11. Treat duplicate `@implements`, unknown module ids, and area-targeted `@implements` as architecture integrity problems.
 12. Keep product-contract questions separate. If the real question is shipped behavior or whether a test proves a claim, switch to `special specs` and the product-spec workflow instead.
 13. Remember that `@implements` is traceability, not behavior proof. A module may have multiple implementing sites, but broad spread is a smell worth calling out.
+14. If you delegate or fan this review out to subagents, explicitly instruct each agent to run `special modules ... --verbose` and `special modules ... --metrics --verbose` themselves. Do not rely on freehand code reading alone for architecture correspondence audits.
 
 Read [references/validation-checklist.md](references/validation-checklist.md) for the review rubric and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.
