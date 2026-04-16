@@ -79,7 +79,11 @@ def existing_tags(root: Path) -> set[str]:
 
 
 def current_revision(root: Path) -> str:
-    return run_checked(root, ["jj", "log", "-r", "@", "--no-graph", "-T", "commit_id"]).strip()
+    return run_checked(root, ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"]).strip()
+
+
+def tag_revision(root: Path, tag: str) -> str:
+    return run_checked(root, ["jj", "log", "-r", tag, "--no-graph", "-T", "commit_id"]).strip()
 
 
 def prompt_checklist() -> None:
@@ -145,7 +149,8 @@ def main() -> int:
     if not root.joinpath(".jj").exists():
         raise SystemExit("release publishing requires a jj repository root")
     revision = current_revision(root)
-    if tag in existing_tags(root) and not args.allow_existing_tag:
+    tag_exists = tag in existing_tags(root)
+    if tag_exists and not args.allow_existing_tag:
         raise SystemExit(f"release tag `{tag}` already exists")
     if tag != manifest_tag:
         raise SystemExit(
@@ -154,7 +159,8 @@ def main() -> int:
 
     bookmark_command = ["jj", "bookmark", "set", "main", "-r", revision]
     tag_command = ["jj", "tag", "set", tag, "-r", revision]
-    push_command = ["jj", "git", "push", "--bookmark", "main", "--tag", tag]
+    push_main_command = ["jj", "git", "push", "--bookmark", "main"]
+    push_tag_command = ["git", "push", "origin", f"refs/tags/{tag}"]
     verify_github_release_command = [
         "bash",
         str(SCRIPT_DIR / "verify-github-release-published.sh"),
@@ -177,7 +183,8 @@ def main() -> int:
                     "checklist": CHECKLIST,
                     "bookmark_command": bookmark_command,
                     "tag_command": tag_command,
-                    "push_command": push_command,
+                    "push_main_command": push_main_command,
+                    "push_tag_command": push_tag_command,
                     "verify_github_release_command": verify_github_release_command,
                     "update_homebrew_formula_command": update_homebrew_formula_command,
                     "verify_homebrew_formula_command": verify_homebrew_formula_command,
@@ -191,8 +198,10 @@ def main() -> int:
         prompt_checklist()
 
     run_step(root, "bookmark_main", bookmark_command, args)
-    run_step(root, "set_tag", tag_command, args)
-    run_step(root, "push_release", push_command, args)
+    if not (tag_exists and tag_revision(root, tag) == revision):
+        run_step(root, "set_tag", tag_command, args)
+    run_step(root, "push_main", push_main_command, args)
+    run_step(root, "push_tag", push_tag_command, args)
     wait_for_github_release(root, "verify_github_release", verify_github_release_command, args)
     run_step(root, "update_homebrew_formula", update_homebrew_formula_command, args)
     run_step(root, "verify_homebrew_formula", verify_homebrew_formula_command, args)

@@ -15,7 +15,7 @@ the release script dry-run prints the planned checklist and publication commands
 the release script requires the requested tag version to exactly match the current `Cargo.toml` package version.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.PUSHES_MAIN_AND_TAG
-the release script publishes the release revision by pushing both the `main` bookmark and the release tag to origin.
+the release script publishes the release revision by pushing the `main` bookmark with Jujutsu and the release Git tag to origin.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.VERIFIES_GITHUB_RELEASE
 after pushing the release tag, the release script waits for the GitHub release artifacts to publish and verifies the release asset set.
@@ -100,17 +100,26 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
         ]
     );
     assert_eq!(
-        payload["push_command"]
+        payload["push_main_command"]
             .as_array()
-            .expect("push_command should be an array"),
+            .expect("push_main_command should be an array"),
         &vec![
             Value::String("jj".to_string()),
             Value::String("git".to_string()),
             Value::String("push".to_string()),
             Value::String("--bookmark".to_string()),
             Value::String("main".to_string()),
-            Value::String("--tag".to_string()),
-            Value::String(format!("v{version}")),
+        ]
+    );
+    assert_eq!(
+        payload["push_tag_command"]
+            .as_array()
+            .expect("push_tag_command should be an array"),
+        &vec![
+            Value::String("git".to_string()),
+            Value::String("push".to_string()),
+            Value::String("origin".to_string()),
+            Value::String(format!("refs/tags/v{version}")),
         ]
     );
     assert_eq!(
@@ -188,7 +197,8 @@ fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_ste
         vec![
             "bookmark_main",
             "set_tag",
-            "push_release",
+            "push_main",
+            "push_tag",
             "verify_github_release",
             "update_homebrew_formula",
             "verify_homebrew_formula",
@@ -203,17 +213,26 @@ fn release_tag_dry_run_pushes_main_bookmark_and_release_tag() {
     let payload = release_tag_dry_run(&version, &[]);
 
     assert_eq!(
-        payload["push_command"]
+        payload["push_main_command"]
             .as_array()
-            .expect("push_command should be an array"),
+            .expect("push_main_command should be an array"),
         &vec![
             Value::String("jj".to_string()),
             Value::String("git".to_string()),
             Value::String("push".to_string()),
             Value::String("--bookmark".to_string()),
             Value::String("main".to_string()),
-            Value::String("--tag".to_string()),
-            Value::String(format!("v{version}")),
+        ]
+    );
+    assert_eq!(
+        payload["push_tag_command"]
+            .as_array()
+            .expect("push_tag_command should be an array"),
+        &vec![
+            Value::String("git".to_string()),
+            Value::String("push".to_string()),
+            Value::String("origin".to_string()),
+            Value::String(format!("refs/tags/v{version}")),
         ]
     );
 }
