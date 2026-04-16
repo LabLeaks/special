@@ -1,18 +1,30 @@
 /**
 @module SPECIAL.PARSER.DECLARATIONS
-Shared spec declaration semantics across source comment blocks and markdown declarations, including header validation, adjacent planned-marker interpretation, and final spec construction. This module does not scan source blocks or markdown files.
+Shared spec declaration semantics across source comment blocks and markdown declarations, including header validation, adjacent lifecycle-marker interpretation, and final spec construction. This module does not scan source blocks or markdown files.
 */
 // @fileimplements SPECIAL.PARSER.DECLARATIONS
-use crate::model::{NodeKind, PlanState, PlannedRelease, SourceLocation, SpecDecl};
+use crate::model::{
+    DeprecatedRelease, NodeKind, PlanState, PlannedRelease, SourceLocation, SpecDecl,
+};
 use crate::planned_syntax::{PlannedAnnotationError, PlannedSyntax};
 
-use super::planned::{DeclHeader, DeclHeaderError, parse_standalone_planned};
+use super::planned::{
+    DeclHeader, DeclHeaderError, parse_standalone_deprecated, parse_standalone_planned,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AdjacentPlanned {
+pub(super) enum AdjacentLifecycle {
     Absent,
     Parsed,
     Invalid,
+}
+
+#[derive(Debug)]
+pub(super) struct SpecLifecycleMarkers {
+    pub(super) planned: bool,
+    pub(super) planned_release: Option<PlannedRelease>,
+    pub(super) deprecated: bool,
+    pub(super) deprecated_release: Option<DeprecatedRelease>,
 }
 
 pub(super) fn parse_spec_decl_header<'a>(
@@ -37,14 +49,26 @@ pub(super) fn parse_spec_decl_header<'a>(
         Err(DeclHeaderError::InvalidPlannedRelease) => {
             return Err("planned release metadata must not be empty".to_string());
         }
+        Err(DeclHeaderError::InvalidDeprecatedRelease) => {
+            return Err("deprecated release metadata must not be empty".to_string());
+        }
     };
 
-    if header.planned && kind == NodeKind::Group {
-        header.planned = false;
-        return Ok((
-            header,
-            Some("@planned may only apply to @spec, not @group".to_string()),
-        ));
+    if kind == NodeKind::Group {
+        if header.planned {
+            header.planned = false;
+            return Ok((
+                header,
+                Some("@planned may only apply to @spec, not @group".to_string()),
+            ));
+        }
+        if header.deprecated {
+            header.deprecated = false;
+            return Ok((
+                header,
+                Some("@deprecated may only apply to @spec, not @group".to_string()),
+            ));
+        }
     }
 
     Ok((header, None))
@@ -55,29 +79,61 @@ pub(super) fn parse_adjacent_spec_planned(
     text: &str,
     planned: PlannedSyntax,
 ) -> (
-    AdjacentPlanned,
+    AdjacentLifecycle,
     Option<PlannedRelease>,
     Option<&'static str>,
 ) {
     if planned != PlannedSyntax::AdjacentOwnedSpec || kind != NodeKind::Spec {
-        return (AdjacentPlanned::Absent, None, None);
+        return (AdjacentLifecycle::Absent, None, None);
     }
 
     let Some(result) = parse_standalone_planned(text) else {
-        return (AdjacentPlanned::Absent, None, None);
+        return (AdjacentLifecycle::Absent, None, None);
     };
 
     match result {
-        Ok(release) => (AdjacentPlanned::Parsed, release, None),
+        Ok(release) => (AdjacentLifecycle::Parsed, release, None),
         Err(PlannedAnnotationError::InvalidRelease) => (
-            AdjacentPlanned::Invalid,
+            AdjacentLifecycle::Invalid,
             None,
             Some("planned release metadata must not be empty"),
         ),
         Err(PlannedAnnotationError::InvalidSuffix) => (
-            AdjacentPlanned::Invalid,
+            AdjacentLifecycle::Invalid,
             None,
             Some("use an exact standalone `@planned` marker with no trailing suffix"),
+        ),
+    }
+}
+
+pub(super) fn parse_adjacent_spec_deprecated(
+    kind: NodeKind,
+    text: &str,
+    planned: PlannedSyntax,
+) -> (
+    AdjacentLifecycle,
+    Option<DeprecatedRelease>,
+    Option<&'static str>,
+) {
+    if planned != PlannedSyntax::AdjacentOwnedSpec || kind != NodeKind::Spec {
+        return (AdjacentLifecycle::Absent, None, None);
+    }
+
+    let Some(result) = parse_standalone_deprecated(text) else {
+        return (AdjacentLifecycle::Absent, None, None);
+    };
+
+    match result {
+        Ok(release) => (AdjacentLifecycle::Parsed, release, None),
+        Err(PlannedAnnotationError::InvalidRelease) => (
+            AdjacentLifecycle::Invalid,
+            None,
+            Some("deprecated release metadata must not be empty"),
+        ),
+        Err(PlannedAnnotationError::InvalidSuffix) => (
+            AdjacentLifecycle::Invalid,
+            None,
+            Some("use an exact standalone `@deprecated` marker with no trailing suffix"),
         ),
     }
 }
@@ -86,22 +142,36 @@ pub(super) fn build_spec_decl(
     header: DeclHeader<'_>,
     kind: NodeKind,
     text: String,
-    adjacent_planned: bool,
-    adjacent_planned_release: Option<PlannedRelease>,
+    lifecycle: SpecLifecycleMarkers,
     location: SourceLocation,
 ) -> Result<SpecDecl, String> {
     let planned_release = if header.planned {
         header.planned_release
     } else {
-        adjacent_planned_release
+        lifecycle.planned_release
     };
-    let plan = if header.planned || adjacent_planned {
+    let deprecated_release = if header.deprecated {
+        header.deprecated_release
+    } else {
+        lifecycle.deprecated_release
+    };
+    let plan = if header.planned || lifecycle.planned {
         PlanState::planned(planned_release)
     } else {
         PlanState::live()
     };
+    let is_deprecated = header.deprecated || lifecycle.deprecated;
 
-    SpecDecl::new(header.id.to_string(), kind, text, plan, location).map_err(|err| err.to_string())
+    SpecDecl::new(
+        header.id.to_string(),
+        kind,
+        text,
+        plan,
+        is_deprecated,
+        deprecated_release,
+        location,
+    )
+    .map_err(|err| err.to_string())
 }
 
 fn invalid_trailing_content_message(kind: NodeKind, planned: PlannedSyntax) -> &'static str {
@@ -113,7 +183,7 @@ fn invalid_trailing_content_message(kind: NodeKind, planned: PlannedSyntax) -> &
             "unexpected trailing content after spec id; compatibility parsing does not allow inline `@planned`"
         }
         (NodeKind::Spec, PlannedSyntax::AdjacentOwnedSpec) => {
-            "unexpected trailing content after spec id; use an exact trailing `@planned` marker if needed"
+            "unexpected trailing content after spec id; use an exact trailing `@planned` or `@deprecated` marker if needed"
         }
     }
 }

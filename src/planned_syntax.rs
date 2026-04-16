@@ -1,9 +1,9 @@
 /**
 @module SPECIAL.PLANNED_SYNTAX
-Shared parsing rules for `@planned` annotations, including exact boundary handling for standalone and inline forms.
+Shared parsing rules for `@planned` and `@deprecated` annotations, including exact boundary handling for standalone and inline forms.
 */
 // @fileimplements SPECIAL.PLANNED_SYNTAX
-use crate::model::PlannedRelease;
+use crate::model::{DeprecatedRelease, PlannedRelease};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlannedSyntax {
@@ -28,6 +28,7 @@ pub(crate) enum DeclHeaderError {
     MissingId,
     InvalidTrailingContent,
     InvalidPlannedRelease,
+    InvalidDeprecatedRelease,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +41,8 @@ pub(crate) struct ParsedDeclHeader<'a> {
     pub(crate) id: &'a str,
     pub(crate) planned: bool,
     pub(crate) planned_release: Option<PlannedRelease>,
+    pub(crate) deprecated: bool,
+    pub(crate) deprecated_release: Option<DeprecatedRelease>,
 }
 
 pub(crate) fn parse_decl_header<'a>(
@@ -58,6 +61,8 @@ pub(crate) fn parse_decl_header<'a>(
                     id,
                     planned: false,
                     planned_release: None,
+                    deprecated: false,
+                    deprecated_release: None,
                 })
             } else {
                 Err(DeclHeaderError::InvalidTrailingContent)
@@ -71,24 +76,43 @@ pub(crate) fn parse_decl_header<'a>(
             }
 
             let suffix = parts.next().map(str::trim_start).unwrap_or_default();
-            let (inline_planned, planned_release) = if suffix.is_empty() {
-                (false, None)
-            } else {
-                match parse_planned_annotation(suffix, PlannedAnnotationContext::Inline) {
-                    Some(Ok(annotation)) => (true, annotation.release),
-                    Some(Err(PlannedAnnotationError::InvalidRelease)) => {
-                        return Err(DeclHeaderError::InvalidPlannedRelease);
+            let (inline_planned, planned_release, inline_deprecated, deprecated_release) =
+                if suffix.is_empty() {
+                    (false, None, false, None)
+                } else if let Some(result) =
+                    parse_planned_annotation(suffix, PlannedAnnotationContext::Inline)
+                {
+                    match result {
+                        Ok(annotation) => (true, annotation.release, false, None),
+                        Err(PlannedAnnotationError::InvalidRelease) => {
+                            return Err(DeclHeaderError::InvalidPlannedRelease);
+                        }
+                        Err(PlannedAnnotationError::InvalidSuffix) => {
+                            return Err(DeclHeaderError::InvalidTrailingContent);
+                        }
                     }
-                    Some(Err(PlannedAnnotationError::InvalidSuffix)) | None => {
-                        return Err(DeclHeaderError::InvalidTrailingContent);
+                } else if let Some(result) =
+                    parse_deprecated_annotation(suffix, PlannedAnnotationContext::Inline)
+                {
+                    match result {
+                        Ok(annotation) => (false, None, true, annotation.release),
+                        Err(PlannedAnnotationError::InvalidRelease) => {
+                            return Err(DeclHeaderError::InvalidDeprecatedRelease);
+                        }
+                        Err(PlannedAnnotationError::InvalidSuffix) => {
+                            return Err(DeclHeaderError::InvalidTrailingContent);
+                        }
                     }
-                }
-            };
+                } else {
+                    return Err(DeclHeaderError::InvalidTrailingContent);
+                };
 
             Ok(ParsedDeclHeader {
                 id,
                 planned: inline_planned,
                 planned_release,
+                deprecated: inline_deprecated,
+                deprecated_release,
             })
         }
     }
@@ -98,9 +122,44 @@ pub(crate) fn parse_planned_annotation(
     text: &str,
     context: PlannedAnnotationContext,
 ) -> Option<Result<ParsedPlannedAnnotation, PlannedAnnotationError>> {
-    let rest = text.strip_prefix("@planned")?;
+    parse_release_annotation(text, "@planned", context, |release| {
+        PlannedRelease::new(release)
+    })
+    .map(|result| {
+        result.map(|annotation| ParsedPlannedAnnotation {
+            release: annotation.release,
+        })
+    })
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ParsedDeprecatedAnnotation {
+    pub(crate) release: Option<DeprecatedRelease>,
+}
+
+pub(crate) fn parse_deprecated_annotation(
+    text: &str,
+    context: PlannedAnnotationContext,
+) -> Option<Result<ParsedDeprecatedAnnotation, PlannedAnnotationError>> {
+    parse_release_annotation(text, "@deprecated", context, |release| {
+        DeprecatedRelease::new(release)
+    })
+    .map(|result| {
+        result.map(|annotation| ParsedDeprecatedAnnotation {
+            release: annotation.release,
+        })
+    })
+}
+
+fn parse_release_annotation<R>(
+    text: &str,
+    keyword: &str,
+    context: PlannedAnnotationContext,
+    parse_release: impl Fn(&str) -> Result<R, crate::model::ModelInvariantError>,
+) -> Option<Result<ParsedReleaseAnnotation<R>, PlannedAnnotationError>> {
+    let rest = text.strip_prefix(keyword)?;
     if rest.is_empty() {
-        return Some(Ok(ParsedPlannedAnnotation { release: None }));
+        return Some(Ok(ParsedReleaseAnnotation { release: None }));
     }
     if !rest.starts_with(char::is_whitespace) {
         let _ = context;
@@ -108,13 +167,18 @@ pub(crate) fn parse_planned_annotation(
     }
     let release = rest.trim();
     if release.is_empty() {
-        Some(Ok(ParsedPlannedAnnotation { release: None }))
+        Some(Ok(ParsedReleaseAnnotation { release: None }))
     } else {
-        Some(match PlannedRelease::new(release) {
-            Ok(release) => Ok(ParsedPlannedAnnotation {
+        Some(match parse_release(release) {
+            Ok(release) => Ok(ParsedReleaseAnnotation {
                 release: Some(release),
             }),
             Err(_) => Err(PlannedAnnotationError::InvalidRelease),
         })
     }
+}
+
+#[derive(Debug, Clone)]
+struct ParsedReleaseAnnotation<R> {
+    release: Option<R>,
 }

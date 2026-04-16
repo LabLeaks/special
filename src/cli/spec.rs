@@ -20,6 +20,9 @@ special specs --all includes planned items.
 @spec SPECIAL.SPEC_COMMAND.PLANNED_RELEASE_METADATA
 when a planned spec declares release metadata, special specs surfaces that release string in text, json, and html output.
 
+@spec SPECIAL.SPEC_COMMAND.DEPRECATED_METADATA
+when a deprecated spec declares release metadata, special specs surfaces that release string in text, json, and html output.
+
 @spec SPECIAL.SPEC_COMMAND.ID_SCOPE
 special specs SPEC.ID scopes the materialized view to the matching spec or group node and its descendants.
 

@@ -6,11 +6,14 @@ Shared markdown declaration helpers for spec and group headings, adjacent planne
 use std::path::Path;
 
 use crate::annotation_syntax::is_any_tag_boundary;
-use crate::model::{Diagnostic, DiagnosticSeverity, NodeKind, ParsedRepo, PlannedRelease};
+use crate::model::{
+    DeprecatedRelease, Diagnostic, DiagnosticSeverity, NodeKind, ParsedRepo, PlannedRelease,
+};
 use crate::planned_syntax::PlannedSyntax;
 
 use super::super::declarations::{
-    AdjacentPlanned, parse_adjacent_spec_planned, parse_spec_decl_header,
+    AdjacentLifecycle, parse_adjacent_spec_deprecated, parse_adjacent_spec_planned,
+    parse_spec_decl_header,
 };
 use super::super::normalize_markdown_annotation_line;
 
@@ -52,9 +55,43 @@ pub(super) fn maybe_consume_markdown_planned(
 
     let (state, release, message) = parse_adjacent_spec_planned(kind, annotation, planned_syntax);
     match state {
-        AdjacentPlanned::Absent => (false, None, cursor),
-        AdjacentPlanned::Parsed => (true, release, skip_blank_markdown_lines(lines, cursor + 1)),
-        AdjacentPlanned::Invalid => {
+        AdjacentLifecycle::Absent => (false, None, cursor),
+        AdjacentLifecycle::Parsed => (true, release, skip_blank_markdown_lines(lines, cursor + 1)),
+        AdjacentLifecycle::Invalid => {
+            if let Some(message) = message {
+                parsed.diagnostics.push(Diagnostic {
+                    severity: DiagnosticSeverity::Error,
+                    path: path.to_path_buf(),
+                    line: cursor + 1,
+                    message: message.to_string(),
+                });
+            }
+            (false, None, skip_blank_markdown_lines(lines, cursor + 1))
+        }
+    }
+}
+
+pub(super) fn maybe_consume_markdown_deprecated(
+    kind: NodeKind,
+    lines: &[&str],
+    cursor: usize,
+    parsed: &mut ParsedRepo,
+    path: &Path,
+    planned_syntax: PlannedSyntax,
+) -> (bool, Option<DeprecatedRelease>, usize) {
+    let Some(annotation) = lines
+        .get(cursor)
+        .and_then(|line| normalize_markdown_annotation_line(line))
+    else {
+        return (false, None, cursor);
+    };
+
+    let (state, release, message) =
+        parse_adjacent_spec_deprecated(kind, annotation, planned_syntax);
+    match state {
+        AdjacentLifecycle::Absent => (false, None, cursor),
+        AdjacentLifecycle::Parsed => (true, release, skip_blank_markdown_lines(lines, cursor + 1)),
+        AdjacentLifecycle::Invalid => {
             if let Some(message) = message {
                 parsed.diagnostics.push(Diagnostic {
                     severity: DiagnosticSeverity::Error,

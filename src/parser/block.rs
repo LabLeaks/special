@@ -14,7 +14,9 @@ use crate::model::{CommentBlock, ParsedRepo};
 use crate::planned_syntax::PlannedSyntax;
 
 use self::attests::handle_attest_line;
-use self::declarations::{BlockState, handle_decl_line, handle_standalone_planned_line};
+use self::declarations::{
+    BlockState, handle_decl_line, handle_standalone_deprecated_line, handle_standalone_planned_line,
+};
 use self::verifies::handle_verify_line;
 use super::ParseDialect;
 
@@ -55,6 +57,11 @@ pub(super) fn parse_block(block: &CommentBlock, parsed: &mut ParsedRepo, rules: 
         }
 
         if handle_standalone_planned_line(block, parsed, &state, entry.line, trimmed, rules) {
+            index += 1;
+            continue;
+        }
+
+        if handle_standalone_deprecated_line(block, parsed, &state, entry.line, trimmed, rules) {
             index += 1;
             continue;
         }

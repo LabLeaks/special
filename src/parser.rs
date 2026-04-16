@@ -41,6 +41,12 @@ with `version = "1"` in `special.toml`, special rejects non-adjacent backward-lo
 @spec SPECIAL.PARSE.PLANNED.RELEASE_TARGET
 special parses an optional release string after `@planned` and records it on the owning spec as planned release metadata.
 
+@spec SPECIAL.PARSE.DEPRECATED
+special records @deprecated on the owning @spec according to the configured `special.toml` version.
+
+@spec SPECIAL.PARSE.DEPRECATED.RELEASE_TARGET
+special parses an optional release string after `@deprecated` and records it on the owning spec as deprecated release metadata.
+
 @spec SPECIAL.PARSE.VERIFIES
 special parses @verifies references from annotation blocks.
 
@@ -599,6 +605,157 @@ mod tests {
         assert_eq!(legacy_parsed.specs[0].planned_release(), Some("0.3.0"));
         assert_eq!(inline_parsed.specs[0].planned_release(), Some("0.4.0"));
         assert_eq!(next_line_parsed.specs[0].planned_release(), Some("0.5.0"));
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.DEPRECATED
+    fn records_deprecated_on_the_owning_spec_for_each_supported_version() {
+        let legacy = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![
+                BlockLine {
+                    line: 1,
+                    text: "@spec EXPORT.LEGACY".to_string(),
+                },
+                BlockLine {
+                    line: 2,
+                    text: "Legacy deprecated behavior.".to_string(),
+                },
+                BlockLine {
+                    line: 3,
+                    text: "@deprecated".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+        let current = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![
+                BlockLine {
+                    line: 10,
+                    text: "@spec EXPORT.CURRENT".to_string(),
+                },
+                BlockLine {
+                    line: 11,
+                    text: "@deprecated".to_string(),
+                },
+                BlockLine {
+                    line: 12,
+                    text: "Current deprecated behavior.".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+
+        let legacy_parsed = parse_with_version(&legacy, SpecialVersion::V0);
+        let current_parsed = parse_current(&current);
+
+        assert!(legacy_parsed.specs[0].is_deprecated());
+        assert!(current_parsed.specs[0].is_deprecated());
+        assert_eq!(legacy_parsed.specs[0].deprecated_release(), None);
+        assert_eq!(current_parsed.specs[0].deprecated_release(), None);
+    }
+
+    #[test]
+    // @verifies SPECIAL.PARSE.DEPRECATED.RELEASE_TARGET
+    fn parses_deprecated_release_metadata_in_supported_forms() {
+        let legacy = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![
+                BlockLine {
+                    line: 1,
+                    text: "@spec EXPORT.LEGACY".to_string(),
+                },
+                BlockLine {
+                    line: 2,
+                    text: "Legacy deprecated behavior.".to_string(),
+                },
+                BlockLine {
+                    line: 3,
+                    text: "@deprecated 0.6.0".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+        let inline_v1 = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![
+                BlockLine {
+                    line: 10,
+                    text: "@spec EXPORT.INLINE @deprecated 0.7.0".to_string(),
+                },
+                BlockLine {
+                    line: 11,
+                    text: "Inline deprecated behavior.".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+        let next_line_v1 = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![
+                BlockLine {
+                    line: 20,
+                    text: "@spec EXPORT.NEXT".to_string(),
+                },
+                BlockLine {
+                    line: 21,
+                    text: "@deprecated 0.8.0".to_string(),
+                },
+                BlockLine {
+                    line: 22,
+                    text: "Next-line deprecated behavior.".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+
+        let legacy_parsed = parse_with_version(&legacy, SpecialVersion::V0);
+        let inline_parsed = parse_current(&inline_v1);
+        let next_line_parsed = parse_current(&next_line_v1);
+
+        assert_eq!(legacy_parsed.specs[0].deprecated_release(), Some("0.6.0"));
+        assert_eq!(inline_parsed.specs[0].deprecated_release(), Some("0.7.0"));
+        assert_eq!(
+            next_line_parsed.specs[0].deprecated_release(),
+            Some("0.8.0")
+        );
+    }
+
+    #[test]
+    fn keeps_the_spec_when_inline_planned_conflicts_with_adjacent_deprecated() {
+        let block = CommentBlock {
+            path: PathBuf::from("src/example.rs"),
+            lines: vec![
+                BlockLine {
+                    line: 1,
+                    text: "@spec EXPORT.CONFLICT @planned 0.4.0".to_string(),
+                },
+                BlockLine {
+                    line: 2,
+                    text: "@deprecated 0.6.0".to_string(),
+                },
+                BlockLine {
+                    line: 3,
+                    text: "Conflicting lifecycle behavior.".to_string(),
+                },
+            ],
+            owned_item: None,
+        };
+
+        let parsed = parse_current(&block);
+
+        assert_eq!(parsed.specs.len(), 1);
+        assert!(parsed.specs[0].is_planned());
+        assert_eq!(parsed.specs[0].planned_release(), Some("0.4.0"));
+        assert!(!parsed.specs[0].is_deprecated());
+        assert_eq!(parsed.specs[0].deprecated_release(), None);
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert!(
+            parsed.diagnostics[0]
+                .message
+                .contains("@spec may not be both planned and deprecated")
+        );
     }
 
     #[test]

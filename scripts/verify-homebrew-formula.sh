@@ -23,6 +23,7 @@ formula="$(gh api repos/LabLeaks/homebrew-tap/contents/Formula/special.rb --jq .
 FORMULA_TEXT="$formula" python3 - "$version" "$release_json" <<'PY'
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -35,9 +36,26 @@ required = set(
     json.loads(Path("scripts/release-assets.json").read_text())["homebrew_formula_archives"]
 )
 missing = sorted(required - assets.keys())
+selector_arms = {
+    "special-cli-aarch64-apple-darwin.tar.xz": ("macos", "arm"),
+    "special-cli-x86_64-apple-darwin.tar.xz": ("macos", "intel"),
+    "special-cli-aarch64-unknown-linux-gnu.tar.xz": ("linux", "arm"),
+    "special-cli-x86_64-unknown-linux-gnu.tar.xz": ("linux", "intel"),
+}
 
 def fail(message, details):
     raise SystemExit(f"{message}: {details}")
+
+def asset_sha256(asset):
+    digest = asset.get("digest")
+    if digest is None:
+        fail("release asset is missing digest", asset)
+    if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        fail("release asset digest is not sha256", asset)
+    sha256 = digest.removeprefix("sha256:")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        fail("release asset digest is not a valid sha256", asset)
+    return sha256
 
 if missing:
     fail("missing required release assets for Homebrew formula", missing)
@@ -56,11 +74,24 @@ if f'url "{expected_url}"' not in formula:
 
 for name in sorted(required):
     asset = assets[name]
-    sha256 = asset["digest"].removeprefix("sha256:")
-    if not asset["digest"].startswith("sha256:"):
-        fail("release asset digest is not sha256", asset)
-    if f'"{name}"' not in formula:
+    sha256 = asset_sha256(asset)
+    selector = selector_arms.get(name)
+    if selector is None:
+        fail("required release asset has no Homebrew selector mapping", name)
+    os_name, arch = selector
+    archive_pattern = re.compile(
+        rf'archive\s*=\s*on_system_conditional\(\s*.*?{os_name}\s*:\s*on_arch_conditional\(\s*.*?{arch}\s*:\s*"{re.escape(name)}"',
+        re.S,
+    )
+    if not archive_pattern.search(formula):
         fail("formula is missing archive selector entry", name)
-    if f'"{sha256}"' not in formula:
-        fail("formula is missing release asset checksum entry", sha256)
+    checksum_pattern = re.compile(
+        rf'{os_name}\s*:\s*on_arch_conditional\(\s*.*?{arch}\s*:\s*"{re.escape(sha256)}"',
+        re.S,
+    )
+    if not checksum_pattern.search(formula):
+        fail(
+            "formula checksum selector entry does not contain expected checksum",
+            {"archive": name, "os": os_name, "arch": arch, "sha256": sha256},
+        )
 PY

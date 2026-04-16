@@ -8,6 +8,7 @@ pub(crate) enum ReservedSpecialAnnotation {
     Spec,
     Group,
     Planned,
+    Deprecated,
     Verifies,
     FileVerifies,
     Attests,
@@ -24,6 +25,7 @@ impl ReservedSpecialAnnotation {
             Self::Spec => "@spec",
             Self::Group => "@group",
             Self::Planned => "@planned",
+            Self::Deprecated => "@deprecated",
             Self::Verifies => "@verifies",
             Self::FileVerifies => "@fileverifies",
             Self::Attests => "@attests",
@@ -40,6 +42,7 @@ const RESERVED_SPECIAL_ANNOTATIONS: &[ReservedSpecialAnnotation] = &[
     ReservedSpecialAnnotation::Spec,
     ReservedSpecialAnnotation::Group,
     ReservedSpecialAnnotation::Planned,
+    ReservedSpecialAnnotation::Deprecated,
     ReservedSpecialAnnotation::Verifies,
     ReservedSpecialAnnotation::FileVerifies,
     ReservedSpecialAnnotation::Attests,
@@ -111,6 +114,7 @@ mod tests {
     fn recognizes_reserved_special_annotations() {
         assert!(is_reserved_special_annotation("@spec EXPORT.CSV"));
         assert!(is_reserved_special_annotation("@planned 0.4.0"));
+        assert!(is_reserved_special_annotation("@deprecated 0.6.0"));
         assert!(is_reserved_special_annotation("@module SPECIAL.RENDER"));
         assert!(is_reserved_special_annotation("@implements SPECIAL.RENDER"));
         assert!(is_reserved_special_annotation(

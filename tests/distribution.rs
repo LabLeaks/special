@@ -272,6 +272,36 @@ fn homebrew_formula_uses_standard_platform_selection_helpers() {
 }
 
 #[test]
+fn homebrew_formula_verifier_requires_release_asset_digests() {
+    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
+
+    assert!(
+        verifier.contains("release asset is missing digest"),
+        "Homebrew verification should fail cleanly when required release assets omit digest metadata"
+    );
+}
+
+#[test]
+fn homebrew_formula_verifier_checks_selector_checksum_pairing() {
+    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
+
+    assert!(
+        verifier.contains("formula checksum selector entry does not contain expected checksum"),
+        "Homebrew verification should validate selector-level checksum pairing, not just loose checksum presence"
+    );
+}
+
+#[test]
+fn homebrew_formula_verifier_rejects_unmapped_required_assets_cleanly() {
+    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
+
+    assert!(
+        verifier.contains("required release asset has no Homebrew selector mapping"),
+        "Homebrew verification should fail cleanly when a required archive lacks selector mapping"
+    );
+}
+
+#[test]
 // @verifies SPECIAL.DISTRIBUTION.GITHUB_RELEASES.ARCHIVES
 fn github_release_plan_contains_versioned_archives() {
     let manifest = dist_manifest();

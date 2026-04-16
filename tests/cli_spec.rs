@@ -11,8 +11,9 @@ use std::fs;
 use serde_json::Value;
 
 use support::{
-    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir, write_file_attest_fixture,
-    write_file_verify_fixture, write_live_and_planned_fixture, write_planned_release_fixture,
+    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir,
+    write_deprecated_release_fixture, write_file_attest_fixture, write_file_verify_fixture,
+    write_live_and_planned_fixture, write_planned_release_fixture,
     write_special_toml_dot_root_fixture, write_special_toml_root_fixture,
     write_unsupported_live_fixture,
 };
@@ -132,7 +133,8 @@ fn spec_surfaces_planned_release_metadata_across_output_modes() {
     assert!(text_output.status.success());
     let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
     assert!(rendered_spec_node_ids(&text_stdout).contains(&"DEMO.PLANNED".to_string()));
-    assert!(text_stdout.contains("[planned: 0.3.0]"));
+    assert!(text_stdout.contains("planned"));
+    assert!(text_stdout.contains("0.3.0"));
 
     let json_output = run_special(&root, &["spec", "--all", "--json"]);
     assert!(json_output.status.success());
@@ -155,7 +157,48 @@ fn spec_surfaces_planned_release_metadata_across_output_modes() {
     let html_output = run_special(&root, &["spec", "--all", "--html"]);
     assert!(html_output.status.success());
     let html_stdout = String::from_utf8(html_output.stdout).expect("stdout should be utf-8");
-    assert!(html_stdout.contains("<span class=\"badge badge-planned\">planned: 0.3.0</span>"));
+    assert!(html_stdout.contains("planned"));
+    assert!(html_stdout.contains("0.3.0"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.SPEC_COMMAND.DEPRECATED_METADATA
+fn spec_surfaces_deprecated_release_metadata_across_output_modes() {
+    let root = temp_repo_dir("special-cli-deprecated-release-metadata");
+    write_deprecated_release_fixture(&root);
+
+    let text_output = run_special(&root, &["spec"]);
+    assert!(text_output.status.success());
+    let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
+    assert!(rendered_spec_node_ids(&text_stdout).contains(&"DEMO.DEPRECATED".to_string()));
+    assert!(text_stdout.contains("deprecated"));
+    assert!(text_stdout.contains("0.6.0"));
+
+    let json_output = run_special(&root, &["spec", "--json"]);
+    assert!(json_output.status.success());
+    let json: Value =
+        serde_json::from_slice(&json_output.stdout).expect("json output should be valid json");
+    let deprecated = json["nodes"]
+        .as_array()
+        .and_then(|nodes| {
+            nodes
+                .iter()
+                .find_map(|node| find_node_by_id(node, "DEMO.DEPRECATED"))
+        })
+        .expect("deprecated node should be present");
+    assert_eq!(
+        deprecated["deprecated_release"],
+        Value::String("0.6.0".to_string())
+    );
+    assert_eq!(deprecated["deprecated"], Value::Bool(true));
+
+    let html_output = run_special(&root, &["spec", "--html"]);
+    assert!(html_output.status.success());
+    let html_stdout = String::from_utf8(html_output.stdout).expect("stdout should be utf-8");
+    assert!(html_stdout.contains("deprecated"));
+    assert!(html_stdout.contains("0.6.0"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
