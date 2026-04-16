@@ -50,14 +50,17 @@ if 'bin.install "special"' not in formula:
 for helper in ('on_system_conditional(', 'on_arch_conditional('):
     if helper not in formula:
         fail("formula is missing platform selection helper", helper)
+expected_url = f'https://github.com/LabLeaks/special/releases/download/v{version}/#{{archive}}'
+if f'url "{expected_url}"' not in formula:
+    fail("formula is missing templated release asset url", expected_url)
 
 for name in sorted(required):
     asset = assets[name]
     sha256 = asset["digest"].removeprefix("sha256:")
     if not asset["digest"].startswith("sha256:"):
         fail("release asset digest is not sha256", asset)
-    if asset["url"] not in formula:
-        fail("formula is missing release asset url", asset["url"])
-    if f'sha256 "{sha256}"' not in formula:
-        fail("formula is missing release asset sha256", sha256)
+    if f'"{name}"' not in formula:
+        fail("formula is missing archive selector entry", name)
+    if f'"{sha256}"' not in formula:
+        fail("formula is missing release asset checksum entry", sha256)
 PY

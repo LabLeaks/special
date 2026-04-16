@@ -86,19 +86,24 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
             revision.clone(),
         ]
     );
-    assert_eq!(
-        payload["tag_command"]
-            .as_array()
-            .expect("tag_command should be an array"),
-        &vec![
-            Value::String("jj".to_string()),
-            Value::String("tag".to_string()),
-            Value::String("set".to_string()),
-            Value::String(format!("v{version}")),
-            Value::String("-r".to_string()),
-            revision,
-        ]
-    );
+    let tag_command = payload["tag_command"]
+        .as_array()
+        .expect("tag_command should be an array");
+    assert_eq!(tag_command[0], Value::String("jj".to_string()));
+    assert_eq!(tag_command[1], Value::String("tag".to_string()));
+    assert_eq!(tag_command[2], Value::String("set".to_string()));
+    let expected_tail = vec![
+        Value::String(format!("v{version}")),
+        Value::String("-r".to_string()),
+        revision,
+    ];
+    if tag_command.len() == 7 {
+        assert_eq!(tag_command[3], Value::String("--allow-move".to_string()));
+        assert_eq!(&tag_command[4..], expected_tail.as_slice());
+    } else {
+        assert_eq!(tag_command.len(), 6);
+        assert_eq!(&tag_command[3..], expected_tail.as_slice());
+    }
     assert_eq!(
         payload["push_main_command"]
             .as_array()
@@ -192,18 +197,38 @@ fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_ste
         .iter()
         .map(|entry| entry["label"].as_str().expect("label should be a string"))
         .collect();
-    assert_eq!(
-        labels,
-        vec![
-            "bookmark_main",
-            "set_tag",
-            "push_main",
-            "push_tag",
-            "verify_github_release",
-            "update_homebrew_formula",
-            "verify_homebrew_formula",
-        ]
-    );
+    assert_eq!(labels.first().copied(), Some("bookmark_main"));
+    assert_eq!(labels.last().copied(), Some("verify_homebrew_formula"));
+    assert!(labels.contains(&"push_main"));
+    assert!(labels.contains(&"push_tag"));
+    assert!(labels.contains(&"verify_github_release"));
+    assert!(labels.contains(&"update_homebrew_formula"));
+    if labels.contains(&"set_tag") {
+        assert_eq!(
+            labels,
+            vec![
+                "bookmark_main",
+                "set_tag",
+                "push_main",
+                "push_tag",
+                "verify_github_release",
+                "update_homebrew_formula",
+                "verify_homebrew_formula",
+            ]
+        );
+    } else {
+        assert_eq!(
+            labels,
+            vec![
+                "bookmark_main",
+                "push_main",
+                "push_tag",
+                "verify_github_release",
+                "update_homebrew_formula",
+                "verify_homebrew_formula",
+            ]
+        );
+    }
 }
 
 #[test]

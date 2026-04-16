@@ -241,6 +241,7 @@ fn homebrew_formula_uses_the_standard_formula_path() {
 // @verifies SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA.PLATFORM_SELECTION
 fn homebrew_formula_uses_standard_platform_selection_helpers() {
     let updater = read_repo_file("scripts/update-homebrew-formula.py");
+    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
 
     assert!(
         updater.contains("archive = on_system_conditional("),
@@ -259,6 +260,14 @@ fn homebrew_formula_uses_standard_platform_selection_helpers() {
             "url \"https://github.com/LabLeaks/special/releases/download/v{version}/#{{archive}}\""
         ),
         "Homebrew updater should emit a single active url from the selected archive"
+    );
+    assert!(
+        verifier.contains("formula is missing templated release asset url"),
+        "Homebrew verification should accept the templated archive URL shape"
+    );
+    assert!(
+        verifier.contains("formula is missing archive selector entry"),
+        "Homebrew verification should validate archive selector entries instead of expanded asset URLs"
     );
 }
 
