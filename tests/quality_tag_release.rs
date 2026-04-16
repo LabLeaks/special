@@ -94,6 +94,7 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
             Value::String("jj".to_string()),
             Value::String("tag".to_string()),
             Value::String("set".to_string()),
+            Value::String("--allow-move".to_string()),
             Value::String(format!("v{version}")),
             Value::String("-r".to_string()),
             revision,
@@ -196,7 +197,6 @@ fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_ste
         labels,
         vec![
             "bookmark_main",
-            "set_tag",
             "push_main",
             "push_tag",
             "verify_github_release",

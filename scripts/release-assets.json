@@ -7,6 +7,7 @@
     "special-cli-x86_64-unknown-linux-gnu.tar.xz"
   ],
   "github_release_assets": [
+    "dist-manifest.json",
     "sha256.sum",
     "source.tar.gz",
     "source.tar.gz.sha256",
