@@ -239,7 +239,7 @@ fn repo_surfaces_experimental_traceability() {
     let root = temp_repo_dir("special-cli-repo-traceability");
     write_traceability_cross_file_module_fixture(&root);
 
-    let output = run_special(&root, &["repo", "--experimental"]);
+    let output = run_special(&root, &["repo", "--experimental", "--verbose"]);
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
@@ -259,7 +259,7 @@ fn repo_json_includes_structured_traceability() {
     let root = temp_repo_dir("special-cli-repo-traceability-json");
     write_traceability_module_analysis_fixture(&root);
 
-    let output = run_special(&root, &["repo", "--experimental", "--json"]);
+    let output = run_special(&root, &["repo", "--experimental", "--json", "--verbose"]);
     assert!(output.status.success());
 
     let json: Value =
@@ -293,6 +293,31 @@ fn repo_json_includes_structured_traceability() {
                     && item["name"].as_str() == Some("orphan_impl")
             })
     );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn repo_non_verbose_experimental_traceability_stays_summary_only() {
+    let root = temp_repo_dir("special-cli-repo-traceability-summary-only");
+    write_traceability_cross_file_module_fixture(&root);
+
+    let text_output = run_special(&root, &["repo", "--experimental"]);
+    assert!(text_output.status.success());
+    let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
+    assert!(text_stdout.contains("experimental traceability"));
+    assert!(!text_stdout.contains("live spec item:"));
+    assert!(!text_stdout.contains("unknown item:"));
+
+    let json_output = run_special(&root, &["repo", "--experimental", "--json"]);
+    assert!(json_output.status.success());
+    let json: Value =
+        serde_json::from_slice(&json_output.stdout).expect("json output should be valid json");
+    let traceability = json["analysis"]["traceability"]
+        .as_object()
+        .expect("traceability summary should be an object");
+    assert!(!traceability.contains_key("live_spec_items"));
+    assert!(!traceability.contains_key("unknown_items"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

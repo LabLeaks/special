@@ -24,6 +24,14 @@ use declarations::{
     skip_blank_markdown_lines,
 };
 
+struct MarkdownLifecycleState {
+    planned: bool,
+    planned_release: Option<crate::model::PlannedRelease>,
+    deprecated: bool,
+    deprecated_release: Option<crate::model::DeprecatedRelease>,
+    cursor: usize,
+}
+
 pub(super) fn parse_markdown_declarations(
     root: &Path,
     ignore_patterns: &[String],
@@ -86,75 +94,21 @@ pub(super) fn parse_markdown_declarations(
                 });
             }
 
-            let mut cursor = skip_blank_markdown_lines(&lines, index + 1);
-            let (mut planned, mut planned_release, next_cursor) =
-                maybe_consume_markdown_planned(kind, &lines, cursor, parsed, &path, rules.planned);
-            cursor = next_cursor;
-            let (mut deprecated, mut deprecated_release, next_cursor) =
-                maybe_consume_markdown_deprecated(
-                    kind,
-                    &lines,
-                    cursor,
-                    parsed,
-                    &path,
-                    rules.planned,
-                );
-            cursor = next_cursor;
-            if header.planned && planned {
-                parsed.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    path: path.clone(),
-                    line: line_number,
-                    message: "@planned must appear only once per owning @spec".to_string(),
-                });
-                planned = false;
-                planned_release = None;
-            }
-            if header.deprecated && deprecated {
-                parsed.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    path: path.clone(),
-                    line: line_number,
-                    message: "@deprecated must appear only once per owning @spec".to_string(),
-                });
-                deprecated = false;
-                deprecated_release = None;
-            }
-            if header.planned && deprecated {
-                parsed.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    path: path.clone(),
-                    line: line_number,
-                    message: "@spec may not be both planned and deprecated".to_string(),
-                });
-                deprecated = false;
-                deprecated_release = None;
-            }
-            if header.deprecated && planned {
-                parsed.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    path: path.clone(),
-                    line: line_number,
-                    message: "@spec may not be both planned and deprecated".to_string(),
-                });
-                planned = false;
-                planned_release = None;
-            }
-            if (header.planned || planned) && (header.deprecated || deprecated) {
-                parsed.diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Error,
-                    path: path.clone(),
-                    line: line_number,
-                    message: "@spec may not be both planned and deprecated".to_string(),
-                });
-                if deprecated {
-                    deprecated = false;
-                    deprecated_release = None;
-                } else {
-                    planned = false;
-                    planned_release = None;
-                }
-            }
+            let MarkdownLifecycleState {
+                planned,
+                planned_release,
+                deprecated,
+                deprecated_release,
+                cursor,
+            } = consume_markdown_lifecycle_markers(
+                kind,
+                &lines,
+                index + 1,
+                parsed,
+                &path,
+                rules.planned,
+                &header,
+            );
             let (description_lines, cursor) =
                 collect_markdown_description_lines(&lines, cursor, starts_markdown_fence);
 
@@ -187,6 +141,90 @@ pub(super) fn parse_markdown_declarations(
     }
 
     Ok(())
+}
+
+fn consume_markdown_lifecycle_markers(
+    kind: crate::model::NodeKind,
+    lines: &[&str],
+    start_cursor: usize,
+    parsed: &mut ParsedRepo,
+    path: &Path,
+    planned_syntax: crate::planned_syntax::PlannedSyntax,
+    header: &crate::planned_syntax::ParsedDeclHeader<'_>,
+) -> MarkdownLifecycleState {
+    let mut cursor = skip_blank_markdown_lines(lines, start_cursor);
+    let mut planned = false;
+    let mut planned_release = None;
+    let mut deprecated = false;
+    let mut deprecated_release = None;
+
+    loop {
+        let marker_line = cursor + 1;
+        let (candidate_planned, candidate_planned_release, next_cursor) =
+            maybe_consume_markdown_planned(kind, lines, cursor, parsed, path, planned_syntax);
+        if next_cursor != cursor {
+            if candidate_planned {
+                if header.planned || planned {
+                    parsed.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        path: path.to_path_buf(),
+                        line: marker_line,
+                        message: "@planned must appear only once per owning @spec".to_string(),
+                    });
+                } else if header.deprecated || deprecated {
+                    parsed.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        path: path.to_path_buf(),
+                        line: marker_line,
+                        message: "@spec may not be both planned and deprecated".to_string(),
+                    });
+                } else {
+                    planned = true;
+                    planned_release = candidate_planned_release;
+                }
+            }
+            cursor = next_cursor;
+            continue;
+        }
+
+        let marker_line = cursor + 1;
+        let (candidate_deprecated, candidate_deprecated_release, next_cursor) =
+            maybe_consume_markdown_deprecated(kind, lines, cursor, parsed, path, planned_syntax);
+        if next_cursor != cursor {
+            if candidate_deprecated {
+                if header.deprecated || deprecated {
+                    parsed.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        path: path.to_path_buf(),
+                        line: marker_line,
+                        message: "@deprecated must appear only once per owning @spec".to_string(),
+                    });
+                } else if header.planned || planned {
+                    parsed.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        path: path.to_path_buf(),
+                        line: marker_line,
+                        message: "@spec may not be both planned and deprecated".to_string(),
+                    });
+                } else {
+                    deprecated = true;
+                    deprecated_release = candidate_deprecated_release;
+                }
+            }
+            cursor = next_cursor;
+            continue;
+        }
+
+        break;
+    }
+
+    MarkdownLifecycleState {
+        planned,
+        planned_release,
+        deprecated,
+        deprecated_release,
+        cursor,
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +321,24 @@ mod tests {
         assert!(parsed.specs[0].is_planned());
         assert!(!parsed.specs[0].is_deprecated());
         assert_eq!(parsed.specs[0].planned_release(), Some("0.4.0"));
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert!(
+            parsed.diagnostics[0]
+                .message
+                .contains("@spec may not be both planned and deprecated")
+        );
+    }
+
+    #[test]
+    fn markdown_rejects_reverse_order_adjacent_deprecated_and_planned_combination() {
+        let parsed = parse_markdown_fixture(
+            "### `@spec APP.BAD`\n### `@deprecated 0.6.0`\n### `@planned 0.4.0`\nConflicting.\n",
+        );
+
+        assert_eq!(parsed.specs.len(), 1);
+        assert!(parsed.specs[0].is_deprecated());
+        assert!(!parsed.specs[0].is_planned());
+        assert_eq!(parsed.specs[0].deprecated_release(), Some("0.6.0"));
         assert_eq!(parsed.diagnostics.len(), 1);
         assert!(
             parsed.diagnostics[0]

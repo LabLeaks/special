@@ -126,15 +126,6 @@ struct ModulePageTextTemplate<'a> {
 }
 
 impl ModulePageTextTemplate<'_> {
-    fn repo_signals_section(&self) -> String {
-        self.document
-            .analysis
-            .as_ref()
-            .and_then(|analysis| analysis.repo_signals.as_ref())
-            .map(|coverage| format_repo_signals(&project_repo_signals_view(coverage, self.verbose)))
-            .unwrap_or_default()
-    }
-
     fn render_nodes(&self) -> String {
         self.document
             .nodes

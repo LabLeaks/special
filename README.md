@@ -147,6 +147,35 @@ Initialize a repo root:
 special init
 ```
 
+## How To Read The Commands
+
+`special` has three main surfaces:
+
+- `special specs`
+  The product-contract view.
+- `special modules`
+  The annotated architecture view.
+- `special repo`
+  The cross-cutting repo-quality view.
+
+Two flags then refine those surfaces:
+
+- `--verbose`
+  Show more of the same surface: attached bodies, implementation detail, or
+  fuller drilldown.
+- `--metrics`
+  Add computed analysis where the default command is otherwise just a
+  materialized tree. Today that mainly applies to `special modules`.
+
+In practice:
+
+- use `special specs --verbose` when you want to inspect whether a claim is
+  honestly supported
+- use `special modules --metrics --verbose` when you want to inspect whether an
+  architecture boundary is honest in code
+- use `special repo --verbose` when you want repo-wide cleanup or quality
+  signals that do not belong to one module
+
 ## Contract Views
 
 The core command is `special specs` (`special spec` also works as an alias).
@@ -172,6 +201,17 @@ retirement metadata when present.
 
 Verbose spec views surface the attached `@verifies` and `@attests` bodies so a
 human or agent can inspect the support directly.
+
+Example shape:
+
+```text
+$ special specs --unsupported --verbose
+
+APP.EXPORT.CSV [unsupported]
+  text: CSV exports include a header row with the selected column names.
+  verifies: 0
+  attests: 0
+```
 
 ## Architecture Views
 
@@ -220,6 +260,20 @@ Use `special repo --verbose` when you want fuller repo-wide drilldown, including
 unowned unreached item locations and complete duplicate-item clusters when the
 built-in analyzers can identify them honestly.
 
+Example shape:
+
+```text
+$ special modules APP.PARSER --metrics
+
+APP.PARSER
+  file-scoped implements: 1
+  item-scoped implements: 3
+  public items: 2
+  internal items: 7
+  module coupling: 2
+  unreached items: 1
+```
+
 Today the built-in implementation analysis is strongest for owned Rust code,
 and it also surfaces first-pass implementation evidence for owned TypeScript
 and Go code.
@@ -231,8 +285,7 @@ For Rust modules, `--metrics` can surface:
 - quality evidence such as public API parameter shape, stringly typed boundaries,
   and recoverability signals
 - unreached-code indicators such as private items with no observed path from
-  public or test roots, plus unreached unowned Rust items outside any declared
-  module
+  public or test roots inside owned implementation
 - `use`-path dependency evidence
 - module coupling evidence derived from owned dependency targets
 
@@ -253,6 +306,19 @@ For Go modules, `--metrics` can surface:
 `special repo --experimental` also surfaces early implementation traceability
 indicators when a built-in analyzer can connect owned code through tests to
 declared specs.
+
+Example shape:
+
+```text
+$ special repo --verbose
+
+special repo
+repo-wide signals
+duplicate items: 3
+duplicate item: APP:parser/a.rs:collect_calls [function; duplicate peers 1]
+duplicate item: APP:parser/b.rs:collect_calls [function; duplicate peers 1]
+unowned unreached items: 0
+```
 
 ## Skills
 
@@ -303,7 +369,7 @@ For local repo development, use the tool-managed commands:
 ```sh
 mise exec -- cargo test
 mise exec -- cargo run -- lint
-mise exec -- cargo run -- spec --all
+mise exec -- cargo run -- specs --all
 mise exec -- cargo run -- modules --metrics
 ```
 
@@ -474,7 +540,7 @@ publishes:
 - public docs like `README.md`
 - `CHANGELOG.md`
 - version bump and release references
-- core validation (`cargo test`, `special lint`, `special spec --all`)
+- core validation (`cargo test`, `special lint`, `special specs --all`)
 
 If you have already checked the prerelease list and want to bypass the
 interactive prompts, use:

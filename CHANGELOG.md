@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 - Unreleased
+## 0.5.0 - 2026-04-17
 
 - Added lightweight claim retirement metadata with `@deprecated <release>`, surfaced across `special specs` text, JSON, and HTML views without changing live-claim support semantics.
 - Added a shared cross-language syntax and analysis substrate, with shipped built-in module metrics for owned Rust, TypeScript, and Go code on the same provider seam.

@@ -37,12 +37,12 @@ def command_exists(name: str) -> bool:
         return False
 
 
-def discover_latest_semver_tag(root: Path, backend: str) -> str:
+def discover_latest_semver_tag(root: Path, backend: str, head: str) -> str:
     if backend == "jj":
-        output = run_checked(root, ["jj", "tag", "list"])
+        output = run_checked(root, ["jj", "tag", "list", "-r", f"::({head})"])
         candidates = [line.split(":", 1)[0].strip() for line in output.splitlines() if ":" in line]
     else:
-        output = run_checked(root, ["git", "tag", "--list"])
+        output = run_checked(root, ["git", "tag", "--merged", head, "--list"])
         candidates = [line.strip() for line in output.splitlines() if line.strip()]
 
     versions: list[tuple[tuple[int, int, int, int, tuple[tuple[int, object], ...]], str]] = []
@@ -52,7 +52,11 @@ def discover_latest_semver_tag(root: Path, backend: str) -> str:
             versions.append((sort_key, candidate))
 
     if not versions:
-        raise SystemExit("no semver release tags found; pass --full or provide --base")
+        if backend == "jj":
+            raise SystemExit("no reachable semver release tags found; pass --full or provide --base")
+        raise SystemExit(
+            f"no reachable semver release tags found from {head}; pass --full or provide --base"
+        )
 
     versions.sort()
     return versions[-1][1]

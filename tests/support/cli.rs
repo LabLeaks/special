@@ -808,7 +808,7 @@ pub fn write_restricted_visibility_root_fixture(root: &Path) {
     .expect("architecture fixture should be written");
     fs::write(
         root.join("lib.rs"),
-        "// @fileimplements DEMO\npub(super) fn entry() {\n    helper();\n}\n\nfn helper() {}\n",
+        "// @fileimplements DEMO\nmod nested {\n    pub(super) fn entry() {\n        helper();\n    }\n\n    fn helper() {}\n}\n",
     )
     .expect("restricted visibility fixture should be written");
 }
@@ -1142,6 +1142,26 @@ pub fn rendered_spec_node_ids(output: &str) -> Vec<String> {
         .into_iter()
         .filter_map(|line| line.split_whitespace().next().map(|id| id.to_string()))
         .collect()
+}
+
+pub fn rendered_spec_node_line(output: &str, id: &str) -> Option<String> {
+    rendered_spec_node_lines(output)
+        .into_iter()
+        .find(|line| line.split_whitespace().next() == Some(id))
+}
+
+pub fn html_node_has_badge(output: &str, id: &str, badge_class: &str, badge_text: &str) -> bool {
+    let needle = format!("<span class=\"node-id\">{id}</span>");
+    let Some(start) = output.find(&needle) else {
+        return false;
+    };
+    let after_id = &output[start + needle.len()..];
+    let Some(header_end) = after_id.find("</div>") else {
+        return false;
+    };
+    after_id[..header_end].contains(&format!(
+        "<span class=\"badge {badge_class}\">{badge_text}</span>"
+    ))
 }
 
 pub fn installed_skill_ids(skills_root: &Path) -> Vec<String> {

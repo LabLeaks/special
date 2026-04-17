@@ -231,13 +231,13 @@ use std::fs;
 use serde_json::Value;
 
 use support::{
-    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir, top_level_help_commands,
-    write_area_implements_fixture, write_area_modules_fixture,
-    write_binary_entrypoint_root_fixture, write_cognitive_complexity_module_analysis_fixture,
-    write_complexity_module_analysis_fixture, write_coupling_module_analysis_fixture,
-    write_dependency_module_analysis_fixture, write_duplicate_file_scoped_implements_fixture,
-    write_duplicate_item_scoped_implements_fixture, write_go_module_analysis_fixture,
-    write_implements_with_trailing_content_fixture,
+    find_node_by_id, html_node_has_badge, rendered_spec_node_ids, rendered_spec_node_line,
+    run_special, temp_repo_dir, top_level_help_commands, write_area_implements_fixture,
+    write_area_modules_fixture, write_binary_entrypoint_root_fixture,
+    write_cognitive_complexity_module_analysis_fixture, write_complexity_module_analysis_fixture,
+    write_coupling_module_analysis_fixture, write_dependency_module_analysis_fixture,
+    write_duplicate_file_scoped_implements_fixture, write_duplicate_item_scoped_implements_fixture,
+    write_go_module_analysis_fixture, write_implements_with_trailing_content_fixture,
     write_item_scoped_item_signals_module_analysis_fixture,
     write_item_scoped_module_analysis_fixture, write_item_signals_module_analysis_fixture,
     write_missing_intermediate_modules_fixture, write_mixed_purpose_source_local_module_fixture,
@@ -331,9 +331,9 @@ fn modules_all_includes_planned_modules() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(rendered_spec_node_ids(&stdout).contains(&"DEMO.PLANNED".to_string()));
-    assert!(stdout.contains("planned"));
-    assert!(stdout.contains("0.4.0"));
+    let planned_line =
+        rendered_spec_node_line(&stdout, "DEMO.PLANNED").expect("planned module should render");
+    assert!(planned_line.contains("[planned: 0.4.0]"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -347,8 +347,9 @@ fn modules_surface_planned_release_metadata_across_output_modes() {
     let text_output = run_special(&root, &["modules", "--all"]);
     assert!(text_output.status.success());
     let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
-    assert!(text_stdout.contains("planned"));
-    assert!(text_stdout.contains("0.4.0"));
+    let planned_line = rendered_spec_node_line(&text_stdout, "DEMO.PLANNED")
+        .expect("planned module should render");
+    assert!(planned_line.contains("[planned: 0.4.0]"));
 
     let json_output = run_special(&root, &["modules", "--all", "--json"]);
     assert!(json_output.status.success());
@@ -370,8 +371,12 @@ fn modules_surface_planned_release_metadata_across_output_modes() {
     let html_output = run_special(&root, &["modules", "--all", "--html"]);
     assert!(html_output.status.success());
     let html_stdout = String::from_utf8(html_output.stdout).expect("stdout should be utf-8");
-    assert!(html_stdout.contains("badge-planned"));
-    assert!(html_stdout.contains("0.4.0"));
+    assert!(html_node_has_badge(
+        &html_stdout,
+        "DEMO.PLANNED",
+        "badge-planned",
+        "planned: 0.4.0"
+    ));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

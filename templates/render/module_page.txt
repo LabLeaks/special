@@ -1,2 +1,1 @@
-{% if !self.repo_signals_section().is_empty() %}{{ self.repo_signals_section() }}
-{% endif %}{{ self.render_nodes() }}
+{{ self.render_nodes() }}

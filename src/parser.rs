@@ -385,6 +385,8 @@ mod tests {
 
         assert!(parsed.specs.is_empty());
         assert_eq!(parsed.diagnostics.len(), 1);
+        assert_eq!(parsed.diagnostics[0].path, PathBuf::from("src/example.rs"));
+        assert_eq!(parsed.diagnostics[0].line, 1);
         assert!(
             parsed.diagnostics[0]
                 .message
@@ -540,7 +542,7 @@ mod tests {
         assert!(
             parsed.diagnostics[0]
                 .message
-                .contains("compatibility parsing does not allow inline `@planned`")
+                .contains("compatibility parsing does not allow inline lifecycle markers")
         );
     }
 

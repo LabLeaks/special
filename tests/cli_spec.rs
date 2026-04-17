@@ -11,9 +11,9 @@ use std::fs;
 use serde_json::Value;
 
 use support::{
-    find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir,
-    write_deprecated_release_fixture, write_file_attest_fixture, write_file_verify_fixture,
-    write_live_and_planned_fixture, write_planned_release_fixture,
+    find_node_by_id, html_node_has_badge, rendered_spec_node_ids, rendered_spec_node_line,
+    run_special, temp_repo_dir, write_deprecated_release_fixture, write_file_attest_fixture,
+    write_file_verify_fixture, write_live_and_planned_fixture, write_planned_release_fixture,
     write_special_toml_dot_root_fixture, write_special_toml_root_fixture,
     write_unsupported_live_fixture,
 };
@@ -132,9 +132,9 @@ fn spec_surfaces_planned_release_metadata_across_output_modes() {
     let text_output = run_special(&root, &["spec", "--all"]);
     assert!(text_output.status.success());
     let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
-    assert!(rendered_spec_node_ids(&text_stdout).contains(&"DEMO.PLANNED".to_string()));
-    assert!(text_stdout.contains("planned"));
-    assert!(text_stdout.contains("0.3.0"));
+    let planned_line =
+        rendered_spec_node_line(&text_stdout, "DEMO.PLANNED").expect("planned node should render");
+    assert!(planned_line.contains("[planned: 0.3.0]"));
 
     let json_output = run_special(&root, &["spec", "--all", "--json"]);
     assert!(json_output.status.success());
@@ -153,12 +153,23 @@ fn spec_surfaces_planned_release_metadata_across_output_modes() {
         Value::String("0.3.0".to_string())
     );
     assert_eq!(planned["planned"], Value::Bool(true));
+    assert_eq!(planned["deprecated"], Value::Bool(false));
 
     let html_output = run_special(&root, &["spec", "--all", "--html"]);
     assert!(html_output.status.success());
     let html_stdout = String::from_utf8(html_output.stdout).expect("stdout should be utf-8");
-    assert!(html_stdout.contains("planned"));
-    assert!(html_stdout.contains("0.3.0"));
+    assert!(html_node_has_badge(
+        &html_stdout,
+        "DEMO.PLANNED",
+        "badge-planned",
+        "planned: 0.3.0"
+    ));
+    assert!(!html_node_has_badge(
+        &html_stdout,
+        "DEMO.PLANNED",
+        "badge-deprecated",
+        "deprecated: 0.3.0"
+    ));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -172,9 +183,9 @@ fn spec_surfaces_deprecated_release_metadata_across_output_modes() {
     let text_output = run_special(&root, &["spec"]);
     assert!(text_output.status.success());
     let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
-    assert!(rendered_spec_node_ids(&text_stdout).contains(&"DEMO.DEPRECATED".to_string()));
-    assert!(text_stdout.contains("deprecated"));
-    assert!(text_stdout.contains("0.6.0"));
+    let deprecated_line = rendered_spec_node_line(&text_stdout, "DEMO.DEPRECATED")
+        .expect("deprecated node should render");
+    assert!(deprecated_line.contains("[deprecated: 0.6.0]"));
 
     let json_output = run_special(&root, &["spec", "--json"]);
     assert!(json_output.status.success());
@@ -193,12 +204,23 @@ fn spec_surfaces_deprecated_release_metadata_across_output_modes() {
         Value::String("0.6.0".to_string())
     );
     assert_eq!(deprecated["deprecated"], Value::Bool(true));
+    assert_eq!(deprecated["planned"], Value::Bool(false));
 
     let html_output = run_special(&root, &["spec", "--html"]);
     assert!(html_output.status.success());
     let html_stdout = String::from_utf8(html_output.stdout).expect("stdout should be utf-8");
-    assert!(html_stdout.contains("deprecated"));
-    assert!(html_stdout.contains("0.6.0"));
+    assert!(html_node_has_badge(
+        &html_stdout,
+        "DEMO.DEPRECATED",
+        "badge-deprecated",
+        "deprecated: 0.6.0"
+    ));
+    assert!(!html_node_has_badge(
+        &html_stdout,
+        "DEMO.DEPRECATED",
+        "badge-planned",
+        "planned: 0.6.0"
+    ));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

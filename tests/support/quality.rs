@@ -368,9 +368,9 @@ print(json.dumps({"dont_write_bytecode": sys.dont_write_bytecode}))
         .expect("entrypoint runtime flag output should be valid json")
 }
 
-pub fn latest_semver_tag() -> String {
+pub fn latest_reachable_semver_tag() -> String {
     let jj_output = Command::new("jj")
-        .args(["tag", "list"])
+        .args(["tag", "list", "-r", "::@"])
         .current_dir(repo_root())
         .output()
         .expect("jj tag list should run");
@@ -393,6 +393,50 @@ pub fn latest_semver_tag() -> String {
         .last()
         .map(|(_, tag)| tag.clone())
         .expect("repo should have at least one semver tag")
+}
+
+pub fn latest_reachable_semver_tag_for_repo(
+    root: &std::path::Path,
+    backend: &str,
+    head: &str,
+) -> String {
+    let script = r#"
+import importlib.util
+import pathlib
+import sys
+
+project_root = pathlib.Path(sys.argv[1])
+target_root = pathlib.Path(sys.argv[2])
+backend = sys.argv[3]
+head = sys.argv[4]
+spec = importlib.util.spec_from_file_location(
+    "release_review", project_root / "scripts" / "review-rust-release-style.py"
+)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(module.discover_latest_semver_tag(target_root, backend, head))
+"#;
+
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(script)
+        .arg(repo_root())
+        .arg(root)
+        .arg(backend)
+        .arg(head)
+        .current_dir(repo_root())
+        .output()
+        .expect("reachable tag helper should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("reachable tag helper output should be utf-8")
+        .trim()
+        .to_string()
 }
 
 type SemverSortKey = (u64, u64, u64, u8, Vec<(u8, String)>);
@@ -455,6 +499,28 @@ pub fn current_revision() -> String {
         .expect("revision should be utf-8")
         .trim()
         .to_string()
+}
+
+pub fn tag_points_at_current_revision(tag: &str) -> bool {
+    let output = Command::new("jj")
+        .args(["tag", "list", "-r", "@"])
+        .current_dir(repo_root())
+        .output()
+        .expect("jj log should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("tag output should be utf-8")
+        .lines()
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(name, _)| name.trim().to_string())
+        })
+        .any(|name| name == tag)
 }
 
 pub fn release_tag_command_output(version: &str, extra_args: &[&str]) -> std::process::Output {

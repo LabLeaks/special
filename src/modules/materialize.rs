@@ -5,12 +5,11 @@ Builds the visible architecture tree from parsed module declarations and `@imple
 // @fileimplements SPECIAL.MODULES.MATERIALIZE
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::{
-    ImplementRef, ModuleDecl, ModuleDocument, ModuleFilter, ModuleNode, ParsedArchitecture,
-};
-
-use super::analyze::ArchitectureAnalysis;
 use super::{immediate_parent_id, nearest_visible_parent_id};
+use crate::model::{
+    ImplementRef, ModuleAnalysisSummary, ModuleDecl, ModuleDocument, ModuleFilter, ModuleNode,
+    ParsedArchitecture,
+};
 
 #[derive(Debug, Clone)]
 struct FlatModuleNode {
@@ -21,7 +20,7 @@ struct FlatModuleNode {
 pub(super) fn build_module_document(
     parsed: &ParsedArchitecture,
     filter: ModuleFilter,
-    analysis: Option<&ArchitectureAnalysis>,
+    module_analysis: Option<&BTreeMap<String, ModuleAnalysisSummary>>,
 ) -> ModuleDocument {
     let mut flat_nodes: BTreeMap<String, FlatModuleNode> = BTreeMap::new();
 
@@ -75,15 +74,12 @@ pub(super) fn build_module_document(
         children.sort();
     }
 
-    let mut nodes = build_children(None, &children_map, &flat_nodes, analysis);
+    let mut nodes = build_children(None, &children_map, &flat_nodes, module_analysis);
     if let Some(scope) = filter.scope.as_deref() {
         nodes = scoped_nodes(nodes, scope);
     }
 
-    ModuleDocument {
-        nodes,
-        analysis: None,
-    }
+    ModuleDocument { nodes }
 }
 
 impl ModuleFilter {
@@ -109,7 +105,7 @@ fn build_children(
     parent: Option<String>,
     children_map: &BTreeMap<Option<String>, Vec<String>>,
     flat_nodes: &BTreeMap<String, FlatModuleNode>,
-    analysis: Option<&ArchitectureAnalysis>,
+    module_analysis: Option<&BTreeMap<String, ModuleAnalysisSummary>>,
 ) -> Vec<ModuleNode> {
     let mut result = Vec::new();
 
@@ -119,10 +115,15 @@ fn build_children(
                 result.push(ModuleNode::new(
                     node.decl.clone(),
                     node.implements.clone(),
-                    analysis
-                        .and_then(|analysis| analysis.modules.get(child_id))
+                    module_analysis
+                        .and_then(|analysis| analysis.get(child_id))
                         .cloned(),
-                    build_children(Some(child_id.clone()), children_map, flat_nodes, analysis),
+                    build_children(
+                        Some(child_id.clone()),
+                        children_map,
+                        flat_nodes,
+                        module_analysis,
+                    ),
                 ));
             }
         }

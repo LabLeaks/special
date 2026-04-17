@@ -135,6 +135,12 @@ impl ModelInvariantError {
             message: "@spec may not be both planned and deprecated".to_string(),
         }
     }
+
+    fn deprecated_release_without_deprecated() -> Self {
+        Self {
+            message: "@deprecated release metadata requires @deprecated".to_string(),
+        }
+    }
 }
 
 impl fmt::Display for ModelInvariantError {
@@ -801,7 +807,7 @@ fn ensure_valid_spec_lifecycle(
         return Err(ModelInvariantError::deprecated_group(kind));
     }
     if !is_deprecated && deprecated_release.is_some() {
-        return Err(ModelInvariantError::conflicting_spec_lifecycle());
+        return Err(ModelInvariantError::deprecated_release_without_deprecated());
     }
     if plan.is_planned() && is_deprecated {
         return Err(ModelInvariantError::conflicting_spec_lifecycle());
@@ -924,8 +930,6 @@ pub struct SpecDocument {
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleDocument {
     pub nodes: Vec<ModuleNode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub analysis: Option<ArchitectureAnalysisSummary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1051,6 +1055,28 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "@spec may not be both planned and deprecated"
+        );
+    }
+
+    #[test]
+    fn rejects_deprecated_release_without_deprecated_state() {
+        let error = SpecDecl::new(
+            "SPECIAL".to_string(),
+            NodeKind::Spec,
+            "Grouping only.".to_string(),
+            PlanState::Live,
+            false,
+            Some(DeprecatedRelease::new("0.6.0").expect("release should be valid")),
+            SourceLocation {
+                path: "specs/special.rs".into(),
+                line: 1,
+            },
+        )
+        .expect_err("deprecated release metadata should require deprecated state");
+
+        assert_eq!(
+            error.to_string(),
+            "@deprecated release metadata requires @deprecated"
         );
     }
 

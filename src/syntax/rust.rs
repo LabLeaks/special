@@ -110,7 +110,7 @@ fn has_test_attribute(node: Node<'_>, source: &[u8]) -> bool {
             continue;
         }
         if trimmed.starts_with("#[") {
-            if trimmed.contains("test") {
+            if attribute_marks_test(trimmed) {
                 return true;
             }
             continue;
@@ -118,6 +118,17 @@ fn has_test_attribute(node: Node<'_>, source: &[u8]) -> bool {
         break;
     }
     false
+}
+
+fn attribute_marks_test(trimmed: &str) -> bool {
+    let Some(attribute) = trimmed
+        .strip_prefix("#[")
+        .and_then(|text| text.strip_suffix(']'))
+    else {
+        return false;
+    };
+    let path = attribute.split('(').next().unwrap_or_default().trim();
+    path == "test" || path.ends_with("::test")
 }
 
 fn has_public_visibility(node: Node<'_>, source: &[u8]) -> bool {
@@ -194,6 +205,20 @@ fn collect_invocations_inner(
 }
 
 fn local_cargo_binary_invocation(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let function = node.child_by_field_name("function")?;
+    let (name, qualifier, syntax) = function_name(function, source)?;
+    let is_command_new = name == "new"
+        && matches!(
+            syntax,
+            CallSyntaxKind::ScopedIdentifier | CallSyntaxKind::Field
+        )
+        && qualifier
+            .as_deref()
+            .is_some_and(|path| path == "Command" || path.ends_with("::Command"));
+    if !is_command_new {
+        return None;
+    }
+
     let arguments = node.child_by_field_name("arguments")?;
     let mut cursor = arguments.walk();
     for child in arguments.named_children(&mut cursor) {

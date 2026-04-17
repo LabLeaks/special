@@ -46,7 +46,8 @@ pub fn build_module_document(
     } else {
         None
     };
-    let document = materialize::build_module_document(&parsed, filter, analysis.as_ref());
+    let document =
+        materialize::build_module_document(&parsed, filter, analysis.as_ref().map(|a| &a.modules));
     Ok((document, lint))
 }
 

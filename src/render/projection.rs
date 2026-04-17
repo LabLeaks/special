@@ -42,10 +42,6 @@ pub(super) fn project_module_document(document: &ModuleDocument, verbose: bool) 
                 .cloned()
                 .map(strip_module_implementation_bodies)
                 .collect(),
-            analysis: document
-                .analysis
-                .clone()
-                .map(strip_module_document_analysis_paths),
         }
     }
 }
@@ -103,12 +99,26 @@ fn strip_module_document_analysis_paths(
     if let Some(repo_signals) = &mut analysis.repo_signals {
         strip_repo_signal_paths(repo_signals);
     }
+    if let Some(traceability) = &mut analysis.traceability {
+        strip_repo_traceability_detail(traceability);
+    }
     analysis
 }
 
 fn strip_repo_signal_paths(repo_signals: &mut ArchitectureRepoSignalsSummary) {
     repo_signals.unowned_unreached_item_details.clear();
     repo_signals.duplicate_item_details.truncate(5);
+}
+
+fn strip_repo_traceability_detail(
+    traceability: &mut crate::model::ArchitectureTraceabilitySummary,
+) {
+    traceability.live_spec_items.clear();
+    traceability.planned_only_items.clear();
+    traceability.deprecated_only_items.clear();
+    traceability.file_scoped_only_items.clear();
+    traceability.unverified_test_items.clear();
+    traceability.unknown_items.clear();
 }
 
 fn strip_module_coverage_paths(_coverage: &mut ModuleCoverageSummary) {}

@@ -73,10 +73,11 @@ Release-review wrapper tests in `tests/quality_release_review.rs`.
 mod support;
 
 use serde_json::{Value, json};
-use std::{fs, process::Command};
+use std::{fs, path::Path, process::Command};
 
 use support::{
-    latest_semver_tag, python_entrypoint_runtime_flag, release_review_changed_line_ranges,
+    latest_reachable_semver_tag, latest_reachable_semver_tag_for_repo,
+    python_entrypoint_runtime_flag, release_review_changed_line_ranges,
     release_review_chunk_helper, release_review_dry_run, release_review_extract_context_ranges,
     release_review_extract_full_scan_context_ranges, release_review_merge_responses,
     release_review_passes_for, release_review_schema, release_review_validate_response_shape_err,
@@ -336,7 +337,139 @@ fn release_review_prompt_stays_on_implementation_quality() {
 fn release_review_defaults_to_latest_semver_tag_in_jj_repo() {
     let payload = release_review_dry_run(&[]);
     assert_eq!(payload["backend"], "jj");
-    assert_eq!(payload["baseline"], latest_semver_tag());
+    assert_eq!(payload["baseline"], latest_reachable_semver_tag());
+}
+
+fn run_jj(temp_root: &Path, args: &[&str]) {
+    let output = Command::new("jj")
+        .args(args)
+        .current_dir(temp_root)
+        .output()
+        .expect("jj command should run");
+    assert!(
+        output.status.success(),
+        "jj {:?} failed\nstdout:\n{}\n\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_jj_repo() {
+    let root = support::repo_root().join(format!(
+        ".tmp-release-review-jj-baseline-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(&root).expect("temp repo should be created");
+
+    run_jj(&root, &["git", "init", "."]);
+
+    fs::write(root.join("a.txt"), "one\n").expect("first fixture should be written");
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "first",
+        ],
+    );
+    run_jj(&root, &["tag", "set", "-r", "@-", "v0.1.0"]);
+
+    fs::write(root.join("b.txt"), "two\n").expect("second fixture should be written");
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "second",
+        ],
+    );
+    run_jj(&root, &["tag", "set", "-r", "@-", "v0.4.1"]);
+
+    run_jj(
+        &root,
+        &["new", "v0.1.0", "--no-edit", "-m", "unrelated_branch"],
+    );
+    run_jj(
+        &root,
+        &[
+            "tag",
+            "set",
+            "-r",
+            "subject(exact:unrelated_branch)",
+            "v9.0.0",
+        ],
+    );
+
+    assert_eq!(
+        latest_reachable_semver_tag_for_repo(&root, "jj", "@"),
+        "v0.4.1".to_string()
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_git_repo() {
+    let root = support::repo_root().join(format!(
+        ".tmp-release-review-git-baseline-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(&root).expect("temp repo should be created");
+
+    let run_git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git {:?} failed\nstdout:\n{}\n\nstderr:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    run_git(&["init", "."]);
+    run_git(&["config", "user.name", "Test User"]);
+    run_git(&["config", "user.email", "test@example.com"]);
+
+    fs::write(root.join("a.txt"), "one\n").expect("first fixture should be written");
+    run_git(&["add", "a.txt"]);
+    run_git(&["commit", "-m", "first"]);
+    run_git(&["tag", "v0.1.0"]);
+
+    fs::write(root.join("b.txt"), "two\n").expect("second fixture should be written");
+    run_git(&["add", "b.txt"]);
+    run_git(&["commit", "-m", "second"]);
+    run_git(&["tag", "v0.4.1"]);
+
+    run_git(&["checkout", "-b", "unrelated", "v0.1.0"]);
+    fs::write(root.join("c.txt"), "three\n").expect("third fixture should be written");
+    run_git(&["add", "c.txt"]);
+    run_git(&["commit", "-m", "unrelated"]);
+    run_git(&["tag", "v9.0.0"]);
+    run_git(&["checkout", "-"]);
+
+    assert_eq!(
+        latest_reachable_semver_tag_for_repo(&root, "git", "HEAD"),
+        "v0.4.1".to_string()
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]

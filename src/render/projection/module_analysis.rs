@@ -599,15 +599,15 @@ fn format_traceability_item(item: &ModuleTraceabilityItem) -> String {
         ));
     }
 
-    format!(
-        "{} [{}; {}]",
-        item.name,
-        match item.kind {
-            ModuleItemKind::Function => "function",
-            ModuleItemKind::Method => "method",
-        },
-        segments.join("; ")
-    )
+    let kind = match item.kind {
+        ModuleItemKind::Function => "function",
+        ModuleItemKind::Method => "method",
+    };
+    if segments.is_empty() {
+        format!("{} [{}]", item.name, kind)
+    } else {
+        format!("{} [{}; {}]", item.name, kind, segments.join("; "))
+    }
 }
 
 fn explanation(label: &'static str, key: MetricExplanationKey) -> ProjectedExplanation {

@@ -35,6 +35,7 @@ use serde_json::Value;
 use support::{
     current_package_version, current_python_executable, release_tag_command_output,
     release_tag_dry_run, release_tag_live_output, release_tag_live_output_with_input,
+    tag_points_at_current_revision,
 };
 
 #[test]
@@ -203,32 +204,28 @@ fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_ste
     assert!(labels.contains(&"push_tag"));
     assert!(labels.contains(&"verify_github_release"));
     assert!(labels.contains(&"update_homebrew_formula"));
-    if labels.contains(&"set_tag") {
-        assert_eq!(
-            labels,
-            vec![
-                "bookmark_main",
-                "set_tag",
-                "push_main",
-                "push_tag",
-                "verify_github_release",
-                "update_homebrew_formula",
-                "verify_homebrew_formula",
-            ]
-        );
+    let tag = format!("v{version}");
+    let expected = if tag_points_at_current_revision(&tag) {
+        vec![
+            "bookmark_main",
+            "push_main",
+            "push_tag",
+            "verify_github_release",
+            "update_homebrew_formula",
+            "verify_homebrew_formula",
+        ]
     } else {
-        assert_eq!(
-            labels,
-            vec![
-                "bookmark_main",
-                "push_main",
-                "push_tag",
-                "verify_github_release",
-                "update_homebrew_formula",
-                "verify_homebrew_formula",
-            ]
-        );
-    }
+        vec![
+            "bookmark_main",
+            "set_tag",
+            "push_main",
+            "push_tag",
+            "verify_github_release",
+            "update_homebrew_formula",
+            "verify_homebrew_formula",
+        ]
+    };
+    assert_eq!(labels, expected);
 }
 
 #[test]

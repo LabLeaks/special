@@ -50,11 +50,16 @@ last_reviewed: 2026-04-16
 Distribution/release asset integration tests in `tests/distribution.rs`.
 */
 // @fileimplements SPECIAL.TESTS.DISTRIBUTION
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::Path};
 
-use serde_json::Value;
+use serde_json::{Value, json};
+
+static HOMEBREW_VERIFIER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -94,6 +99,13 @@ fn release_assets() -> Value {
         .expect("release assets json should be valid")
 }
 
+fn current_package_version() -> String {
+    package_metadata()["version"]
+        .as_str()
+        .expect("package version should be a string")
+        .to_string()
+}
+
 fn package_metadata() -> Value {
     cargo_metadata()["packages"]
         .as_array()
@@ -102,6 +114,218 @@ fn package_metadata() -> Value {
         .find(|package| package["name"].as_str() == Some("special-cli"))
         .cloned()
         .expect("cargo metadata should include the special-cli package")
+}
+
+fn base64_encode(input: &str) -> String {
+    let mut child = Command::new("python3")
+        .args([
+            "-c",
+            "import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("python3 should run");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(input.as_bytes())
+        .expect("input should be written");
+    let output = child
+        .wait_with_output()
+        .expect("python output should be captured");
+    assert!(
+        output.status.success(),
+        "python3 base64 helper should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("base64 output should be utf-8")
+        .trim()
+        .to_string()
+}
+
+fn homebrew_selector_arms() -> Vec<(&'static str, &'static str, &'static str)> {
+    vec![
+        ("special-cli-aarch64-apple-darwin.tar.xz", "macos", "arm"),
+        ("special-cli-x86_64-apple-darwin.tar.xz", "macos", "intel"),
+        (
+            "special-cli-aarch64-unknown-linux-gnu.tar.xz",
+            "linux",
+            "arm",
+        ),
+        (
+            "special-cli-x86_64-unknown-linux-gnu.tar.xz",
+            "linux",
+            "intel",
+        ),
+    ]
+}
+
+fn expected_release_sha(index: usize) -> String {
+    format!("{:064x}", index + 1)
+}
+
+fn expected_release_sha_for_archive(name: &str) -> String {
+    release_assets()["homebrew_formula_archives"]
+        .as_array()
+        .expect("homebrew formula archives should be an array")
+        .iter()
+        .enumerate()
+        .find_map(|(index, value)| {
+            (value.as_str() == Some(name)).then(|| expected_release_sha(index))
+        })
+        .unwrap_or_else(|| panic!("archive {name} should exist in release assets"))
+}
+
+fn valid_release_assets_json(mut mutate: impl FnMut(&mut Vec<Value>)) -> String {
+    let release_assets = release_assets();
+    let required = release_assets["homebrew_formula_archives"]
+        .as_array()
+        .expect("homebrew formula archives should be an array");
+    let mut assets = required
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let name = name.as_str().expect("archive name should be a string");
+            json!({
+                "name": name,
+                "digest": format!("sha256:{}", expected_release_sha(index)),
+            })
+        })
+        .collect::<Vec<_>>();
+    mutate(&mut assets);
+    json!({ "assets": assets }).to_string()
+}
+
+fn valid_formula_for_release(version: &str, sha_override: Option<(&str, String)>) -> String {
+    let mut macos_arm = String::new();
+    let mut macos_intel = String::new();
+    let mut linux_arm = String::new();
+    let mut linux_intel = String::new();
+    let mut sha_macos_arm = String::new();
+    let mut sha_macos_intel = String::new();
+    let mut sha_linux_arm = String::new();
+    let mut sha_linux_intel = String::new();
+
+    for (archive, os_name, arch) in homebrew_selector_arms() {
+        let sha = if let Some((target_archive, override_sha)) = &sha_override {
+            if *target_archive == archive {
+                override_sha.clone()
+            } else {
+                expected_release_sha_for_archive(archive)
+            }
+        } else {
+            expected_release_sha_for_archive(archive)
+        };
+        match (os_name, arch) {
+            ("macos", "arm") => {
+                macos_arm = archive.to_string();
+                sha_macos_arm = sha;
+            }
+            ("macos", "intel") => {
+                macos_intel = archive.to_string();
+                sha_macos_intel = sha;
+            }
+            ("linux", "arm") => {
+                linux_arm = archive.to_string();
+                sha_linux_arm = sha;
+            }
+            ("linux", "intel") => {
+                linux_intel = archive.to_string();
+                sha_linux_intel = sha;
+            }
+            _ => unreachable!("unexpected selector arm"),
+        }
+    }
+
+    format!(
+        r#"class Special < Formula
+  version "{version}"
+  archive = on_system_conditional(
+    macos: on_arch_conditional(
+      arm: "{macos_arm}",
+      intel: "{macos_intel}"
+    ),
+    linux: on_arch_conditional(
+      arm: "{linux_arm}",
+      intel: "{linux_intel}"
+    )
+  )
+  sha256 on_system_conditional(
+    macos: on_arch_conditional(
+      arm: "{sha_macos_arm}",
+      intel: "{sha_macos_intel}"
+    ),
+    linux: on_arch_conditional(
+      arm: "{sha_linux_arm}",
+      intel: "{sha_linux_intel}"
+    )
+  )
+  url "https://github.com/LabLeaks/special/releases/download/v{version}/#{{archive}}"
+
+  def install
+    bin.install "special"
+  end
+end
+"#
+    )
+}
+
+fn run_homebrew_formula_verifier(release_json: &str, formula: &str) -> std::process::Output {
+    let counter = HOMEBREW_VERIFIER_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after unix epoch")
+        .as_nanos();
+    let temp = std::env::temp_dir().join(format!(
+        "special-homebrew-verifier-{}-{nanos}-{counter}",
+        std::process::id()
+    ));
+    let bin_dir = temp.join("bin");
+    fs::create_dir_all(&bin_dir).expect("temp bin dir should be created");
+
+    let gh_script = format!(
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${{1:-}}" == "release" && "${{2:-}}" == "view" ]]; then
+cat <<'JSON'
+{release_json}
+JSON
+elif [[ "${{1:-}}" == "api" ]]; then
+cat <<'B64'
+{formula_b64}
+B64
+else
+echo "unexpected gh invocation: $*" >&2
+exit 1
+fi
+"#,
+        release_json = release_json,
+        formula_b64 = base64_encode(formula),
+    );
+    let gh_path = bin_dir.join("gh");
+    fs::write(&gh_path, gh_script).expect("fake gh script should be written");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&gh_path)
+            .expect("fake gh metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&gh_path, permissions).expect("fake gh should be executable");
+    }
+
+    let path = std::env::var("PATH").expect("PATH should be set");
+    let output = Command::new("bash")
+        .arg("scripts/verify-homebrew-formula.sh")
+        .current_dir(repo_root())
+        .env("PATH", format!("{}:{path}", bin_dir.display()))
+        .output()
+        .expect("homebrew verifier should run");
+    fs::remove_dir_all(&temp).expect("homebrew verifier temp dir should be removed");
+    output
 }
 
 fn dist_command() -> Command {
@@ -241,7 +465,6 @@ fn homebrew_formula_uses_the_standard_formula_path() {
 // @verifies SPECIAL.DISTRIBUTION.HOMEBREW.FORMULA.PLATFORM_SELECTION
 fn homebrew_formula_uses_standard_platform_selection_helpers() {
     let updater = read_repo_file("scripts/update-homebrew-formula.py");
-    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
 
     assert!(
         updater.contains("archive = on_system_conditional("),
@@ -261,43 +484,90 @@ fn homebrew_formula_uses_standard_platform_selection_helpers() {
         ),
         "Homebrew updater should emit a single active url from the selected archive"
     );
+
+    let version = current_package_version();
+    let release_json = valid_release_assets_json(|_| {});
+    let formula = valid_formula_for_release(&version, None);
+    let success = run_homebrew_formula_verifier(&release_json, &formula);
     assert!(
-        verifier.contains("formula is missing templated release asset url"),
-        "Homebrew verification should accept the templated archive URL shape"
+        success.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&success.stdout),
+        String::from_utf8_lossy(&success.stderr)
     );
+
+    let missing_url = run_homebrew_formula_verifier(
+        &release_json,
+        &formula.replace(
+            &format!(
+                "url \"https://github.com/LabLeaks/special/releases/download/v{version}/#{{archive}}\""
+            ),
+            "",
+        ),
+    );
+    assert!(!missing_url.status.success());
     assert!(
-        verifier.contains("formula is missing archive selector entry"),
-        "Homebrew verification should validate archive selector entries instead of expanded asset URLs"
+        String::from_utf8_lossy(&missing_url.stderr)
+            .contains("formula is missing templated release asset url"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&missing_url.stderr)
+    );
+
+    let missing_selector = run_homebrew_formula_verifier(
+        &release_json,
+        &formula.replace(
+            "arm: \"special-cli-aarch64-apple-darwin.tar.xz\"",
+            "arm: \"wrong-archive.tar.xz\"",
+        ),
+    );
+    assert!(!missing_selector.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing_selector.stderr)
+            .contains("formula is missing archive selector entry"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&missing_selector.stderr)
     );
 }
 
 #[test]
 fn homebrew_formula_verifier_requires_release_asset_digests() {
-    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
+    let version = current_package_version();
+    let release_json = valid_release_assets_json(|assets| {
+        assets[0]
+            .as_object_mut()
+            .expect("asset should be an object")
+            .remove("digest");
+    });
+    let formula = valid_formula_for_release(&version, None);
+    let output = run_homebrew_formula_verifier(&release_json, &formula);
 
+    assert!(!output.status.success());
     assert!(
-        verifier.contains("release asset is missing digest"),
-        "Homebrew verification should fail cleanly when required release assets omit digest metadata"
+        String::from_utf8_lossy(&output.stderr).contains("release asset is missing digest"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
 #[test]
 fn homebrew_formula_verifier_checks_selector_checksum_pairing() {
-    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
-
-    assert!(
-        verifier.contains("formula checksum selector entry does not contain expected checksum"),
-        "Homebrew verification should validate selector-level checksum pairing, not just loose checksum presence"
+    let version = current_package_version();
+    let release_json = valid_release_assets_json(|_| {});
+    let formula = valid_formula_for_release(
+        &version,
+        Some((
+            "special-cli-x86_64-unknown-linux-gnu.tar.xz",
+            "f".repeat(64),
+        )),
     );
-}
+    let output = run_homebrew_formula_verifier(&release_json, &formula);
 
-#[test]
-fn homebrew_formula_verifier_rejects_unmapped_required_assets_cleanly() {
-    let verifier = read_repo_file("scripts/verify-homebrew-formula.sh");
-
+    assert!(!output.status.success());
     assert!(
-        verifier.contains("required release asset has no Homebrew selector mapping"),
-        "Homebrew verification should fail cleanly when a required archive lacks selector mapping"
+        String::from_utf8_lossy(&output.stderr)
+            .contains("formula checksum selector entry does not contain expected checksum"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

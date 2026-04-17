@@ -248,17 +248,6 @@ struct ModulePageHtmlTemplate<'a> {
 }
 
 impl ModulePageHtmlTemplate<'_> {
-    fn repo_signals_section(&self) -> String {
-        self.document
-            .analysis
-            .as_ref()
-            .and_then(|analysis| analysis.repo_signals.as_ref())
-            .map(|coverage| {
-                format_repo_signals_html(&project_repo_signals_view(coverage, self.verbose))
-            })
-            .unwrap_or_default()
-    }
-
     fn tree_html(&self) -> String {
         self.document
             .nodes

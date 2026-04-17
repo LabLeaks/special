@@ -180,7 +180,7 @@ fn invalid_trailing_content_message(kind: NodeKind, planned: PlannedSyntax) -> &
             "unexpected trailing content after group id; only the id belongs on the @group line"
         }
         (NodeKind::Spec, PlannedSyntax::LegacyBackward) => {
-            "unexpected trailing content after spec id; compatibility parsing does not allow inline `@planned`"
+            "unexpected trailing content after spec id; compatibility parsing does not allow inline lifecycle markers like `@planned` or `@deprecated`"
         }
         (NodeKind::Spec, PlannedSyntax::AdjacentOwnedSpec) => {
             "unexpected trailing content after spec id; use an exact trailing `@planned` or `@deprecated` marker if needed"

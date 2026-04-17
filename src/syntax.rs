@@ -158,6 +158,25 @@ mod tests {
         parse_source_graph_for_language, parse_source_graph_for_language_at_path,
     };
 
+    fn item_named<'a>(graph: &'a super::ParsedSourceGraph, name: &str) -> &'a super::SourceItem {
+        graph
+            .items
+            .iter()
+            .find(|item| item.name == name)
+            .unwrap_or_else(|| panic!("item {name} should be present"))
+    }
+
+    fn item_qualified<'a>(
+        graph: &'a super::ParsedSourceGraph,
+        qualified_name: &str,
+    ) -> &'a super::SourceItem {
+        graph
+            .items
+            .iter()
+            .find(|item| item.qualified_name == qualified_name)
+            .unwrap_or_else(|| panic!("item {qualified_name} should be present"))
+    }
+
     #[test]
     fn go_provider_collects_items_and_calls() {
         let graph = parse_source_graph_for_language_at_path(
@@ -179,21 +198,21 @@ func helper() {}
         .expect("go graph should parse");
 
         assert_eq!(graph.items.len(), 2);
-        assert_eq!(graph.items[0].name, "Entry");
-        assert!(graph.items[0].public);
-        assert_eq!(graph.items[0].qualified_name, "app::Entry");
-        assert!(graph.items[0].calls.iter().any(|call| {
+        let entry = item_named(&graph, "Entry");
+        assert!(entry.public);
+        assert_eq!(entry.qualified_name, "app::Entry");
+        assert!(entry.calls.iter().any(|call| {
             call.name == "helper"
                 && call.qualifier.is_none()
                 && call.syntax == CallSyntaxKind::Identifier
         }));
-        assert!(graph.items[0].calls.iter().any(|call| {
+        assert!(entry.calls.iter().any(|call| {
             call.name == "Println"
                 && call.qualifier.as_deref() == Some("fmt")
                 && call.syntax == CallSyntaxKind::Field
         }));
-        assert_eq!(graph.items[1].name, "helper");
-        assert!(!graph.items[1].public);
+        let helper = item_named(&graph, "helper");
+        assert!(!helper.public);
     }
 
     #[test]
@@ -217,15 +236,15 @@ fn verifies_demo() {
         .expect("rust graph should parse");
 
         assert_eq!(graph.items.len(), 2);
-        assert_eq!(graph.items[0].name, "helper");
-        assert_eq!(graph.items[0].qualified_name, "helper");
-        assert!(graph.items[0].module_path.is_empty());
-        assert!(graph.items[0].container_path.is_empty());
-        assert_eq!(graph.items[0].kind, SourceItemKind::Function);
-        assert!(!graph.items[0].public);
-        assert!(!graph.items[0].is_test);
+        let helper = item_named(&graph, "helper");
+        assert_eq!(helper.qualified_name, "helper");
+        assert!(helper.module_path.is_empty());
+        assert!(helper.container_path.is_empty());
+        assert_eq!(helper.kind, SourceItemKind::Function);
+        assert!(!helper.public);
+        assert!(!helper.is_test);
 
-        let test_item = &graph.items[1];
+        let test_item = item_named(&graph, "verifies_demo");
         assert_eq!(test_item.name, "verifies_demo");
         assert_eq!(test_item.qualified_name, "verifies_demo");
         assert!(test_item.is_test);
@@ -254,6 +273,25 @@ fn verifies_demo() {
     }
 
     #[test]
+    fn rust_provider_avoids_false_positive_test_and_invocation_detection() {
+        let graph = parse_source_graph_for_language(
+            SourceLanguage::Rust,
+            r#"
+#[cfg(not(test))]
+fn helper() {
+    format!("{}", env!("CARGO_BIN_EXE_special"));
+}
+"#,
+        )
+        .expect("rust graph should parse");
+
+        assert_eq!(graph.items.len(), 1);
+        let helper = item_named(&graph, "helper");
+        assert!(!helper.is_test);
+        assert!(helper.invocations.is_empty());
+    }
+
+    #[test]
     fn rust_provider_records_stable_and_qualified_item_names() {
         let graph = parse_source_graph_for_language_at_path(
             SourceLanguage::Rust,
@@ -271,7 +309,7 @@ mod nested {
         .expect("rust graph should parse");
 
         assert_eq!(graph.items.len(), 1);
-        let method = &graph.items[0];
+        let method = item_qualified(&graph, "nested::Worker::run");
         assert_eq!(method.name, "run");
         assert_eq!(method.qualified_name, "nested::Worker::run");
         assert_eq!(method.container_path, vec!["Worker".to_string()]);
@@ -289,7 +327,7 @@ mod nested {
         .expect("rust graph should parse");
 
         assert_eq!(graph.items.len(), 1);
-        let function = &graph.items[0];
+        let function = item_qualified(&graph, "render::html::render_spec_html");
         assert_eq!(
             function.module_path,
             vec!["render".to_string(), "html".to_string()]
@@ -325,24 +363,24 @@ export const render = () => {
         .expect("typescript graph should parse");
 
         assert_eq!(graph.items.len(), 3);
-        assert_eq!(graph.items[0].name, "entry");
-        assert!(graph.items[0].public);
+        let entry = item_named(&graph, "entry");
+        assert!(entry.public);
         assert!(
-            graph.items[0]
+            entry
                 .calls
                 .iter()
                 .any(|call| call.name == "helper" && call.qualifier.is_none())
         );
-        assert!(graph.items[0].calls.iter().any(|call| {
+        assert!(entry.calls.iter().any(|call| {
             call.name == "run"
                 && call.qualifier.as_deref() == Some("api")
                 && call.syntax == CallSyntaxKind::Field
         }));
 
-        assert_eq!(graph.items[1].name, "helper");
-        assert!(!graph.items[1].public);
+        let helper = item_named(&graph, "helper");
+        assert!(!helper.public);
 
-        assert_eq!(graph.items[2].name, "render");
-        assert!(graph.items[2].public);
+        let render = item_named(&graph, "render");
+        assert!(render.public);
     }
 }

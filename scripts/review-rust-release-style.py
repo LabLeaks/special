@@ -150,8 +150,8 @@ def main() -> int:
 
     review_mode, model = selected_model(args)
     version = load_version(root)
-    base = None if args.full else (args.base or discover_latest_semver_tag(root, backend))
     head = args.head or ("@" if backend == "jj" else "HEAD")
+    base = None if args.full else (args.base or discover_latest_semver_tag(root, backend, head))
     review_files = (
         full_scan_files(root, backend)
         if args.full
