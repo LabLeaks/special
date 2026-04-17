@@ -5,7 +5,7 @@ Renders projected specs and modules into structured JSON output.
 // @fileimplements SPECIAL.RENDER.JSON
 use anyhow::Result;
 
-use crate::model::{ModuleDocument, SpecDocument};
+use crate::model::{ModuleDocument, RepoDocument, SpecDocument};
 
 use super::projection::{project_document, project_module_document};
 
@@ -16,5 +16,10 @@ pub(super) fn render_spec_json(document: &SpecDocument, verbose: bool) -> Result
 
 pub(super) fn render_module_json(document: &ModuleDocument, verbose: bool) -> Result<String> {
     let document = project_module_document(document, verbose);
+    Ok(serde_json::to_string_pretty(&document)?)
+}
+
+pub(super) fn render_repo_json(document: &RepoDocument, verbose: bool) -> Result<String> {
+    let document = super::projection::project_repo_document(document, verbose);
     Ok(serde_json::to_string_pretty(&document)?)
 }

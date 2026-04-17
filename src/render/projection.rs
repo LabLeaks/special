@@ -6,13 +6,14 @@ Projects materialized specs and modules into the visible verbose or non-verbose 
 mod module_analysis;
 
 use crate::model::{
-    ArchitectureCoverageSummary, ModuleCoverageSummary, ModuleDocument, ModuleNode, SpecDocument,
-    SpecNode,
+    ArchitectureRepoSignalsSummary, ModuleCoverageSummary, ModuleDocument, ModuleNode,
+    RepoDocument, SpecDocument, SpecNode,
 };
 
 pub(super) use self::module_analysis::{
-    ProjectedArchitectureCoverage, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
-    ProjectedModuleAnalysis, project_architecture_coverage_view, project_module_analysis_view,
+    ProjectedArchitectureTraceability, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
+    ProjectedModuleAnalysis, ProjectedRepoSignals, project_module_analysis_view,
+    project_repo_signals_view, project_repo_traceability_view,
 };
 
 pub(super) fn project_document(document: &SpecDocument, verbose: bool) -> SpecDocument {
@@ -41,6 +42,19 @@ pub(super) fn project_module_document(document: &ModuleDocument, verbose: bool) 
                 .cloned()
                 .map(strip_module_implementation_bodies)
                 .collect(),
+            analysis: document
+                .analysis
+                .clone()
+                .map(strip_module_document_analysis_paths),
+        }
+    }
+}
+
+pub(super) fn project_repo_document(document: &RepoDocument, verbose: bool) -> RepoDocument {
+    if verbose {
+        document.clone()
+    } else {
+        RepoDocument {
             analysis: document
                 .analysis
                 .clone()
@@ -86,18 +100,15 @@ fn strip_module_implementation_bodies(mut node: ModuleNode) -> ModuleNode {
 fn strip_module_document_analysis_paths(
     mut analysis: crate::model::ArchitectureAnalysisSummary,
 ) -> crate::model::ArchitectureAnalysisSummary {
-    if let Some(coverage) = &mut analysis.coverage {
-        strip_architecture_coverage_paths(coverage);
+    if let Some(repo_signals) = &mut analysis.repo_signals {
+        strip_repo_signal_paths(repo_signals);
     }
     analysis
 }
 
-fn strip_architecture_coverage_paths(coverage: &mut ArchitectureCoverageSummary) {
-    coverage.uncovered_paths.clear();
-    coverage.weak_paths.clear();
+fn strip_repo_signal_paths(repo_signals: &mut ArchitectureRepoSignalsSummary) {
+    repo_signals.unowned_unreached_item_details.clear();
+    repo_signals.duplicate_item_details.truncate(5);
 }
 
-fn strip_module_coverage_paths(coverage: &mut ModuleCoverageSummary) {
-    coverage.covered_paths.clear();
-    coverage.weak_paths.clear();
-}
+fn strip_module_coverage_paths(_coverage: &mut ModuleCoverageSummary) {}

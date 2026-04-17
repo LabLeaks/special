@@ -83,6 +83,24 @@ impl PlannedRelease {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeprecatedRelease(String);
+
+impl DeprecatedRelease {
+    pub fn new(value: impl Into<String>) -> Result<Self, ModelInvariantError> {
+        let value = value.into();
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(ModelInvariantError::empty_deprecated_release());
+        }
+        Ok(Self(trimmed.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelInvariantError {
     message: String,
 }
@@ -97,6 +115,24 @@ impl ModelInvariantError {
     fn empty_planned_release() -> Self {
         Self {
             message: "planned release metadata must not be empty".to_string(),
+        }
+    }
+
+    fn deprecated_group(kind: NodeKind) -> Self {
+        Self {
+            message: format!("`{}` nodes may not be deprecated", kind.as_annotation()),
+        }
+    }
+
+    fn empty_deprecated_release() -> Self {
+        Self {
+            message: "deprecated release metadata must not be empty".to_string(),
+        }
+    }
+
+    fn conflicting_spec_lifecycle() -> Self {
+        Self {
+            message: "@spec may not be both planned and deprecated".to_string(),
         }
     }
 }
@@ -151,6 +187,8 @@ pub struct SpecDecl {
     kind: NodeKind,
     pub text: String,
     plan: PlanState,
+    deprecated: bool,
+    deprecated_release: Option<DeprecatedRelease>,
     pub location: SourceLocation,
 }
 
@@ -160,26 +198,55 @@ impl SpecDecl {
         kind: NodeKind,
         text: String,
         plan: PlanState,
+        deprecated: bool,
+        deprecated_release: Option<DeprecatedRelease>,
         location: SourceLocation,
     ) -> Result<Self, ModelInvariantError> {
-        ensure_valid_plan(kind, &plan)?;
+        ensure_valid_spec_lifecycle(kind, &plan, deprecated, deprecated_release.as_ref())?;
         Ok(Self {
             id,
             kind,
             text,
             plan,
+            deprecated,
+            deprecated_release,
             location,
         })
     }
 
     pub fn set_plan(&mut self, plan: PlanState) -> Result<(), ModelInvariantError> {
-        ensure_valid_plan(self.kind, &plan)?;
+        ensure_valid_spec_lifecycle(
+            self.kind,
+            &plan,
+            self.deprecated,
+            self.deprecated_release.as_ref(),
+        )?;
         self.plan = plan;
+        Ok(())
+    }
+
+    pub fn set_deprecated(
+        &mut self,
+        is_deprecated: bool,
+        deprecated_release: Option<DeprecatedRelease>,
+    ) -> Result<(), ModelInvariantError> {
+        ensure_valid_spec_lifecycle(
+            self.kind,
+            &self.plan,
+            is_deprecated,
+            deprecated_release.as_ref(),
+        )?;
+        self.deprecated = is_deprecated;
+        self.deprecated_release = deprecated_release;
         Ok(())
     }
 
     pub fn is_planned(&self) -> bool {
         self.plan.is_planned()
+    }
+
+    pub fn is_deprecated(&self) -> bool {
+        self.deprecated
     }
 
     pub fn kind(&self) -> NodeKind {
@@ -188,6 +255,12 @@ impl SpecDecl {
 
     pub fn planned_release(&self) -> Option<&str> {
         self.plan.release()
+    }
+
+    pub fn deprecated_release(&self) -> Option<&str> {
+        self.deprecated_release
+            .as_ref()
+            .map(DeprecatedRelease::as_str)
     }
 
     pub fn plan(&self) -> &PlanState {
@@ -200,20 +273,24 @@ impl Serialize for SpecDecl {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct(
-            "SpecDecl",
-            if self.planned_release().is_some() {
-                6
-            } else {
-                5
-            },
-        )?;
+        let mut fields = 6;
+        if self.planned_release().is_some() {
+            fields += 1;
+        }
+        if self.deprecated_release().is_some() {
+            fields += 1;
+        }
+        let mut state = serializer.serialize_struct("SpecDecl", fields)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("kind", &self.kind)?;
         state.serialize_field("text", &self.text)?;
         state.serialize_field("planned", &self.is_planned())?;
+        state.serialize_field("deprecated", &self.is_deprecated())?;
         if let Some(planned_release) = self.planned_release() {
             state.serialize_field("planned_release", planned_release)?;
+        }
+        if let Some(deprecated_release) = self.deprecated_release() {
+            state.serialize_field("deprecated_release", deprecated_release)?;
         }
         state.serialize_field("location", &self.location)?;
         state.end()
@@ -332,16 +409,41 @@ pub struct ImplementRef {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ArchitectureCoverageSummary {
-    pub analyzed_files: usize,
-    pub covered_files: usize,
-    pub uncovered_files: usize,
-    pub weak_files: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub uncovered_paths: Vec<PathBuf>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub weak_paths: Vec<PathBuf>,
+#[derive(Debug, Clone, Default)]
+pub struct ArchitectureRepoSignalsSummary {
+    pub unowned_unreached_items: usize,
+    pub unowned_unreached_item_details: Vec<ArchitectureUnreachedItem>,
+    pub duplicate_items: usize,
+    pub duplicate_item_details: Vec<ArchitectureDuplicateItem>,
+}
+
+impl Serialize for ArchitectureRepoSignalsSummary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut field_count = 2;
+        if !self.unowned_unreached_item_details.is_empty() {
+            field_count += 1;
+        }
+        if !self.duplicate_item_details.is_empty() {
+            field_count += 1;
+        }
+        let mut state =
+            serializer.serialize_struct("ArchitectureRepoSignalsSummary", field_count)?;
+        state.serialize_field("unowned_unreached_items", &self.unowned_unreached_items)?;
+        state.serialize_field("duplicate_items", &self.duplicate_items)?;
+        if !self.unowned_unreached_item_details.is_empty() {
+            state.serialize_field(
+                "unowned_unreached_item_details",
+                &self.unowned_unreached_item_details,
+            )?;
+        }
+        if !self.duplicate_item_details.is_empty() {
+            state.serialize_field("duplicate_item_details", &self.duplicate_item_details)?;
+        }
+        state.end()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -369,7 +471,7 @@ pub struct ModuleQualitySummary {
     pub panic_site_count: usize,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum ModuleItemKind {
     Function,
@@ -392,15 +494,67 @@ pub struct ModuleItemSignal {
     pub panic_site_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ArchitectureUnreachedItem {
+    pub path: PathBuf,
+    pub name: String,
+    pub kind: ModuleItemKind,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArchitectureDuplicateItem {
+    pub module_id: String,
+    pub path: PathBuf,
+    pub name: String,
+    pub kind: ModuleItemKind,
+    pub duplicate_peer_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArchitectureTraceabilityItem {
+    pub module_id: String,
+    pub name: String,
+    pub kind: ModuleItemKind,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub verifying_tests: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unverified_tests: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub live_specs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub planned_specs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deprecated_specs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModuleTraceabilityItem {
+    pub name: String,
+    pub kind: ModuleItemKind,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub verifying_tests: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unverified_tests: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub live_specs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub planned_specs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deprecated_specs: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ModuleItemSignalsSummary {
     pub analyzed_items: usize,
+    pub unreached_item_count: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub connected_items: Vec<ModuleItemSignal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outbound_heavy_items: Vec<ModuleItemSignal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub isolated_items: Vec<ModuleItemSignal>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unreached_items: Vec<ModuleItemSignal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub highest_complexity_items: Vec<ModuleItemSignal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -409,6 +563,40 @@ pub struct ModuleItemSignalsSummary {
     pub stringly_boundary_items: Vec<ModuleItemSignal>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub panic_heavy_items: Vec<ModuleItemSignal>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ModuleTraceabilitySummary {
+    pub analyzed_items: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub live_spec_items: Vec<ModuleTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub planned_only_items: Vec<ModuleTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deprecated_only_items: Vec<ModuleTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub file_scoped_only_items: Vec<ModuleTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unverified_test_items: Vec<ModuleTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unknown_items: Vec<ModuleTraceabilityItem>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ArchitectureTraceabilitySummary {
+    pub analyzed_items: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub live_spec_items: Vec<ArchitectureTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub planned_only_items: Vec<ArchitectureTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub deprecated_only_items: Vec<ArchitectureTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub file_scoped_only_items: Vec<ArchitectureTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unverified_test_items: Vec<ArchitectureTraceabilityItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unknown_items: Vec<ArchitectureTraceabilityItem>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -436,16 +624,22 @@ pub struct ModuleDependencySummary {
     pub targets: Vec<ModuleDependencyTargetSummary>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ModuleCoverageSummary {
-    pub covered_files: usize,
-    pub weak_files: usize,
     pub file_scoped_implements: usize,
     pub item_scoped_implements: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub covered_paths: Vec<PathBuf>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub weak_paths: Vec<PathBuf>,
+}
+
+impl Serialize for ModuleCoverageSummary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ModuleCoverageSummary", 2)?;
+        state.serialize_field("file_scoped_implements", &self.file_scoped_implements)?;
+        state.serialize_field("item_scoped_implements", &self.item_scoped_implements)?;
+        state.end()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -461,6 +655,8 @@ pub struct ModuleAnalysisSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item_signals: Option<ModuleItemSignalsSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub traceability: Option<ModuleTraceabilitySummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub coupling: Option<ModuleCouplingSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependencies: Option<ModuleDependencySummary>,
@@ -469,7 +665,9 @@ pub struct ModuleAnalysisSummary {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ArchitectureAnalysisSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub coverage: Option<ArchitectureCoverageSummary>,
+    pub repo_signals: Option<ArchitectureRepoSignalsSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub traceability: Option<ArchitectureTraceabilitySummary>,
 }
 
 #[derive(Debug, Clone)]
@@ -478,6 +676,8 @@ pub struct SpecNode {
     kind: NodeKind,
     pub text: String,
     plan: PlanState,
+    deprecated: bool,
+    deprecated_release: Option<DeprecatedRelease>,
     pub location: SourceLocation,
     pub verifies: Vec<VerifyRef>,
     pub attests: Vec<AttestRef>,
@@ -496,6 +696,8 @@ impl SpecNode {
             kind: decl.kind,
             text: decl.text,
             plan: decl.plan,
+            deprecated: decl.deprecated,
+            deprecated_release: decl.deprecated_release,
             location: decl.location,
             verifies,
             attests,
@@ -507,12 +709,22 @@ impl SpecNode {
         self.plan.is_planned()
     }
 
+    pub fn is_deprecated(&self) -> bool {
+        self.deprecated
+    }
+
     pub fn kind(&self) -> NodeKind {
         self.kind
     }
 
     pub fn planned_release(&self) -> Option<&str> {
         self.plan.release()
+    }
+
+    pub fn deprecated_release(&self) -> Option<&str> {
+        self.deprecated_release
+            .as_ref()
+            .map(DeprecatedRelease::as_str)
     }
 
     pub fn is_unsupported(&self) -> bool {
@@ -578,6 +790,25 @@ fn ensure_valid_plan(kind: NodeKind, plan: &PlanState) -> Result<(), ModelInvari
     Ok(())
 }
 
+fn ensure_valid_spec_lifecycle(
+    kind: NodeKind,
+    plan: &PlanState,
+    is_deprecated: bool,
+    deprecated_release: Option<&DeprecatedRelease>,
+) -> Result<(), ModelInvariantError> {
+    ensure_valid_plan(kind, plan)?;
+    if kind == NodeKind::Group && is_deprecated {
+        return Err(ModelInvariantError::deprecated_group(kind));
+    }
+    if !is_deprecated && deprecated_release.is_some() {
+        return Err(ModelInvariantError::conflicting_spec_lifecycle());
+    }
+    if plan.is_planned() && is_deprecated {
+        return Err(ModelInvariantError::conflicting_spec_lifecycle());
+    }
+    Ok(())
+}
+
 fn ensure_valid_architecture_plan(
     kind: ArchitectureKind,
     plan: &PlanState,
@@ -595,20 +826,24 @@ impl Serialize for SpecNode {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct(
-            "SpecNode",
-            if self.planned_release().is_some() {
-                9
-            } else {
-                8
-            },
-        )?;
+        let mut fields = 9;
+        if self.planned_release().is_some() {
+            fields += 1;
+        }
+        if self.deprecated_release().is_some() {
+            fields += 1;
+        }
+        let mut state = serializer.serialize_struct("SpecNode", fields)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("kind", &self.kind)?;
         state.serialize_field("text", &self.text)?;
         state.serialize_field("planned", &self.is_planned())?;
+        state.serialize_field("deprecated", &self.is_deprecated())?;
         if let Some(planned_release) = self.planned_release() {
             state.serialize_field("planned_release", planned_release)?;
+        }
+        if let Some(deprecated_release) = self.deprecated_release() {
+            state.serialize_field("deprecated_release", deprecated_release)?;
         }
         state.serialize_field("location", &self.location)?;
         state.serialize_field("verifies", &self.verifies)?;
@@ -659,11 +894,25 @@ pub struct ModuleFilter {
 pub struct ModuleAnalysisOptions {
     pub coverage: bool,
     pub metrics: bool,
+    pub experimental: bool,
 }
 
 impl ModuleAnalysisOptions {
+    pub fn normalized(self) -> Self {
+        if self.experimental {
+            Self {
+                coverage: true,
+                metrics: true,
+                experimental: true,
+            }
+        } else {
+            self
+        }
+    }
+
     pub fn any(self) -> bool {
-        self.coverage || self.metrics
+        let normalized = self.normalized();
+        normalized.coverage || normalized.metrics || normalized.experimental
     }
 }
 
@@ -675,6 +924,12 @@ pub struct SpecDocument {
 #[derive(Debug, Clone, Serialize)]
 pub struct ModuleDocument {
     pub nodes: Vec<ModuleNode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<ArchitectureAnalysisSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RepoDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis: Option<ArchitectureAnalysisSummary>,
 }
@@ -695,7 +950,8 @@ impl LintReport {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArchitectureKind, ModuleDecl, NodeKind, PlanState, PlannedRelease, SourceLocation, SpecDecl,
+        ArchitectureKind, DeprecatedRelease, ModuleDecl, NodeKind, PlanState, PlannedRelease,
+        SourceLocation, SpecDecl,
     };
 
     #[test]
@@ -708,12 +964,23 @@ mod tests {
     }
 
     #[test]
+    fn rejects_empty_deprecated_release_values() {
+        let error = DeprecatedRelease::new("   ").expect_err("empty releases should be rejected");
+        assert_eq!(
+            error.to_string(),
+            "deprecated release metadata must not be empty"
+        );
+    }
+
+    #[test]
     fn rejects_planned_groups_at_construction_time() {
         let error = SpecDecl::new(
             "SPECIAL".to_string(),
             NodeKind::Group,
             "Grouping only.".to_string(),
             PlanState::planned(None),
+            false,
+            None,
             SourceLocation {
                 path: "specs/special.rs".into(),
                 line: 1,
@@ -731,6 +998,8 @@ mod tests {
             NodeKind::Group,
             "Grouping only.".to_string(),
             PlanState::live(),
+            false,
+            None,
             SourceLocation {
                 path: "specs/special.rs".into(),
                 line: 1,
@@ -742,6 +1011,47 @@ mod tests {
             .set_plan(PlanState::planned(None))
             .expect_err("groups should stay unplannable");
         assert_eq!(error.to_string(), "`@group` nodes may not be planned");
+    }
+
+    #[test]
+    fn rejects_deprecated_groups_at_construction_time() {
+        let error = SpecDecl::new(
+            "SPECIAL".to_string(),
+            NodeKind::Group,
+            "Grouping only.".to_string(),
+            PlanState::live(),
+            true,
+            Some(DeprecatedRelease::new("0.6.0").expect("release should be valid")),
+            SourceLocation {
+                path: "specs/special.rs".into(),
+                line: 1,
+            },
+        )
+        .expect_err("groups should not accept deprecated state");
+
+        assert_eq!(error.to_string(), "`@group` nodes may not be deprecated");
+    }
+
+    #[test]
+    fn rejects_conflicting_spec_lifecycle_metadata() {
+        let error = SpecDecl::new(
+            "SPECIAL".to_string(),
+            NodeKind::Spec,
+            "Grouping only.".to_string(),
+            PlanState::planned(None),
+            true,
+            Some(DeprecatedRelease::new("0.6.0").expect("release should be valid")),
+            SourceLocation {
+                path: "specs/special.rs".into(),
+                line: 1,
+            },
+        )
+        .expect_err("specs should not accept conflicting lifecycle state");
+
+        assert_eq!(
+            error.to_string(),
+            "@spec may not be both planned and deprecated"
+        );
     }
 
     #[test]

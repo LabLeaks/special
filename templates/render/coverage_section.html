@@ -1,16 +1,17 @@
 <section class="node">
   <div class="node-header">
-    <span class="node-id">coverage</span>
+    <span class="node-id">repo-wide signals</span>
   </div>
   <div class="meta counts">
     {{ counts_html|safe }}
   </div>
+  {{ explanations_html|safe }}
   {% if verbose %}
-  {% for path in uncovered_paths %}
-  <div class="meta">uncovered path {{ path }}</div>
+  {% for item in unowned_unreached_items %}
+  <div class="meta">unowned unreached item {{ item }}</div>
   {% endfor %}
-  {% for path in weak_paths %}
-  <div class="meta">weak path {{ path }}</div>
+  {% for item in duplicate_items %}
+  <div class="meta">duplicate item {{ item }}</div>
   {% endfor %}
   {% endif %}
 </section>

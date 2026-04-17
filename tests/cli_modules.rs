@@ -53,13 +53,16 @@ when a planned module declares release metadata, special modules surfaces that r
 special modules can materialize slower implementation analysis evidence.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS
-special modules --metrics surfaces architecture analysis evidence, including ownership coverage and per-module implementation summaries from built-in language analyzers.
+special modules --metrics surfaces module ownership granularity and per-module implementation summaries from built-in language analyzers.
 
 @group SPECIAL.MODULE_COMMAND.METRICS.COMPLEXITY
 special modules can explain and summarize complexity evidence.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.QUALITY
 special modules --metrics surfaces language-agnostic quality evidence categories when a built-in analyzer can extract them honestly.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.UNREACHED_CODE
+special modules --metrics surfaces conservative unreached-code indicators within owned implementation when built-in analyzers can identify them honestly.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.COMPLEXITY.EXPLANATIONS
 special modules --metrics explains complexity evidence in plain language and in precise structural terms from a shared analysis registry.
@@ -101,13 +104,25 @@ special modules --metrics surfaces Rust `use`-path dependency evidence from owne
 special modules --metrics derives generic module coupling evidence from Rust `use` targets when those targets resolve to uniquely owned files.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.RUST.ITEM_SIGNALS
-special modules --metrics surfaces per-item Rust evidence for owned implementation, including internally connected, outbound-heavy, and isolated items.
+special modules --metrics surfaces per-item Rust evidence for owned implementation, including internally connected, outbound-heavy, isolated, and unreached items when the built-in analyzer can identify them honestly.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.RUST.ITEM_SIGNALS.COMPLEXITY
 special modules --metrics surfaces highest-complexity Rust items within owned implementation so unusual local hotspots are visible inside a claimed module boundary.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.RUST.ITEM_SIGNALS.QUALITY
 special modules --metrics surfaces parameter-heavy, stringly boundary, and panic-heavy Rust items within owned implementation so unusual local craftsmanship signals are visible inside a claimed module boundary.
+
+@group SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT_GROUP
+special modules can surface TypeScript-specific implementation evidence for owned TypeScript code through the built-in TypeScript analyzer.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT
+special modules --metrics surfaces built-in TypeScript implementation evidence for owned TypeScript code, including public and internal item counts, import-path dependency evidence, coupling derived from owned relative imports, and per-item connected, outbound-heavy, isolated, and unreached signals when the built-in analyzer can identify them honestly.
+
+@group SPECIAL.MODULE_COMMAND.METRICS.GO_GROUP
+special modules can surface Go-specific implementation evidence for owned Go code through the built-in Go analyzer.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.GO
+special modules --metrics surfaces built-in Go implementation evidence for owned Go code, including public and internal item counts, import-path dependency evidence, coupling derived from owned local imports, and per-item connected, outbound-heavy, isolated, and unreached signals when the built-in analyzer can identify them honestly.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON
 special modules --json --metrics includes structured architecture analysis summaries.
@@ -117,6 +132,9 @@ special modules --json --metrics includes structured quality evidence summaries 
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON.COUPLING
 special modules --json --metrics includes structured module coupling summaries when available.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.JSON.UNREACHED_CODE
+special modules --json --metrics includes structured unreached-code indicators when built-in analyzers can identify them honestly.
 
 @group SPECIAL.MODULE_COMMAND.METRICS.JSON.RUST
 special modules --json --metrics can include Rust-specific structured analysis evidence.
@@ -134,7 +152,7 @@ special modules --json --metrics includes structured Rust quality evidence summa
 special modules --json --metrics includes structured Rust dependency targets for owned implementation.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON.RUST.ITEM_SIGNALS
-special modules --json --metrics includes structured per-item Rust evidence for owned implementation.
+special modules --json --metrics includes structured per-item Rust evidence for owned implementation, including unreached Rust items when the built-in analyzer can identify them honestly.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON.RUST.ITEM_SIGNALS.COMPLEXITY
 special modules --json --metrics includes structured highest-complexity Rust item evidence for owned implementation.
@@ -142,8 +160,17 @@ special modules --json --metrics includes structured highest-complexity Rust ite
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON.RUST.ITEM_SIGNALS.QUALITY
 special modules --json --metrics includes structured parameter-heavy, stringly boundary, and panic-heavy Rust item evidence for owned implementation.
 
-@spec SPECIAL.MODULE_COMMAND.METRICS.VERBOSE
-special modules --metrics --verbose includes uncovered or weakly covered file paths plus per-module implementation coverage details.
+@group SPECIAL.MODULE_COMMAND.METRICS.JSON.TYPESCRIPT_GROUP
+special modules --json --metrics can include TypeScript-specific structured analysis evidence.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.JSON.TYPESCRIPT
+special modules --json --metrics includes structured TypeScript implementation evidence for owned TypeScript code, including public and internal item counts, dependency targets, and per-item signals.
+
+@group SPECIAL.MODULE_COMMAND.METRICS.JSON.GO_GROUP
+special modules --json --metrics can include Go-specific structured analysis evidence.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.JSON.GO
+special modules --json --metrics includes structured Go implementation evidence for owned Go code, including public and internal item counts, dependency targets, and per-item signals.
 
 @group SPECIAL.MODULE_PARSE
 special parses architecture module declarations and implementation attachments.
@@ -206,18 +233,20 @@ use serde_json::Value;
 use support::{
     find_node_by_id, rendered_spec_node_ids, run_special, temp_repo_dir, top_level_help_commands,
     write_area_implements_fixture, write_area_modules_fixture,
-    write_cognitive_complexity_module_analysis_fixture, write_complexity_module_analysis_fixture,
-    write_coupling_module_analysis_fixture, write_dependency_module_analysis_fixture,
-    write_duplicate_file_scoped_implements_fixture, write_duplicate_item_scoped_implements_fixture,
+    write_binary_entrypoint_root_fixture, write_cognitive_complexity_module_analysis_fixture,
+    write_complexity_module_analysis_fixture, write_coupling_module_analysis_fixture,
+    write_dependency_module_analysis_fixture, write_duplicate_file_scoped_implements_fixture,
+    write_duplicate_item_scoped_implements_fixture, write_go_module_analysis_fixture,
     write_implements_with_trailing_content_fixture,
     write_item_scoped_item_signals_module_analysis_fixture,
     write_item_scoped_module_analysis_fixture, write_item_signals_module_analysis_fixture,
     write_missing_intermediate_modules_fixture, write_mixed_purpose_source_local_module_fixture,
     write_module_analysis_fixture, write_modules_fixture, write_planned_area_fixture,
     write_planned_area_invalid_suffix_fixture, write_quality_module_analysis_fixture,
-    write_source_local_module_analysis_fixture, write_source_local_modules_fixture,
+    write_restricted_visibility_root_fixture, write_source_local_module_analysis_fixture,
+    write_source_local_modules_fixture, write_typescript_module_analysis_fixture,
     write_unimplemented_module_fixture, write_unknown_implements_fixture,
-    write_unsupported_module_fixture,
+    write_unreached_code_module_analysis_fixture, write_unsupported_module_fixture,
 };
 
 #[test]
@@ -303,7 +332,8 @@ fn modules_all_includes_planned_modules() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
     assert!(rendered_spec_node_ids(&stdout).contains(&"DEMO.PLANNED".to_string()));
-    assert!(stdout.contains("[planned: 0.4.0]"));
+    assert!(stdout.contains("planned"));
+    assert!(stdout.contains("0.4.0"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -317,7 +347,8 @@ fn modules_surface_planned_release_metadata_across_output_modes() {
     let text_output = run_special(&root, &["modules", "--all"]);
     assert!(text_output.status.success());
     let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
-    assert!(text_stdout.contains("[planned: 0.4.0]"));
+    assert!(text_stdout.contains("planned"));
+    assert!(text_stdout.contains("0.4.0"));
 
     let json_output = run_special(&root, &["modules", "--all", "--json"]);
     assert!(json_output.status.success());
@@ -339,14 +370,15 @@ fn modules_surface_planned_release_metadata_across_output_modes() {
     let html_output = run_special(&root, &["modules", "--all", "--html"]);
     assert!(html_output.status.success());
     let html_stdout = String::from_utf8(html_output.stdout).expect("stdout should be utf-8");
-    assert!(html_stdout.contains("<span class=\"badge badge-planned\">planned: 0.4.0</span>"));
+    assert!(html_stdout.contains("badge-planned"));
+    assert!(html_stdout.contains("0.4.0"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]
 // @verifies SPECIAL.MODULE_COMMAND.METRICS
-fn modules_coverage_surfaces_architecture_wide_coverage_summary() {
+fn modules_metrics_surface_module_ownership_granularity() {
     let root = temp_repo_dir("special-cli-modules-coverage");
     write_module_analysis_fixture(&root);
 
@@ -354,31 +386,116 @@ fn modules_coverage_surfaces_architecture_wide_coverage_summary() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("coverage"));
-    assert!(stdout.contains("analyzed files: 2"));
-    assert!(stdout.contains("covered files: 1"));
-    assert!(stdout.contains("uncovered files: 1"));
-    assert!(stdout.contains("weak files: 1"));
-    assert!(stdout.contains("covered files: 1"));
     assert!(stdout.contains("file-scoped implements: 1"));
+    assert!(stdout.contains("item-scoped implements: 0"));
+    assert!(stdout.contains("owned lines:"));
+    assert!(stdout.contains("public items: 1"));
+    assert!(stdout.contains("internal items: 1"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]
-// @verifies SPECIAL.MODULE_COMMAND.METRICS.VERBOSE
-fn modules_coverage_verbose_includes_uncovered_and_weak_paths() {
-    let root = temp_repo_dir("special-cli-modules-coverage-verbose");
-    write_module_analysis_fixture(&root);
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.UNREACHED_CODE
+fn modules_metrics_surface_unreached_code_within_owned_implementation() {
+    let root = temp_repo_dir("special-cli-modules-unreached-code");
+    write_unreached_code_module_analysis_fixture(&root);
 
     let output = run_special(&root, &["modules", "--metrics", "--verbose"]);
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("uncovered path: hidden.rs"));
-    assert!(stdout.contains("weak path: main.rs"));
-    assert!(stdout.contains("covered file: main.rs"));
-    assert!(stdout.contains("weak file: main.rs"));
+    assert!(stdout.contains("unreached items: 2"));
+    assert!(stdout.contains("unreached items meaning:"));
+    assert!(stdout.contains("unreached item meaning:"));
+    assert!(stdout.contains("unreached item exact:"));
+    assert!(stdout.contains("unreached item: unreached_cluster_entry"));
+    assert!(stdout.contains("unreached item: unreached_cluster_leaf"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.JSON.UNREACHED_CODE
+fn modules_metrics_json_includes_structured_unreached_code() {
+    let root = temp_repo_dir("special-cli-modules-unreached-code-json");
+    write_unreached_code_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics", "--json"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+
+    let demo = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
+        .expect("demo module should be present");
+    assert_eq!(
+        demo["analysis"]["item_signals"]["unreached_items"]
+            .as_array()
+            .expect("unreached items should be an array")
+            .len(),
+        2
+    );
+    assert!(
+        demo["analysis"]["item_signals"]["unreached_items"]
+            .as_array()
+            .expect("unreached items should be an array")
+            .iter()
+            .any(|item| item["name"].as_str() == Some("unreached_cluster_entry"))
+    );
+    assert!(
+        demo["analysis"]["item_signals"]["unreached_items"]
+            .as_array()
+            .expect("unreached items should be an array")
+            .iter()
+            .any(|item| item["name"].as_str() == Some("unreached_cluster_leaf"))
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn modules_metrics_treat_restricted_visibility_items_as_reachability_roots() {
+    let root = temp_repo_dir("special-cli-modules-restricted-visibility-root");
+    write_restricted_visibility_root_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics", "--json"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let demo = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
+        .expect("demo module should be present");
+    assert_eq!(
+        demo["analysis"]["item_signals"]["unreached_item_count"],
+        Value::from(0)
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn modules_metrics_treat_binary_main_as_a_reachability_root() {
+    let root = temp_repo_dir("special-cli-modules-binary-main-root");
+    write_binary_entrypoint_root_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics", "--json"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let demo = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
+        .expect("demo module should be present");
+    assert_eq!(
+        demo["analysis"]["item_signals"]["unreached_item_count"],
+        Value::from(0)
+    );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -411,18 +528,17 @@ fn modules_metrics_json_includes_structured_analysis() {
 
     let json: Value =
         serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-    assert_eq!(
-        json["analysis"]["coverage"]["analyzed_files"],
-        Value::from(1)
-    );
-    assert_eq!(json["analysis"]["coverage"]["weak_files"], Value::from(1));
 
     let demo = json["nodes"]
         .as_array()
         .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
         .expect("demo module should be present");
     assert_eq!(
-        demo["analysis"]["coverage"]["covered_files"],
+        demo["analysis"]["coverage"]["file_scoped_implements"],
+        Value::from(0)
+    );
+    assert_eq!(
+        demo["analysis"]["coverage"]["item_scoped_implements"],
         Value::from(1)
     );
     assert_eq!(demo["analysis"]["metrics"]["public_items"], Value::from(1));
@@ -533,6 +649,148 @@ fn modules_metrics_json_includes_structured_dependency_targets() {
     assert!(targets.iter().any(|target| {
         target["path"] == Value::String("serde_json::Value".to_string()) && target["count"] == 1
     }));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT
+fn modules_metrics_surface_typescript_analysis() {
+    let root = temp_repo_dir("special-cli-modules-metrics-typescript");
+    write_typescript_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("DEMO"));
+    assert!(stdout.contains("public items: 2"));
+    assert!(stdout.contains("internal items: 4"));
+    assert!(stdout.contains("dependency refs: 2"));
+    assert!(stdout.contains("dependency targets: 2"));
+    assert!(stdout.contains("dependency target: ./shared (1)"));
+    assert!(stdout.contains("dependency target: node:fs (1)"));
+    assert!(stdout.contains("unreached items: 3"));
+    assert!(stdout.contains("isolated item: isolatedExternal"));
+    assert!(stdout.contains("unreached item: unreachedClusterEntry"));
+    assert!(stdout.contains("unreached item: unreachedClusterLeaf"));
+    assert!(stdout.contains("fan out: 1"));
+    assert!(stdout.contains("external dependency targets: 1"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.JSON.TYPESCRIPT
+fn modules_metrics_json_includes_structured_typescript_analysis() {
+    let root = temp_repo_dir("special-cli-modules-metrics-typescript-json");
+    write_typescript_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics", "--json"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let demo = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
+        .expect("demo module should be present");
+    assert_eq!(demo["analysis"]["metrics"]["public_items"], Value::from(2));
+    assert_eq!(
+        demo["analysis"]["metrics"]["internal_items"],
+        Value::from(4)
+    );
+    assert_eq!(
+        demo["analysis"]["item_signals"]["unreached_item_count"],
+        Value::from(3)
+    );
+    let targets = demo["analysis"]["dependencies"]["targets"]
+        .as_array()
+        .expect("dependency targets should be an array");
+    assert!(targets.iter().any(|target| {
+        target["path"] == Value::String("./shared".to_string()) && target["count"] == 1
+    }));
+    assert!(targets.iter().any(|target| {
+        target["path"] == Value::String("node:fs".to_string()) && target["count"] == 1
+    }));
+    assert!(
+        demo["analysis"]["item_signals"]["unreached_items"]
+            .as_array()
+            .expect("unreached items should be an array")
+            .iter()
+            .any(|item| item["name"].as_str() == Some("unreachedClusterEntry"))
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.GO
+fn modules_metrics_surface_go_analysis() {
+    let root = temp_repo_dir("special-cli-modules-metrics-go");
+    write_go_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("DEMO"));
+    assert!(stdout.contains("public items: 1"));
+    assert!(stdout.contains("internal items: 4"));
+    assert!(stdout.contains("dependency refs: 2"));
+    assert!(stdout.contains("dependency targets: 2"));
+    assert!(stdout.contains("dependency target: fmt (1)"));
+    assert!(stdout.contains("dependency target: shared (1)"));
+    assert!(stdout.contains("unreached items: 3"));
+    assert!(stdout.contains("isolated item: isolatedExternal"));
+    assert!(stdout.contains("unreached item: unreachedClusterEntry"));
+    assert!(stdout.contains("unreached item: unreachedClusterLeaf"));
+    assert!(stdout.contains("fan out: 1"));
+    assert!(stdout.contains("external dependency targets: 1"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.JSON.GO
+fn modules_metrics_json_includes_structured_go_analysis() {
+    let root = temp_repo_dir("special-cli-modules-metrics-go-json");
+    write_go_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["modules", "--metrics", "--json"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let demo = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
+        .expect("demo module should be present");
+    assert_eq!(demo["analysis"]["metrics"]["public_items"], Value::from(1));
+    assert_eq!(
+        demo["analysis"]["metrics"]["internal_items"],
+        Value::from(4)
+    );
+    assert_eq!(
+        demo["analysis"]["item_signals"]["unreached_item_count"],
+        Value::from(3)
+    );
+    let targets = demo["analysis"]["dependencies"]["targets"]
+        .as_array()
+        .expect("dependency targets should be an array");
+    assert!(targets.iter().any(|target| {
+        target["path"] == Value::String("fmt".to_string()) && target["count"] == 1
+    }));
+    assert!(targets.iter().any(|target| {
+        target["path"] == Value::String("shared".to_string()) && target["count"] == 1
+    }));
+    assert!(
+        demo["analysis"]["item_signals"]["unreached_items"]
+            .as_array()
+            .expect("unreached items should be an array")
+            .iter()
+            .any(|item| item["name"].as_str() == Some("unreachedClusterEntry"))
+    );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

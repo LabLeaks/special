@@ -65,7 +65,7 @@ impl RustDependencySummary {
     pub(super) fn coupling_input(&self) -> ModuleCouplingInput {
         ModuleCouplingInput {
             internal_files: self.internal_files.clone(),
-            external_target_count: self.external_targets.len(),
+            external_targets: self.external_targets.clone(),
         }
     }
 }

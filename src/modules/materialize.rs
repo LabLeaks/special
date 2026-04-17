@@ -10,6 +10,7 @@ use crate::model::{
 };
 
 use super::analyze::ArchitectureAnalysis;
+use super::{immediate_parent_id, nearest_visible_parent_id};
 
 #[derive(Debug, Clone)]
 struct FlatModuleNode {
@@ -53,18 +54,18 @@ pub(super) fn build_module_document(
 
     let mut visible_ids = directly_visible_ids.clone();
     for id in &directly_visible_ids {
-        let mut parent = immediate_parent(id);
+        let mut parent = immediate_parent_id(id);
         while let Some(candidate) = parent {
             if flat_nodes.contains_key(candidate) {
                 visible_ids.insert(candidate.to_string());
             }
-            parent = immediate_parent(candidate);
+            parent = immediate_parent_id(candidate);
         }
     }
 
     let mut children_map: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
     for id in &visible_ids {
-        let visible_parent = nearest_visible_parent(id, &visible_ids);
+        let visible_parent = nearest_visible_parent_id(id, &visible_ids);
         children_map
             .entry(visible_parent)
             .or_default()
@@ -81,7 +82,7 @@ pub(super) fn build_module_document(
 
     ModuleDocument {
         nodes,
-        analysis: analysis.map(|analysis| analysis.summary.clone()),
+        analysis: None,
     }
 }
 
@@ -141,19 +142,4 @@ fn scoped_nodes(nodes: Vec<ModuleNode>, scope: &str) -> Vec<ModuleNode> {
         }
     }
     Vec::new()
-}
-
-fn nearest_visible_parent(id: &str, visible_ids: &BTreeSet<String>) -> Option<String> {
-    let mut parent = immediate_parent(id);
-    while let Some(candidate) = parent {
-        if visible_ids.contains(candidate) {
-            return Some(candidate.to_string());
-        }
-        parent = immediate_parent(candidate);
-    }
-    None
-}
-
-fn immediate_parent(id: &str) -> Option<&str> {
-    id.rsplit_once('.').map(|(parent, _)| parent)
 }

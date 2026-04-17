@@ -20,6 +20,9 @@ special help text presents the semantic spec command as `special specs`.
 @spec SPECIAL.HELP.MODULES_COMMAND_PLURAL_PRIMARY
 special help text presents the architecture module command as `special modules`.
 
+@spec SPECIAL.HELP.REPO_COMMAND
+special help text presents the repo-wide quality command as `special repo`.
+
 @spec SPECIAL.HELP.SKILLS_COMMAND_SHAPES
 special help text explains the `skills`, `skills SKILL_ID`, and `skills install [SKILL_ID]` command shapes.
 
@@ -36,11 +39,13 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 mod init;
 mod modules;
+mod repo;
 mod skills;
 mod spec;
 
 use self::init::execute_init;
 use self::modules::{ModulesArgs, execute_modules};
+use self::repo::{RepoArgs, execute_repo};
 use self::skills::{SkillsArgs, execute_skills};
 use self::spec::{SpecArgs, execute_lint, execute_spec};
 
@@ -49,7 +54,7 @@ use self::spec::{SpecArgs, execute_lint, execute_spec};
     name = "special",
     bin_name = "special",
     about = "Repo-native semantic spec and skill tool",
-    after_help = "Examples:\n  special specs\n  special specs SPECIAL.CONFIG --verbose\n  special modules\n  special modules SPECIAL.PARSER --verbose\n  special lint\n  special init\n  special skills\n  special skills ship-product-change\n  special skills install\n  special skills install define-product-specs",
+    after_help = "Examples:\n  special specs\n  special specs SPECIAL.CONFIG --verbose\n  special modules\n  special modules SPECIAL.PARSER --verbose\n  special repo\n  special repo --verbose\n  special lint\n  special init\n  special skills\n  special skills ship-product-change\n  special skills install\n  special skills install define-product-specs",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -71,6 +76,8 @@ enum Command {
         about = "Materialize and inspect architecture modules"
     )]
     Modules(ModulesArgs),
+    #[command(name = "repo", about = "Inspect repo-wide quality signals")]
+    Repo(RepoArgs),
     #[command(about = "Check annotations and references for structural problems")]
     Lint,
     #[command(about = "Create a starter special.toml in the current directory")]
@@ -113,6 +120,7 @@ fn execute(cli: Cli) -> Result<ExitCode> {
     match cli.command {
         Command::Init => execute_init(&current_dir),
         Command::Modules(args) => execute_modules(args, &current_dir),
+        Command::Repo(args) => execute_repo(args, &current_dir),
         Command::Skills(args) => execute_skills(args, &current_dir),
         Command::Specs(args) => execute_spec(args, &current_dir),
         Command::Lint => execute_lint(&current_dir),

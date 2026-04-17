@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 /**
 @module SPECIAL.INDEX
 Coordinates dialect selection, lint assembly, and spec-tree materialization over parsed repo annotations.
@@ -63,6 +64,24 @@ fn parse_dialect(version: SpecialVersion) -> ParseDialect {
     }
 }
 
+pub(super) fn immediate_parent_id(id: &str) -> Option<&str> {
+    id.rsplit_once('.').map(|(parent, _)| parent)
+}
+
+pub(super) fn nearest_visible_parent_id(
+    id: &str,
+    visible_ids: &BTreeSet<String>,
+) -> Option<String> {
+    let mut parent = immediate_parent_id(id);
+    while let Some(candidate) = parent {
+        if visible_ids.contains(candidate) {
+            return Some(candidate.to_string());
+        }
+        parent = immediate_parent_id(candidate);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -88,6 +107,8 @@ mod tests {
             kind,
             text.to_string(),
             plan,
+            false,
+            None,
             SourceLocation {
                 path: "src/lib.rs".into(),
                 line,
@@ -330,6 +351,8 @@ mod tests {
                     NodeKind::Spec,
                     "Duplicate export root.".to_string(),
                     PlanState::live(),
+                    false,
+                    None,
                     SourceLocation {
                         path: "src/other.rs".into(),
                         line: 20,
@@ -395,6 +418,8 @@ mod tests {
                     NodeKind::Group,
                     "Top-level grouping.".to_string(),
                     PlanState::live(),
+                    false,
+                    None,
                     SourceLocation {
                         path: "specs/special.rs".into(),
                         line: 1,
@@ -406,6 +431,8 @@ mod tests {
                     NodeKind::Spec,
                     "Parses annotated blocks.".to_string(),
                     PlanState::live(),
+                    false,
+                    None,
                     SourceLocation {
                         path: "specs/special.rs".into(),
                         line: 3,
@@ -446,6 +473,8 @@ mod tests {
                     NodeKind::Group,
                     "Export grouping.".to_string(),
                     PlanState::live(),
+                    false,
+                    None,
                     SourceLocation {
                         path: "src/lib.rs".into(),
                         line: 1,
@@ -457,6 +486,8 @@ mod tests {
                     NodeKind::Spec,
                     "Export claim.".to_string(),
                     PlanState::live(),
+                    false,
+                    None,
                     SourceLocation {
                         path: "src/spec.rs".into(),
                         line: 5,

@@ -15,5 +15,6 @@ mod parser;
 mod planned_syntax;
 mod render;
 mod skills;
+mod syntax;
 
 pub use cli::run_from_env;

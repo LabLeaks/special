@@ -1,2 +1,2 @@
-{% if !self.coverage_section().is_empty() %}{{ self.coverage_section() }}
+{% if !self.repo_signals_section().is_empty() %}{{ self.repo_signals_section() }}
 {% endif %}{{ self.render_nodes() }}

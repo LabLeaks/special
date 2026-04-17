@@ -4,6 +4,7 @@
       <span class="node-id">{{ self.node_id() }}</span>
       {% if self.is_group() %}<span class="badge badge-group">group</span>{% endif %}
       {% if node.is_planned() %}<span class="badge badge-planned">{{ self.planned_badge() }}</span>{% endif %}
+      {% if node.is_deprecated() %}<span class="badge badge-deprecated">{{ self.deprecated_badge() }}</span>{% endif %}
       {% if node.is_unsupported() %}<span class="badge badge-unsupported">unsupported</span>{% endif %}
     </div>
     {% if !node.text.is_empty() %}<div class="node-text">{{ self.node_text() }}</div>{% endif %}

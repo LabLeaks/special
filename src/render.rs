@@ -5,7 +5,7 @@ Coordinates shared projection policy and output backends for text, JSON, and HTM
 // @fileimplements SPECIAL.RENDER
 use anyhow::Result;
 
-use crate::model::{LintReport, ModuleDocument, SpecDocument};
+use crate::model::{LintReport, ModuleDocument, RepoDocument, SpecDocument};
 
 mod common;
 mod html;
@@ -22,6 +22,10 @@ pub fn render_module_text(document: &ModuleDocument, verbose: bool) -> String {
     text::render_module_text(document, verbose)
 }
 
+pub fn render_repo_text(document: &RepoDocument, verbose: bool) -> String {
+    text::render_repo_text(document, verbose)
+}
+
 pub fn render_spec_json(document: &SpecDocument, verbose: bool) -> Result<String> {
     json::render_spec_json(document, verbose)
 }
@@ -30,12 +34,20 @@ pub fn render_module_json(document: &ModuleDocument, verbose: bool) -> Result<St
     json::render_module_json(document, verbose)
 }
 
+pub fn render_repo_json(document: &RepoDocument, verbose: bool) -> Result<String> {
+    json::render_repo_json(document, verbose)
+}
+
 pub fn render_spec_html(document: &SpecDocument, verbose: bool) -> String {
     html::render_spec_html(document, verbose)
 }
 
 pub fn render_module_html(document: &ModuleDocument, verbose: bool) -> String {
     html::render_module_html(document, verbose)
+}
+
+pub fn render_repo_html(document: &RepoDocument, verbose: bool) -> String {
+    html::render_repo_html(document, verbose)
 }
 
 pub fn render_lint_text(report: &LintReport) -> String {
@@ -58,6 +70,8 @@ mod tests {
                     NodeKind::Spec,
                     "special specs materializes the current spec view.".to_string(),
                     PlanState::live(),
+                    false,
+                    None,
                     SourceLocation {
                         path: "/tmp/specs/special.rs".into(),
                         line: 1,

@@ -6,6 +6,7 @@ Builds module lint diagnostics from parsed architecture declarations and impleme
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use super::immediate_parent_id;
 use crate::model::{
     ArchitectureKind, Diagnostic, DiagnosticSeverity, LintReport, ParsedArchitecture,
 };
@@ -147,7 +148,7 @@ pub(super) fn build_module_lint_report(parsed: &ParsedArchitecture) -> LintRepor
 fn missing_intermediates<'a>(id: &'a str, ids: &BTreeSet<String>) -> Vec<&'a str> {
     let mut missing = Vec::new();
     let mut prefix = id;
-    while let Some(parent) = immediate_parent(prefix) {
+    while let Some(parent) = immediate_parent_id(prefix) {
         if !ids.contains(parent) {
             missing.push(parent);
         }
@@ -155,8 +156,4 @@ fn missing_intermediates<'a>(id: &'a str, ids: &BTreeSet<String>) -> Vec<&'a str
     }
     missing.reverse();
     missing
-}
-
-fn immediate_parent(id: &str) -> Option<&str> {
-    id.rsplit_once('.').map(|(parent, _)| parent)
 }

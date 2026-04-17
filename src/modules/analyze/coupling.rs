@@ -13,7 +13,7 @@ use crate::model::{
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModuleCouplingInput {
     pub internal_files: BTreeSet<PathBuf>,
-    pub external_target_count: usize,
+    pub external_targets: BTreeSet<String>,
 }
 
 pub(crate) fn apply_module_coupling(
@@ -64,7 +64,7 @@ pub(crate) fn apply_module_coupling(
         };
         let external_target_count = inputs
             .get(&module_id)
-            .map_or(0, |input| input.external_target_count);
+            .map_or(0, |input| input.external_targets.len());
         let unresolved_internal_target_count =
             unresolved_counts.get(&module_id).copied().unwrap_or(0);
 

@@ -14,9 +14,13 @@ pub(crate) enum MetricExplanationKey {
     QualityBoolParameters,
     QualityRawStringParameters,
     QualityPanicSites,
+    UnownedUnreachedItems,
     ConnectedItem,
     OutboundHeavyItem,
     IsolatedItem,
+    UnreachedItem,
+    UnreachedItems,
+    DuplicateItems,
     HighestComplexityItem,
     ParameterHeavyItem,
     StringlyBoundaryItem,
@@ -72,6 +76,10 @@ pub(crate) fn metric_explanation(key: MetricExplanationKey) -> MetricExplanation
             plain: "this highlights places where recoverable runtime paths can still crash or abort abruptly.",
             precise: "count of panic-like macros and unwrap/expect method calls across analyzed owned implementation.",
         },
+        MetricExplanationKey::UnownedUnreachedItems => MetricExplanation {
+            plain: "this counts source items outside declared modules with no observed path from public or test roots, so they may be trapped, incidental, framework-driven, or unused.",
+            precise: "count of unowned non-public, non-test items not reachable from public or test items through observed sibling call edges.",
+        },
         MetricExplanationKey::ConnectedItem => MetricExplanation {
             plain: "this item is meaningfully tied into the rest of the module's owned implementation.",
             precise: "owned item with inbound or outbound references to other owned items in the same module.",
@@ -83,6 +91,18 @@ pub(crate) fn metric_explanation(key: MetricExplanationKey) -> MetricExplanation
         MetricExplanationKey::IsolatedItem => MetricExplanation {
             plain: "this item talks outward without much visible relationship to the rest of its own module.",
             precise: "owned item with zero inbound and outbound sibling references but at least one external reference.",
+        },
+        MetricExplanationKey::UnreachedItem => MetricExplanation {
+            plain: "this private item has no observed path from public or test roots inside the analyzed implementation, so it may be trapped, incidental, or unused.",
+            precise: "non-public, non-test owned item not reachable from public or test items through observed sibling call edges.",
+        },
+        MetricExplanationKey::UnreachedItems => MetricExplanation {
+            plain: "this counts private owned items with no observed path from public or test roots, so they may be trapped, incidental, framework-driven, or unused.",
+            precise: "count of non-public, non-test owned items not reachable from public or test items through observed sibling call edges.",
+        },
+        MetricExplanationKey::DuplicateItems => MetricExplanation {
+            plain: "this counts owned items whose parser-normalized structure and substantive operation profile match another owned item, so they may indicate repeated implementation logic worth consolidating or reviewing.",
+            precise: "count of analyzed owned items whose structural fingerprint and substantive call/control-flow profile match at least one other analyzed owned item.",
         },
         MetricExplanationKey::HighestComplexityItem => MetricExplanation {
             plain: "this is one of the most structurally complex owned items inside the module boundary.",

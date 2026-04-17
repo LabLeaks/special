@@ -5,6 +5,7 @@ Builds spec lint diagnostics from parsed annotations. This module does not choos
 // @fileimplements SPECIAL.INDEX.LINT
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::immediate_parent_id;
 use crate::model::{Diagnostic, DiagnosticSeverity, LintReport, NodeKind, ParsedRepo};
 
 pub(super) fn lint_from_parsed(parsed: &ParsedRepo) -> LintReport {
@@ -119,17 +120,13 @@ pub(super) fn lint_from_parsed(parsed: &ParsedRepo) -> LintReport {
 fn missing_intermediates(id: &str, declared: &BTreeSet<String>) -> Vec<String> {
     let mut missing = Vec::new();
     let mut cursor = id;
-    while let Some(parent) = immediate_parent(cursor) {
+    while let Some(parent) = immediate_parent_id(cursor) {
         if !declared.contains(parent) {
             missing.push(parent.to_string());
         }
         cursor = parent;
     }
     missing
-}
-
-fn immediate_parent(id: &str) -> Option<&str> {
-    id.rsplit_once('.').map(|(parent, _)| parent)
 }
 
 fn kind_label(kind: NodeKind) -> &'static str {

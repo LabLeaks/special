@@ -9,6 +9,7 @@ use syn::{BinOp, FnArg, GenericArgument, ImplItemFn, PathArguments, Type, Visibi
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct RustItemMetrics {
     pub public: bool,
+    pub root_visible: bool,
     pub parameter_count: usize,
     pub bool_parameter_count: usize,
     pub raw_string_parameter_count: usize,
@@ -24,6 +25,7 @@ pub(super) fn function_metrics(
 ) -> RustItemMetrics {
     RustItemMetrics {
         public: is_public_visibility(visibility),
+        root_visible: is_root_visibility(visibility),
         parameter_count: parameter_count(inputs),
         bool_parameter_count: bool_parameter_count(inputs),
         raw_string_parameter_count: raw_string_parameter_count(inputs),
@@ -72,6 +74,10 @@ fn raw_string_parameter_count(
 
 fn is_public_visibility(vis: &Visibility) -> bool {
     matches!(vis, Visibility::Public(_))
+}
+
+fn is_root_visibility(vis: &Visibility) -> bool {
+    matches!(vis, Visibility::Public(_) | Visibility::Restricted(_))
 }
 
 fn is_bool_type(ty: &Type) -> bool {

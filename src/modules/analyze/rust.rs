@@ -8,41 +8,59 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::model::{
-    ImplementRef, ModuleComplexitySummary, ModuleDependencySummary, ModuleItemSignalsSummary,
-    ModuleMetricsSummary, ModuleQualitySummary,
-};
+use crate::model::{ImplementRef, ModuleMetricsSummary, ParsedRepo};
 
-use super::{
-    FileOwnership, coupling::ModuleCouplingInput, read_owned_file_text, visit_owned_texts,
-};
+use super::{FileOwnership, ProviderModuleAnalysis, read_owned_file_text, visit_owned_texts};
 
 mod complexity;
 mod dependencies;
 mod item_metrics;
-mod item_signals;
+pub(super) mod item_signals;
 mod quality;
 mod surface;
+mod traceability;
 
-pub(super) struct RustModuleAnalysisOutputs<'a> {
-    pub metrics: &'a mut ModuleMetricsSummary,
-    pub complexity: &'a mut ModuleComplexitySummary,
-    pub quality: &'a mut ModuleQualitySummary,
-    pub item_signals: &'a mut ModuleItemSignalsSummary,
-    pub coupling: &'a mut ModuleCouplingInput,
-    pub dependencies: &'a mut ModuleDependencySummary,
+pub(super) struct RustRepoAnalysisContext {
+    traceability: traceability::RustTraceabilityCatalog,
 }
 
-pub(super) fn apply_module_analysis(
+pub(super) fn build_repo_analysis_context(
+    root: &Path,
+    source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
+    parsed_architecture: &crate::model::ParsedArchitecture,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+) -> RustRepoAnalysisContext {
+    RustRepoAnalysisContext {
+        traceability: traceability::build_traceability_catalog(
+            root,
+            source_files,
+            parsed_repo,
+            parsed_architecture,
+            file_ownership,
+        ),
+    }
+}
+
+pub(super) fn analyze_module(
     root: &Path,
     implementations: &[&ImplementRef],
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
-    outputs: RustModuleAnalysisOutputs<'_>,
-) -> Result<()> {
+    context: &RustRepoAnalysisContext,
+    include_traceability: bool,
+) -> Result<ProviderModuleAnalysis> {
     let mut surface_summary = surface::RustSurfaceSummary::default();
     let mut complexity_summary = complexity::RustComplexitySummary::default();
     let mut quality_summary = quality::RustQualitySummary::default();
     let mut dependency_summary = dependencies::RustDependencySummary::default();
+    let traceability_summary = include_traceability.then(|| {
+        traceability::summarize_module_traceability(
+            root,
+            implementations,
+            file_ownership,
+            &context.traceability,
+        )
+    });
 
     visit_owned_texts(root, implementations, file_ownership, |path, text| {
         if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
@@ -61,18 +79,23 @@ pub(super) fn apply_module_analysis(
             continue;
         }
         match (&implementation.body_location, &implementation.body) {
-            (Some(_), Some(body)) => item_signals_summary.observe(body),
-            (None, _) => item_signals_summary.observe(&read_owned_file_text(root, path)),
+            (Some(_), Some(body)) => item_signals_summary.observe(path, body),
+            (None, _) => item_signals_summary.observe(path, &read_owned_file_text(root, path)),
             _ => {}
         }
     }
 
-    outputs.metrics.public_items += surface_summary.public_items;
-    outputs.metrics.internal_items += surface_summary.internal_items;
-    *outputs.complexity = complexity_summary.finish();
-    *outputs.quality = quality_summary.finish();
-    *outputs.item_signals = item_signals_summary.finish();
-    *outputs.coupling = dependency_summary.coupling_input();
-    *outputs.dependencies = dependency_summary.summary();
-    Ok(())
+    Ok(ProviderModuleAnalysis {
+        metrics: ModuleMetricsSummary {
+            public_items: surface_summary.public_items,
+            internal_items: surface_summary.internal_items,
+            ..ModuleMetricsSummary::default()
+        },
+        complexity: Some(complexity_summary.finish()),
+        quality: Some(quality_summary.finish()),
+        item_signals: Some(item_signals_summary.finish()),
+        traceability: traceability_summary,
+        coupling: Some(dependency_summary.coupling_input()),
+        dependencies: Some(dependency_summary.summary()),
+    })
 }

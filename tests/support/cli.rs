@@ -124,6 +124,16 @@ pub fn write_planned_release_fixture(root: &Path) {
     .expect("planned release fixture should be written");
 }
 
+pub fn write_deprecated_release_fixture(root: &Path) {
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("specs.rs"),
+        include_str!("../fixtures/cli/deprecated_release/specs.txt"),
+    )
+    .expect("deprecated release fixture should be written");
+}
+
 pub fn write_file_verify_fixture(root: &Path) {
     fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
         .expect("special.toml should be written");
@@ -442,6 +452,381 @@ pub fn write_item_scoped_item_signals_module_analysis_fixture(root: &Path) {
         "// @implements DEMO\nfn connected() {\n    shared();\n}\n\n// @implements DEMO\nfn shared() {}\n\n// @implements DEMO\nfn isolated_external() {\n    std::process::id();\n}\n",
     )
     .expect("item-scoped item signals fixture should be written");
+}
+
+pub fn write_unreached_code_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn entry() {\n    live_helper();\n}\n\nfn live_helper() {}\n\nfn unreached_cluster_entry() {\n    unreached_cluster_leaf();\n}\n\nfn unreached_cluster_leaf() {}\n",
+    )
+    .expect("unreached-code implementation fixture should be written");
+    fs::write(root.join("hidden.rs"), "fn hidden_unreached() {}\n")
+        .expect("unowned unreached-code fixture should be written");
+}
+
+pub fn write_typescript_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("src")).expect("src dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n\n### `@module SHARED`\nShared module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("src/app.ts"),
+        "// @fileimplements DEMO\nimport { sharedValue } from \"./shared\";\nimport { readFileSync } from \"node:fs\";\n\nexport function entry() {\n    return localHelper() + sharedValue();\n}\n\nexport const render = () => sharedValue();\n\nfunction localHelper() {\n    return 1;\n}\n\nfunction isolatedExternal() {\n    return readFileSync(\"demo.txt\").length;\n}\n\nfunction unreachedClusterEntry() {\n    return unreachedClusterLeaf();\n}\n\nfunction unreachedClusterLeaf() {\n    return 1;\n}\n",
+    )
+    .expect("typescript implementation fixture should be written");
+    fs::write(
+        root.join("src/shared.ts"),
+        "// @fileimplements SHARED\nexport function sharedValue() {\n    return 1;\n}\n",
+    )
+    .expect("typescript shared fixture should be written");
+}
+
+pub fn write_go_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("app")).expect("app dir should be created");
+    fs::create_dir_all(root.join("shared")).expect("shared dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n\n### `@module SHARED`\nShared module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("app/main.go"),
+        "// @fileimplements DEMO\npackage app\n\nimport \"fmt\"\nimport \"shared\"\n\nfunc Entry() int {\n    return localHelper() + shared.SharedValue()\n}\n\nfunc localHelper() int {\n    return 1\n}\n\nfunc isolatedExternal() {\n    fmt.Println(\"demo\")\n}\n\nfunc unreachedClusterEntry() {\n    unreachedClusterLeaf()\n}\n\nfunc unreachedClusterLeaf() {}\n",
+    )
+    .expect("go implementation fixture should be written");
+    fs::write(
+        root.join("shared/shared.go"),
+        "// @fileimplements SHARED\npackage shared\n\nfunc SharedValue() int {\n    return 1\n}\n",
+    )
+    .expect("go shared fixture should be written");
+}
+
+pub fn write_traceability_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.LIVE`\nLive behavior.\n\n### `@spec APP.PLANNED`\n### `@planned 0.6.0`\nPlanned behavior.\n\n### `@spec APP.DEPRECATED`\n### `@deprecated 0.6.0`\nDeprecated behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn live_impl() {}\n\npub fn planned_impl() {}\n\npub fn deprecated_impl() {}\n\npub fn unverified_impl() {}\n\npub fn orphan_impl() {}\n",
+    )
+    .expect("implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @verifies APP.LIVE\n#[test]\nfn verifies_live_impl() {\n    crate::live_impl();\n}\n\n// @verifies APP.PLANNED\n#[test]\nfn verifies_planned_impl() {\n    crate::planned_impl();\n}\n\n// @verifies APP.DEPRECATED\n#[test]\nfn verifies_deprecated_impl() {\n    crate::deprecated_impl();\n}\n\n#[test]\nfn exercises_unverified_impl() {\n    crate::unverified_impl();\n}\n",
+    )
+    .expect("traceability test fixture should be written");
+}
+
+pub fn write_traceability_file_verify_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.FILE`\nFile scoped behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn broad_impl() {}\n\npub fn second_impl() {}\n",
+    )
+    .expect("implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @fileverifies APP.FILE\n#[test]\nfn covers_broad_impl() {\n    crate::broad_impl();\n}\n\n#[test]\nfn covers_second_impl() {\n    crate::second_impl();\n}\n",
+    )
+    .expect("file-verify traceability fixture should be written");
+}
+
+pub fn write_traceability_name_collision_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.COLLISION`\nCollision behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("one.rs"),
+        "// @fileimplements DEMO\npub fn shared() {}\n",
+    )
+    .expect("first implementation fixture should be written");
+    fs::write(
+        root.join("two.rs"),
+        "// @fileimplements DEMO\npub fn shared() {}\n",
+    )
+    .expect("second implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @verifies APP.COLLISION\n#[test]\nfn verifies_shared_collision() {\n    crate::shared();\n}\n",
+    )
+    .expect("name collision traceability fixture should be written");
+}
+
+pub fn write_traceability_qualified_match_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.NESTED`\nNested function behavior.\n\n### `@spec APP.METHOD`\nQualified method behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub mod nested {\n    pub fn helper() {}\n\n    pub struct Worker;\n\n    impl Worker {\n        pub fn run() {}\n    }\n}\n\npub mod sibling {\n    pub fn helper() {}\n\n    pub struct Worker;\n\n    impl Worker {\n        pub fn run() {}\n    }\n}\n",
+    )
+    .expect("qualified match implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @verifies APP.NESTED\n#[test]\nfn verifies_nested_helper() {\n    crate::nested::helper();\n}\n\n// @verifies APP.METHOD\n#[test]\nfn verifies_nested_worker_run() {\n    crate::nested::Worker::run();\n}\n",
+    )
+    .expect("qualified match traceability fixture should be written");
+}
+
+pub fn write_traceability_transitive_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.TRANSITIVE`\nTransitive traceability behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub fn helper_impl() {\n    leaf_impl();\n}\n\npub fn leaf_impl() {}\n\npub fn orphan_impl() {}\n",
+    )
+    .expect("implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @verifies APP.TRANSITIVE\n#[test]\nfn verifies_transitive_leaf() {\n    crate::helper_impl();\n}\n",
+    )
+    .expect("transitive traceability fixture should be written");
+}
+
+pub fn write_traceability_local_binary_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::create_dir_all(root.join("src")).expect("src dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"demo-cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[[bin]]\nname = \"app\"\npath = \"src/main.rs\"\n",
+    )
+    .expect("cargo fixture should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.CLI`\nLocal binary invocation behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("src/main.rs"),
+        "// @fileimplements DEMO\nfn main() {\n    app_entry();\n}\n\nfn app_entry() {\n    live_impl();\n}\n\npub fn live_impl() {}\n\npub fn orphan_impl() {}\n",
+    )
+    .expect("implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "use std::process::Command;\n\nfn run_app() {\n    let _ = Command::new(env!(\"CARGO_BIN_EXE_app\")).arg(\"status\").output();\n}\n\n// @verifies APP.CLI\n#[test]\nfn verifies_cli_entrypoint() {\n    run_app();\n}\n",
+    )
+    .expect("local binary traceability fixture should be written");
+}
+
+pub fn write_traceability_cross_file_module_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::create_dir_all(root.join("render")).expect("render dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.CROSS_FILE`\nCross-file module-path traceability behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("render/mod.rs"),
+        "// @fileimplements DEMO\npub mod common;\npub mod html;\n\npub fn render_entry() {\n    html::render_spec_html();\n}\n",
+    )
+    .expect("render module fixture should be written");
+    fs::write(
+        root.join("render/html.rs"),
+        "// @fileimplements DEMO\npub fn render_spec_html() {\n    super::common::helper_impl();\n}\n\npub fn orphan_impl() {}\n",
+    )
+    .expect("render html fixture should be written");
+    fs::write(
+        root.join("render/common.rs"),
+        "// @fileimplements DEMO\npub fn helper_impl() {\n    live_impl();\n}\n\npub fn live_impl() {}\n",
+    )
+    .expect("render common fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @verifies APP.CROSS_FILE\n#[test]\nfn verifies_cross_file_render_path() {\n    crate::render::render_entry();\n}\n",
+    )
+    .expect("cross-file traceability fixture should be written");
+}
+
+pub fn write_traceability_self_method_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.SELF_METHOD`\nSelf and Self dispatch traceability behavior.\n",
+    )
+    .expect("spec fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\npub struct Worker;\n\nimpl Worker {\n    pub fn run() {\n        Self::helper();\n    }\n\n    fn helper() {\n        Self::leaf();\n    }\n\n    fn leaf() {}\n\n    fn unknown() {}\n}\n",
+    )
+    .expect("self method implementation fixture should be written");
+    fs::write(
+        root.join("tests.rs"),
+        "// @verifies APP.SELF_METHOD\n#[test]\nfn verifies_self_method_path() {\n    crate::Worker::run();\n}\n",
+    )
+    .expect("self method traceability fixture should be written");
+}
+
+pub fn write_duplicate_item_signals_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("alpha.rs"),
+        "// @fileimplements DEMO\npub fn first_duplicate(value: i32) -> i32 {\n    let doubled = normalize(value + value);\n    if doubled > 10 {\n        doubled - offset()\n    } else {\n        doubled + offset()\n    }\n}\n\nfn normalize(value: i32) -> i32 {\n    value\n}\n\nfn offset() -> i32 {\n    1\n}\n\npub fn distinct_alpha(input: i32) -> i32 {\n    input * 3\n}\n",
+    )
+    .expect("first duplicate fixture should be written");
+    fs::write(
+        root.join("beta.rs"),
+        "// @fileimplements DEMO\npub fn second_duplicate(input: i32) -> i32 {\n    let total = normalize(input + input);\n    if total > 10 {\n        total - offset()\n    } else {\n        total + offset()\n    }\n}\n\nfn normalize(value: i32) -> i32 {\n    value\n}\n\nfn offset() -> i32 {\n    1\n}\n",
+    )
+    .expect("second duplicate fixture should be written");
+}
+
+pub fn write_many_duplicate_item_signals_module_analysis_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+
+    for name in ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"] {
+        fs::write(
+            root.join(format!("{name}.rs")),
+            format!(
+                "// @fileimplements DEMO\npub fn {name}_duplicate(value: i32) -> i32 {{\n    let doubled = normalize(value + value);\n    if doubled > 10 {{\n        doubled - offset()\n    }} else {{\n        doubled + offset()\n    }}\n}}\n\nfn normalize(value: i32) -> i32 {{\n    value\n}}\n\nfn offset() -> i32 {{\n    1\n}}\n"
+            ),
+        )
+        .expect("many duplicate fixture should be written");
+    }
+}
+
+pub fn write_restricted_visibility_root_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("lib.rs"),
+        "// @fileimplements DEMO\npub(super) fn entry() {\n    helper();\n}\n\nfn helper() {}\n",
+    )
+    .expect("restricted visibility fixture should be written");
+}
+
+pub fn write_binary_entrypoint_root_fixture(root: &Path) {
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("main.rs"),
+        "// @fileimplements DEMO\nfn main() {\n    helper();\n}\n\nfn helper() {}\n",
+    )
+    .expect("binary entrypoint fixture should be written");
 }
 
 pub fn write_markdown_declarations_fixture(root: &Path) {

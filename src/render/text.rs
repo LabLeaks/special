@@ -11,18 +11,20 @@ use std::fmt::Write;
 use askama::Template;
 
 use crate::model::{
-    ArchitectureKind, DiagnosticSeverity, LintReport, ModuleDocument, ModuleNode, SpecDocument,
-    SpecNode,
+    ArchitectureKind, DiagnosticSeverity, LintReport, ModuleDocument, ModuleNode, RepoDocument,
+    SpecDocument, SpecNode,
 };
 
-use self::analysis::{format_architecture_coverage, render_projected_module_analysis};
+use self::analysis::{
+    format_repo_signals, format_repo_traceability, render_projected_module_analysis,
+};
 use self::attachments::{
     render_attest_section, render_implementation_section, render_verify_section,
 };
-use super::common::planned_badge_text;
+use super::common::{deprecated_badge_text, planned_badge_text};
 use super::projection::{
-    project_architecture_coverage_view, project_document, project_module_analysis_view,
-    project_module_document,
+    project_document, project_module_analysis_view, project_module_document,
+    project_repo_signals_view, project_repo_traceability_view,
 };
 use super::templates::{render_template, text_indent};
 
@@ -75,6 +77,10 @@ impl SpecNodeTextTemplate<'_> {
         planned_badge_text(self.node.planned_release())
     }
 
+    fn deprecated_badge(&self) -> String {
+        deprecated_badge_text(self.node.deprecated_release())
+    }
+
     fn verbose_section(&self) -> String {
         if !self.verbose {
             return String::new();
@@ -120,17 +126,12 @@ struct ModulePageTextTemplate<'a> {
 }
 
 impl ModulePageTextTemplate<'_> {
-    fn coverage_section(&self) -> String {
+    fn repo_signals_section(&self) -> String {
         self.document
             .analysis
             .as_ref()
-            .and_then(|analysis| analysis.coverage.as_ref())
-            .map(|coverage| {
-                format_architecture_coverage(&project_architecture_coverage_view(
-                    coverage,
-                    self.verbose,
-                ))
-            })
+            .and_then(|analysis| analysis.repo_signals.as_ref())
+            .map(|coverage| format_repo_signals(&project_repo_signals_view(coverage, self.verbose)))
             .unwrap_or_default()
     }
 
@@ -256,6 +257,31 @@ pub(super) fn render_module_text(document: &ModuleDocument, verbose: bool) -> St
         document: &document,
         verbose,
     })
+}
+
+pub(super) fn render_repo_text(document: &RepoDocument, verbose: bool) -> String {
+    let document = super::projection::project_repo_document(document, verbose);
+    let mut output = String::from("special repo\n");
+    if let Some(repo_signals) = document
+        .analysis
+        .as_ref()
+        .and_then(|analysis| analysis.repo_signals.as_ref())
+    {
+        output.push_str(&format_repo_signals(&project_repo_signals_view(
+            repo_signals,
+            verbose,
+        )));
+    }
+    if let Some(traceability) = document
+        .analysis
+        .as_ref()
+        .and_then(|analysis| analysis.traceability.as_ref())
+    {
+        output.push_str(&format_repo_traceability(&project_repo_traceability_view(
+            traceability,
+        )));
+    }
+    output
 }
 
 pub(super) fn render_lint_text(report: &LintReport) -> String {

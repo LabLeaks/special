@@ -5,6 +5,7 @@ Builds the visible spec tree from parsed annotations and support attachments. Th
 // @fileimplements SPECIAL.INDEX.MATERIALIZE
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::{immediate_parent_id, nearest_visible_parent_id};
 use crate::model::{NodeKind, ParsedRepo, SpecDecl, SpecDocument, SpecFilter, SpecNode, VerifyRef};
 
 #[derive(Debug, Clone)]
@@ -57,18 +58,18 @@ pub(super) fn materialize_spec(parsed: &ParsedRepo, filter: SpecFilter) -> SpecD
 
     let mut visible_ids = directly_visible_ids.clone();
     for id in &directly_visible_ids {
-        let mut parent = immediate_parent(id);
+        let mut parent = immediate_parent_id(id);
         while let Some(candidate) = parent {
             if flat_nodes.contains_key(candidate) {
                 visible_ids.insert(candidate.to_string());
             }
-            parent = immediate_parent(candidate);
+            parent = immediate_parent_id(candidate);
         }
     }
 
     let mut children_map: BTreeMap<Option<String>, Vec<String>> = BTreeMap::new();
     for id in &visible_ids {
-        let visible_parent = nearest_visible_parent(id, &visible_ids);
+        let visible_parent = nearest_visible_parent_id(id, &visible_ids);
         children_map
             .entry(visible_parent)
             .or_default()
@@ -108,17 +109,6 @@ impl SpecFilter {
     }
 }
 
-fn nearest_visible_parent(id: &str, visible_ids: &BTreeSet<String>) -> Option<String> {
-    let mut parent = immediate_parent(id);
-    while let Some(candidate) = parent {
-        if visible_ids.contains(candidate) {
-            return Some(candidate.to_string());
-        }
-        parent = immediate_parent(candidate);
-    }
-    None
-}
-
 fn build_children(
     parent: Option<String>,
     children_map: &BTreeMap<Option<String>, Vec<String>>,
@@ -139,10 +129,6 @@ fn build_children(
             )
         })
         .collect()
-}
-
-fn immediate_parent(id: &str) -> Option<&str> {
-    id.rsplit_once('.').map(|(parent, _)| parent)
 }
 
 fn scoped_nodes(nodes: Vec<SpecNode>, scope: &str) -> Vec<SpecNode> {

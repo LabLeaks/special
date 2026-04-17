@@ -138,7 +138,29 @@ pub(crate) fn parse_module_header(
             });
             return None;
         }
+        Err(DeclHeaderError::InvalidDeprecatedRelease) => {
+            parsed.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                path: path.to_path_buf(),
+                line,
+                message: "unexpected trailing content after module id; only `@planned` is supported on module declarations".to_string(),
+            });
+            return None;
+        }
     };
+
+    if header.deprecated {
+        parsed.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            path: path.to_path_buf(),
+            line,
+            message: format!(
+                "@deprecated may only apply to @spec, not {}",
+                kind.as_annotation()
+            ),
+        });
+        return None;
+    }
 
     if header.planned && kind != ArchitectureKind::Module {
         parsed.diagnostics.push(Diagnostic {

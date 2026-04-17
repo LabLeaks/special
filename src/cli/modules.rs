@@ -47,6 +47,7 @@ pub(super) fn execute_modules(args: ModulesArgs, current_dir: &Path) -> Result<E
     let (document, lint) = build_module_document(
         &root,
         &resolution.ignore_patterns,
+        resolution.version,
         ModuleFilter {
             include_planned: args.include_planned,
             unsupported_only: args.unsupported_only,
@@ -55,6 +56,7 @@ pub(super) fn execute_modules(args: ModulesArgs, current_dir: &Path) -> Result<E
         ModuleAnalysisOptions {
             coverage: args.metrics,
             metrics: args.metrics,
+            experimental: false,
         },
     )?;
 

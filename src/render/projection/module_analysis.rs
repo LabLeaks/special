@@ -4,8 +4,8 @@ Projects module analysis into a shared view model of counts, explanation rows, a
 */
 // @fileimplements SPECIAL.RENDER.PROJECTION.MODULE_ANALYSIS
 use crate::model::{
-    ArchitectureCoverageSummary, ModuleAnalysisSummary, ModuleItemKind, ModuleItemSignal,
-    ModuleNode,
+    ArchitectureRepoSignalsSummary, ArchitectureTraceabilityItem, ArchitectureTraceabilitySummary,
+    ModuleAnalysisSummary, ModuleItemKind, ModuleItemSignal, ModuleNode, ModuleTraceabilityItem,
 };
 use crate::modules::analyze::explain::{MetricExplanationKey, metric_explanation};
 
@@ -29,10 +29,17 @@ pub(in crate::render) struct ProjectedExplanation {
 }
 
 #[derive(Debug, Clone)]
-pub(in crate::render) struct ProjectedArchitectureCoverage {
+pub(in crate::render) struct ProjectedRepoSignals {
     pub(in crate::render) counts: Vec<ProjectedCount>,
-    pub(in crate::render) uncovered_paths: Vec<String>,
-    pub(in crate::render) weak_paths: Vec<String>,
+    pub(in crate::render) explanations: Vec<ProjectedExplanation>,
+    pub(in crate::render) unowned_unreached_items: Vec<String>,
+    pub(in crate::render) duplicate_items: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::render) struct ProjectedArchitectureTraceability {
+    pub(in crate::render) counts: Vec<ProjectedCount>,
+    pub(in crate::render) items: Vec<ProjectedMetaLine>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,36 +49,131 @@ pub(in crate::render) struct ProjectedModuleAnalysis {
     pub(in crate::render) explanations: Vec<ProjectedExplanation>,
 }
 
-pub(in crate::render) fn project_architecture_coverage_view(
-    coverage: &ArchitectureCoverageSummary,
+pub(in crate::render) fn project_repo_signals_view(
+    coverage: &ArchitectureRepoSignalsSummary,
     verbose: bool,
-) -> ProjectedArchitectureCoverage {
-    ProjectedArchitectureCoverage {
+) -> ProjectedRepoSignals {
+    let explanations = vec![
+        explanation(
+            "unowned unreached items",
+            MetricExplanationKey::UnownedUnreachedItems,
+        ),
+        explanation("duplicate items", MetricExplanationKey::DuplicateItems),
+    ];
+
+    ProjectedRepoSignals {
         counts: vec![
-            count("analyzed files", coverage.analyzed_files),
-            count("covered files", coverage.covered_files),
-            count("uncovered files", coverage.uncovered_files),
-            count("weak files", coverage.weak_files),
+            count("unowned unreached items", coverage.unowned_unreached_items),
+            count("duplicate items", coverage.duplicate_items),
         ],
-        uncovered_paths: if verbose {
+        explanations,
+        unowned_unreached_items: if verbose {
             coverage
-                .uncovered_paths
+                .unowned_unreached_item_details
                 .iter()
-                .map(|path| path.display().to_string())
+                .map(|item| {
+                    format!(
+                        "{}:{} [{}]",
+                        item.path.display(),
+                        item.name,
+                        match item.kind {
+                            ModuleItemKind::Function => "function",
+                            ModuleItemKind::Method => "method",
+                        }
+                    )
+                })
                 .collect()
         } else {
             Vec::new()
         },
-        weak_paths: if verbose {
-            coverage
-                .weak_paths
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect()
-        } else {
-            Vec::new()
-        },
+        duplicate_items: coverage
+            .duplicate_item_details
+            .iter()
+            .take(if verbose { usize::MAX } else { 5 })
+            .map(|item| {
+                format!(
+                    "{}:{}:{} [{}; duplicate peers {}]",
+                    item.module_id,
+                    item.path.display(),
+                    item.name,
+                    match item.kind {
+                        ModuleItemKind::Function => "function",
+                        ModuleItemKind::Method => "method",
+                    },
+                    item.duplicate_peer_count,
+                )
+            })
+            .collect(),
     }
+}
+
+pub(in crate::render) fn project_repo_traceability_view(
+    traceability: &ArchitectureTraceabilitySummary,
+) -> ProjectedArchitectureTraceability {
+    let mut counts = vec![count(
+        "traceability items analyzed",
+        traceability.analyzed_items,
+    )];
+    if !traceability.live_spec_items.is_empty() {
+        counts.push(count("live spec items", traceability.live_spec_items.len()));
+    }
+    if !traceability.planned_only_items.is_empty() {
+        counts.push(count(
+            "planned-only items",
+            traceability.planned_only_items.len(),
+        ));
+    }
+    if !traceability.deprecated_only_items.is_empty() {
+        counts.push(count(
+            "deprecated-only items",
+            traceability.deprecated_only_items.len(),
+        ));
+    }
+    if !traceability.file_scoped_only_items.is_empty() {
+        counts.push(count(
+            "file-scoped-only items",
+            traceability.file_scoped_only_items.len(),
+        ));
+    }
+    if !traceability.unverified_test_items.is_empty() {
+        counts.push(count(
+            "unverified-test items",
+            traceability.unverified_test_items.len(),
+        ));
+    }
+    if !traceability.unknown_items.is_empty() {
+        counts.push(count("unknown items", traceability.unknown_items.len()));
+    }
+
+    let mut items = Vec::new();
+    push_architecture_traceability_group(
+        &mut items,
+        "live spec item",
+        &traceability.live_spec_items,
+    );
+    push_architecture_traceability_group(
+        &mut items,
+        "planned-only item",
+        &traceability.planned_only_items,
+    );
+    push_architecture_traceability_group(
+        &mut items,
+        "deprecated-only item",
+        &traceability.deprecated_only_items,
+    );
+    push_architecture_traceability_group(
+        &mut items,
+        "file-scoped-only item",
+        &traceability.file_scoped_only_items,
+    );
+    push_architecture_traceability_group(
+        &mut items,
+        "unverified-test item",
+        &traceability.unverified_test_items,
+    );
+    push_architecture_traceability_group(&mut items, "unknown item", &traceability.unknown_items);
+
+    ProjectedArchitectureTraceability { counts, items }
 }
 
 pub(in crate::render) fn project_module_analysis_view(
@@ -87,7 +189,8 @@ pub(in crate::render) fn project_module_analysis_view(
     append_metrics(analysis, &mut counts);
     append_complexity(analysis, &mut counts, &mut explanations);
     append_quality(analysis, &mut counts, &mut explanations);
-    append_item_signals(analysis, &mut meta_lines, &mut explanations);
+    append_item_signals(analysis, &mut counts, &mut meta_lines, &mut explanations);
+    append_traceability(analysis, &mut meta_lines);
     append_coupling(analysis, &mut counts, &mut explanations);
     append_dependencies(analysis, &mut counts, &mut meta_lines);
 
@@ -100,16 +203,14 @@ pub(in crate::render) fn project_module_analysis_view(
 
 fn append_coverage(
     analysis: &ModuleAnalysisSummary,
-    verbose: bool,
+    _verbose: bool,
     counts: &mut Vec<ProjectedCount>,
-    meta_lines: &mut Vec<ProjectedMetaLine>,
+    _meta_lines: &mut Vec<ProjectedMetaLine>,
 ) {
     let Some(coverage) = &analysis.coverage else {
         return;
     };
 
-    counts.push(count("covered files", coverage.covered_files));
-    counts.push(count("weak files", coverage.weak_files));
     counts.push(count(
         "file-scoped implements",
         coverage.file_scoped_implements,
@@ -118,17 +219,6 @@ fn append_coverage(
         "item-scoped implements",
         coverage.item_scoped_implements,
     ));
-
-    if verbose {
-        meta_lines.extend(coverage.covered_paths.iter().map(|path| ProjectedMetaLine {
-            label: "covered file",
-            value: path.display().to_string(),
-        }));
-        meta_lines.extend(coverage.weak_paths.iter().map(|path| ProjectedMetaLine {
-            label: "weak file",
-            value: path.display().to_string(),
-        }));
-    }
 }
 
 fn append_metrics(analysis: &ModuleAnalysisSummary, counts: &mut Vec<ProjectedCount>) {
@@ -217,6 +307,7 @@ fn append_quality(
 
 fn append_item_signals(
     analysis: &ModuleAnalysisSummary,
+    counts: &mut Vec<ProjectedCount>,
     meta_lines: &mut Vec<ProjectedMetaLine>,
     explanations: &mut Vec<ProjectedExplanation>,
 ) {
@@ -224,6 +315,13 @@ fn append_item_signals(
         return;
     };
 
+    if item_signals.unreached_item_count > 0 {
+        counts.push(count("unreached items", item_signals.unreached_item_count));
+        explanations.push(explanation(
+            "unreached items",
+            MetricExplanationKey::UnreachedItems,
+        ));
+    }
     meta_lines.push(ProjectedMetaLine {
         label: "item signals analyzed",
         value: item_signals.analyzed_items.to_string(),
@@ -248,6 +346,13 @@ fn append_item_signals(
         "isolated item",
         MetricExplanationKey::IsolatedItem,
         &item_signals.isolated_items,
+    );
+    push_item_group(
+        meta_lines,
+        explanations,
+        "unreached item",
+        MetricExplanationKey::UnreachedItem,
+        &item_signals.unreached_items,
     );
     push_item_group(
         meta_lines,
@@ -320,6 +425,83 @@ fn append_coupling(
     ));
 }
 
+fn append_traceability(analysis: &ModuleAnalysisSummary, meta_lines: &mut Vec<ProjectedMetaLine>) {
+    let Some(traceability) = &analysis.traceability else {
+        return;
+    };
+
+    meta_lines.push(ProjectedMetaLine {
+        label: "traceability items analyzed",
+        value: traceability.analyzed_items.to_string(),
+    });
+    push_traceability_group(meta_lines, "live spec item", &traceability.live_spec_items);
+    push_traceability_group(
+        meta_lines,
+        "planned-only item",
+        &traceability.planned_only_items,
+    );
+    push_traceability_group(
+        meta_lines,
+        "deprecated-only item",
+        &traceability.deprecated_only_items,
+    );
+    push_traceability_group(
+        meta_lines,
+        "file-scoped-only item",
+        &traceability.file_scoped_only_items,
+    );
+    push_traceability_group(
+        meta_lines,
+        "unverified-test item",
+        &traceability.unverified_test_items,
+    );
+    push_traceability_group(meta_lines, "unknown item", &traceability.unknown_items);
+}
+
+fn push_architecture_traceability_group(
+    meta_lines: &mut Vec<ProjectedMetaLine>,
+    label: &'static str,
+    items: &[ArchitectureTraceabilityItem],
+) {
+    meta_lines.extend(items.iter().map(|item| ProjectedMetaLine {
+        label,
+        value: architecture_traceability_value(item),
+    }));
+}
+
+fn architecture_traceability_value(item: &ArchitectureTraceabilityItem) -> String {
+    let mut suffix = Vec::new();
+    if !item.live_specs.is_empty() {
+        suffix.push(format!("live specs {}", item.live_specs.join(", ")));
+    }
+    if !item.planned_specs.is_empty() {
+        suffix.push(format!("planned specs {}", item.planned_specs.join(", ")));
+    }
+    if !item.deprecated_specs.is_empty() {
+        suffix.push(format!(
+            "deprecated specs {}",
+            item.deprecated_specs.join(", ")
+        ));
+    }
+    if !item.verifying_tests.is_empty() {
+        suffix.push(format!(
+            "verifying tests {}",
+            item.verifying_tests.join(", ")
+        ));
+    }
+    if !item.unverified_tests.is_empty() {
+        suffix.push(format!(
+            "unverified tests {}",
+            item.unverified_tests.join(", ")
+        ));
+    }
+    if suffix.is_empty() {
+        format!("{}:{}", item.module_id, item.name)
+    } else {
+        format!("{}:{} [{}]", item.module_id, item.name, suffix.join("; "))
+    }
+}
+
 fn append_dependencies(
     analysis: &ModuleAnalysisSummary,
     counts: &mut Vec<ProjectedCount>,
@@ -355,6 +537,21 @@ fn push_item_group(
     explanations.push(explanation(label, key));
 }
 
+fn push_traceability_group(
+    meta_lines: &mut Vec<ProjectedMetaLine>,
+    label: &'static str,
+    items: &[ModuleTraceabilityItem],
+) {
+    if items.is_empty() {
+        return;
+    }
+
+    meta_lines.extend(items.iter().map(|item| ProjectedMetaLine {
+        label,
+        value: format_traceability_item(item),
+    }));
+}
+
 fn format_item_signal(item: &ModuleItemSignal) -> String {
     format!(
         "{} [{}; params {} (bool {}, raw string {}), internal refs {}, inbound {}, external refs {}, cyclomatic {}, cognitive {}, panic sites {}]",
@@ -372,6 +569,44 @@ fn format_item_signal(item: &ModuleItemSignal) -> String {
         item.cyclomatic,
         item.cognitive,
         item.panic_site_count,
+    )
+}
+
+fn format_traceability_item(item: &ModuleTraceabilityItem) -> String {
+    let mut segments = Vec::new();
+    if !item.live_specs.is_empty() {
+        segments.push(format!("live specs {}", item.live_specs.join(", ")));
+    }
+    if !item.planned_specs.is_empty() {
+        segments.push(format!("planned specs {}", item.planned_specs.join(", ")));
+    }
+    if !item.deprecated_specs.is_empty() {
+        segments.push(format!(
+            "deprecated specs {}",
+            item.deprecated_specs.join(", ")
+        ));
+    }
+    if !item.verifying_tests.is_empty() {
+        segments.push(format!(
+            "verifying tests {}",
+            item.verifying_tests.join(", ")
+        ));
+    }
+    if !item.unverified_tests.is_empty() {
+        segments.push(format!(
+            "unverified tests {}",
+            item.unverified_tests.join(", ")
+        ));
+    }
+
+    format!(
+        "{} [{}; {}]",
+        item.name,
+        match item.kind {
+            ModuleItemKind::Function => "function",
+            ModuleItemKind::Method => "method",
+        },
+        segments.join("; ")
     )
 }
 

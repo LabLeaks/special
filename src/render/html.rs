@@ -5,16 +5,18 @@ Renders projected specs and modules into HTML views with shared styling and best
 // @fileimplements SPECIAL.RENDER.HTML
 use askama::Template;
 
-use crate::model::{ArchitectureKind, ModuleDocument, ModuleNode, SpecDocument, SpecNode};
+use crate::model::{
+    ArchitectureKind, ModuleDocument, ModuleNode, RepoDocument, SpecDocument, SpecNode,
+};
 
 use super::common::{
-    MODULES_HTML_EMPTY, SPEC_HTML_EMPTY, SPEC_HTML_STYLE, escape_html, highlight_code_html,
-    language_name_for_path, planned_badge_text,
+    MODULES_HTML_EMPTY, SPEC_HTML_EMPTY, SPEC_HTML_STYLE, deprecated_badge_text, escape_html,
+    highlight_code_html, language_name_for_path, planned_badge_text,
 };
 use super::projection::{
-    ProjectedArchitectureCoverage, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
-    project_architecture_coverage_view, project_document, project_module_analysis_view,
-    project_module_document,
+    ProjectedArchitectureTraceability, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
+    ProjectedRepoSignals, project_document, project_module_analysis_view, project_module_document,
+    project_repo_signals_view, project_repo_traceability_view,
 };
 use super::templates::render_template;
 
@@ -90,9 +92,10 @@ struct ModuleVerboseHtmlTemplate {
 #[template(path = "render/coverage_section.html")]
 struct CoverageSectionHtmlTemplate<'a> {
     counts_html: String,
+    explanations_html: String,
     verbose: bool,
-    uncovered_paths: &'a [String],
-    weak_paths: &'a [String],
+    unowned_unreached_items: &'a [String],
+    duplicate_items: &'a [String],
 }
 
 #[derive(Template)]
@@ -139,6 +142,10 @@ impl SpecNodeHtmlTemplate<'_> {
 
     fn planned_badge(&self) -> String {
         planned_badge_text(self.node.planned_release())
+    }
+
+    fn deprecated_badge(&self) -> String {
+        deprecated_badge_text(self.node.deprecated_release())
     }
 
     fn declared_at(&self) -> String {
@@ -241,16 +248,13 @@ struct ModulePageHtmlTemplate<'a> {
 }
 
 impl ModulePageHtmlTemplate<'_> {
-    fn coverage_section(&self) -> String {
+    fn repo_signals_section(&self) -> String {
         self.document
             .analysis
             .as_ref()
-            .and_then(|analysis| analysis.coverage.as_ref())
+            .and_then(|analysis| analysis.repo_signals.as_ref())
             .map(|coverage| {
-                format_architecture_coverage_html(&project_architecture_coverage_view(
-                    coverage,
-                    self.verbose,
-                ))
+                format_repo_signals_html(&project_repo_signals_view(coverage, self.verbose))
             })
             .unwrap_or_default()
     }
@@ -430,7 +434,36 @@ pub(super) fn render_module_html(document: &ModuleDocument, verbose: bool) -> St
     })
 }
 
-fn format_architecture_coverage_html(coverage: &ProjectedArchitectureCoverage) -> String {
+pub(super) fn render_repo_html(document: &RepoDocument, verbose: bool) -> String {
+    let document = super::projection::project_repo_document(document, verbose);
+    let repo_signals_html = document
+        .analysis
+        .as_ref()
+        .and_then(|analysis| analysis.repo_signals.as_ref())
+        .map(|signals| format_repo_signals_html(&project_repo_signals_view(signals, verbose)))
+        .unwrap_or_default();
+    let traceability_html = document
+        .analysis
+        .as_ref()
+        .and_then(|analysis| analysis.traceability.as_ref())
+        .map(|traceability| {
+            format_repo_traceability_html(&project_repo_traceability_view(traceability))
+        })
+        .unwrap_or_default();
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>special repo</title><style>{}</style></head><body><main><h1>special repo</h1><p class=\"lede\">Repo-wide quality signals for the current repository.</p>{}{}</main></body></html>",
+        SPEC_HTML_STYLE, repo_signals_html, traceability_html
+    )
+}
+
+fn format_repo_signals_html(coverage: &ProjectedRepoSignals) -> String {
+    if coverage.counts.is_empty()
+        && coverage.unowned_unreached_items.is_empty()
+        && coverage.duplicate_items.is_empty()
+    {
+        return String::new();
+    }
+
     render_template(&CoverageSectionHtmlTemplate {
         counts_html: render_template(&CountsSectionHtmlTemplate {
             counts: &coverage
@@ -439,10 +472,47 @@ fn format_architecture_coverage_html(coverage: &ProjectedArchitectureCoverage) -
                 .map(projected_count)
                 .collect::<Vec<_>>(),
         }),
-        verbose: !(coverage.uncovered_paths.is_empty() && coverage.weak_paths.is_empty()),
-        uncovered_paths: &coverage.uncovered_paths,
-        weak_paths: &coverage.weak_paths,
+        explanations_html: render_template(&ExplanationsHtmlTemplate {
+            explanations: &coverage
+                .explanations
+                .iter()
+                .map(projected_explanation)
+                .collect::<Vec<_>>(),
+        }),
+        verbose: !coverage.unowned_unreached_items.is_empty()
+            || !coverage.duplicate_items.is_empty(),
+        unowned_unreached_items: &coverage.unowned_unreached_items,
+        duplicate_items: &coverage.duplicate_items,
     })
+}
+
+fn format_repo_traceability_html(traceability: &ProjectedArchitectureTraceability) -> String {
+    if traceability.counts.is_empty() && traceability.items.is_empty() {
+        return String::new();
+    }
+
+    let counts_html = render_template(&CountsSectionHtmlTemplate {
+        counts: &traceability
+            .counts
+            .iter()
+            .map(projected_count)
+            .collect::<Vec<_>>(),
+    });
+    let details_html = traceability
+        .items
+        .iter()
+        .map(|item| {
+            format!(
+                "<li><strong>{}</strong>: {}</li>",
+                item.label,
+                escape_html(&item.value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        "<section class=\"coverage\"><h2>experimental traceability</h2>{counts_html}<details><summary>traceability detail</summary><ul>{details_html}</ul></details></section>"
+    )
 }
 
 fn projected_count(count: &ProjectedCount) -> HtmlCount {

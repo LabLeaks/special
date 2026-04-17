@@ -12,7 +12,7 @@ use syntect::html::{IncludeBackground, styled_line_to_highlighted_html};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use syntect::util::LinesWithEndings;
 
-pub(super) const SPEC_HTML_STYLE: &str = r#":root{color-scheme:light;--bg:#fcfcfb;--panel:#ffffff;--border:#e7e5e4;--text:#1c1917;--muted:#6b7280;--code-bg:#f5f5f4;--planned-bg:#fff7ed;--planned-text:#9a3412;--unsupported-bg:#fef2f2;--unsupported-text:#b91c1c;--group-bg:#f5f5f4;--group-text:#44403c;}
+pub(super) const SPEC_HTML_STYLE: &str = r#":root{color-scheme:light;--bg:#fcfcfb;--panel:#ffffff;--border:#e7e5e4;--text:#1c1917;--muted:#6b7280;--code-bg:#f5f5f4;--planned-bg:#fff7ed;--planned-text:#9a3412;--deprecated-bg:#eff6ff;--deprecated-text:#1d4ed8;--unsupported-bg:#fef2f2;--unsupported-text:#b91c1c;--group-bg:#f5f5f4;--group-text:#44403c;}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 main{max-width:980px;margin:0 auto;padding:32px 20px 56px}
@@ -27,6 +27,7 @@ li{margin:12px 0}
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;line-height:1.5}
 .badge-group{background:var(--group-bg);color:var(--group-text)}
 .badge-planned{background:var(--planned-bg);color:var(--planned-text)}
+.badge-deprecated{background:var(--deprecated-bg);color:var(--deprecated-text)}
 .badge-unsupported{background:var(--unsupported-bg);color:var(--unsupported-text);font-weight:600}
 .node-text{margin-top:6px;color:#292524}
 .meta{margin-top:8px;color:var(--muted);font-size:13px}
@@ -50,6 +51,13 @@ pub(super) fn planned_badge_text(planned_release: Option<&str>) -> String {
     match planned_release {
         Some(release) => format!("planned: {release}"),
         None => "planned".to_string(),
+    }
+}
+
+pub(super) fn deprecated_badge_text(deprecated_release: Option<&str>) -> String {
+    match deprecated_release {
+        Some(release) => format!("deprecated: {release}"),
+        None => "deprecated".to_string(),
     }
 }
 

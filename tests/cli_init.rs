@@ -115,7 +115,7 @@ fn top_level_help_lists_command_summaries() {
     let command_names = top_level_help_command_names(&stdout);
     assert_eq!(
         command_names,
-        vec!["specs", "modules", "lint", "init", "skills"]
+        vec!["specs", "modules", "repo", "lint", "init", "skills"]
     );
     let summaries = top_level_help_command_summaries(&stdout);
     assert_eq!(summaries.len(), command_names.len());
