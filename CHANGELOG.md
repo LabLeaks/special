@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 - Unreleased
+
+- Added lightweight claim retirement metadata with `@deprecated <release>`, surfaced across `special specs` text, JSON, and HTML views without changing live-claim support semantics.
+- Added a shared cross-language syntax and analysis substrate, with shipped built-in module metrics for owned Rust, TypeScript, and Go code on the same provider seam.
+- Tightened `special modules --metrics` around annotated architecture: module ownership granularity, implementation summaries, dependencies, coupling, quality evidence, and conservative unreached-code indicators now stay on the module side, while repo-wide quality signals moved out.
+- Added `special repo` as the repo-wide quality surface, including duplication and unowned unreached-code signals, with `--verbose` for fuller drilldown and `--experimental` for early implementation traceability.
+- Landed an initial experimental impl-to-test-to-spec traceability indicator behind `special repo --experimental`, while keeping deeper cross-language traceability hardening planned for later releases.
+- Hardened release and parser correctness around the new surfaces, including stricter Homebrew formula verification and consistent planned/deprecated lifecycle validation across block and markdown parsing.
+
 ## 0.4.1 - 2026-04-16
 
 - Added `@fileattests` as the file-scoped attestation companion to `@attests`, so long review artifacts can attach predictably without item-scope ambiguity.

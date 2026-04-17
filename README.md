@@ -54,6 +54,7 @@ It does that by:
 - materializing architecture modules and areas
 - attaching implementation ownership with `@implements`
 - surfacing architecture analysis evidence with `special modules --metrics`
+- surfacing repo-wide quality and experimental traceability with `special repo`
 - installing repo-local skills that teach agents how to work with the contract
 
 ## Source Of Truth
@@ -127,6 +128,13 @@ Inspect architecture ownership and implementation evidence:
 special modules --metrics
 ```
 
+Inspect repo-wide quality signals and experimental cross-cutting traceability:
+
+```sh
+special repo
+special repo --experimental
+```
+
 Check structural problems:
 
 ```sh
@@ -159,7 +167,8 @@ special specs APP.EXPORT --json --verbose
 
 `special specs` gives you the current live contract by default. `--all` includes
 planned items. `--unsupported` shows live items with zero verifies and zero
-attests.
+attests. Deprecated claims remain visible in the live view and surface their
+retirement metadata when present.
 
 Verbose spec views surface the attached `@verifies` and `@attests` bodies so a
 human or agent can inspect the support directly.
@@ -176,6 +185,9 @@ special modules --all
 special modules APP.PARSER --verbose
 special modules --metrics
 special modules --metrics --verbose
+special repo
+special repo --verbose
+special repo --experimental
 special modules --json
 special modules --json --metrics
 special modules --html --verbose
@@ -185,13 +197,32 @@ special modules --html --verbose
 
 `special modules --metrics` adds architecture-as-implemented evidence, including:
 
-- ownership coverage
+- module ownership granularity
 - per-module implementation summaries
 - public and internal item counts when a built-in analyzer can extract them
 - dependency and coupling evidence when a built-in analyzer can resolve them
 - quality evidence summaries when a built-in analyzer can extract them honestly
+- unreached-code indicators within owned implementation when a built-in analyzer
+  can identify them honestly
 
-Today the built-in implementation analysis is strongest for owned Rust code.
+`file-scoped implements` and `item-scoped implements` are ownership-granularity
+signals, not file-coverage grades. A module can be honestly owned at file scope
+while still being coarser than item-scoped ownership.
+
+`special repo` surfaces repo-wide quality signals that are not tied to one
+architecture module, including:
+
+- repo-wide duplicate-logic signals across owned implementation
+- unowned unreached-code indicators outside any declared module
+- experimental implementation traceability when requested with `--experimental`
+
+Use `special repo --verbose` when you want fuller repo-wide drilldown, including
+unowned unreached item locations and complete duplicate-item clusters when the
+built-in analyzers can identify them honestly.
+
+Today the built-in implementation analysis is strongest for owned Rust code,
+and it also surfaces first-pass implementation evidence for owned TypeScript
+and Go code.
 For Rust modules, `--metrics` can surface:
 
 - public and internal item counts
@@ -199,11 +230,29 @@ For Rust modules, `--metrics` can surface:
 - cognitive complexity summaries
 - quality evidence such as public API parameter shape, stringly typed boundaries,
   and recoverability signals
+- unreached-code indicators such as private items with no observed path from
+  public or test roots, plus unreached unowned Rust items outside any declared
+  module
 - `use`-path dependency evidence
 - module coupling evidence derived from owned dependency targets
 
-Use `--verbose` when you want uncovered or weakly covered paths plus per-module
-coverage detail.
+For TypeScript modules, `--metrics` can surface:
+
+- public and internal item counts
+- import-path dependency evidence
+- module coupling evidence derived from owned relative imports
+- per-item connected, outbound-heavy, isolated, and unreached evidence
+
+For Go modules, `--metrics` can surface:
+
+- public and internal item counts
+- import-path dependency evidence
+- module coupling evidence derived from owned local imports
+- per-item connected, outbound-heavy, isolated, and unreached evidence
+
+`special repo --experimental` also surfaces early implementation traceability
+indicators when a built-in analyzer can connect owned code through tests to
+declared specs.
 
 ## Skills
 
@@ -270,6 +319,9 @@ mise exec -- cargo run -- modules --metrics
 - `@planned`
   Marks a `@spec` as not part of the live spec yet, and may optionally carry a
   release string like `@planned X.Y.Z`.
+- `@deprecated`
+  Marks a live `@spec` for retirement while it is still materialized, and may
+  optionally carry a release string like `@deprecated X.Y.Z`.
 - `@verifies ID`
   Attaches one verification artifact to one claim.
 - `@attests ID`
@@ -293,6 +345,8 @@ Important constraints:
 
 - `@group` and `@spec` are mutually exclusive for the same id.
 - `@planned` is local to the owning `@spec`.
+- `@deprecated` is local to the owning `@spec`.
+- a `@spec` may not be both `@planned` and `@deprecated`.
 - one `@verifies` block may target only one spec id.
 - one `@fileverifies` block may target only one spec id.
 - child claims do not justify a parent `@spec`.
@@ -321,6 +375,16 @@ Planned claims use the same declaration form:
 @spec EXPORT.METADATA
 @planned
 Exports include provenance metadata.
+*/
+```
+
+Deprecated claims use the same local marker shape:
+
+```text
+/**
+@spec EXPORT.LEGACY_HEADERS
+@deprecated 0.6.0
+Legacy CSV header behavior is scheduled for removal.
 */
 ```
 
