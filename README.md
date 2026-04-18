@@ -2,60 +2,47 @@
 
 Pronounced "spec-ee-al".
 
-AI dev starts fast.
+A CLI for repos that have started to outrun trust.
 
-Then it bogs down.
+When agent-driven development starts going wrong, the failure mode usually is
+not “the model is dumb.” The repo itself has become hard to read:
 
-The agent writes code against behavior that is only planned. A tagged test does
-not really prove the claim it points at. A module boundary sounds clean, but the
-implementation is broad and tangled. You stop trusting what the agent thinks is
-true, and now you are back to grepping through the repo to reconstruct reality.
+- behavior is half shipped and half planned
+- tests are tagged as proof, but do not really prove the claim
+- module boundaries sound clean in docs, but the implementation sprawls
+- reviewers have to grep through the tree to reconstruct what is actually true
 
-`special` is for that moment.
+`special` makes that visible again.
 
-It turns annotations in ordinary source files and markdown into an inspectable
-contract and architecture view, so you can see:
+It turns lightweight annotations in normal source files and markdown into three
+inspectable views:
 
-- what is live
-- what is planned
-- what supports a claim
-- which code implements a module
+- `special specs`
+  What the repo claims is live, planned, deprecated, or unsupported.
+- `special modules`
+  How the repo says implementation is organized.
+- `special repo`
+  Cross-cutting quality signals that do not belong to one module.
 
 ## Why It Exists
 
-The pain is not "the model is dumb." The pain is that once the repo gets even a
-little complicated, the agent stops feeling grounded in what is actually
-implemented.
+Most agent tooling helps you run work: planning, orchestration, memory,
+autonomy, handoffs.
 
-That is when AI-assisted development starts to slow down:
+`special` helps you answer a different question:
 
-- the agent treats planned behavior like shipped behavior
-- a test is tagged as support, but does not really prove the claim
-- a module sounds clean in docs, but the implementation is broad, tangled, or
-  leaking across boundaries
-- reviewers have to grep through code to reconstruct what is true
-- progress slows down because everyone is reloading context and second-guessing
-  the contract
+What does this repo actually claim, what evidence is attached to those claims,
+and what code really implements the architecture it describes?
 
-There are already good tools for agent memory, planning flows, and orchestration.
-Those mostly help you run the work.
+That matters once the codebase is large enough that:
 
-`special` solves a different problem: once the work is already happening, what
-does the repo actually claim, what support is attached to those claims, and what
-code really implements each module?
+- planned work starts getting mistaken for shipped behavior
+- tagged tests stop being trusted automatically
+- architecture docs stop matching the implementation
+- quality hotspots exist across the repo, not just inside one module
 
-`special` exists to make that explicit before the repo turns into vibes,
-reconstruction work, and cleanup debt.
-
-It does that by:
-
-- materializing live and planned specs from source-local annotations
-- surfacing attached `@verifies` and `@attests`
-- materializing architecture modules and areas
-- attaching implementation ownership with `@implements`
-- surfacing architecture analysis evidence with `special modules --metrics`
-- surfacing repo-wide quality and experimental traceability with `special repo`
-- installing repo-local skills that teach agents how to work with the contract
+`special` is meant to be the thing you run before another hour of grep,
+guessing, or cleanup debt.
 
 ## Source Of Truth
 
@@ -71,7 +58,7 @@ binary is `special`.
 
 The repo root is explicitly anchored by [special.toml](special.toml).
 
-## What `special` Does
+## What It Gives You
 
 Today `special` is a Rust CLI that:
 
@@ -88,25 +75,190 @@ Today `special` is a Rust CLI that:
   views
 - installs task-shaped skills for product-spec and architecture workflows
 
-This repo is self-hosting: `special`'s own behavior is described and verified in
-`special` format across its source files, test files, and minimal central
-markdown contract residue.
+This repo is self-hosting: `special` describes and verifies its own behavior
+with `special` annotations across its source, tests, and a small amount of
+markdown residue.
 
-## Who It Is For
+## Typical Use Cases
 
-`special` is for people already using coding agents in real repos where the
-early speed gains are starting to turn into breakage, review thrash, and
-confusion:
+### 1. Catching spec drift before it ships
 
-- what is actually implemented?
-- what is only planned?
-- does this test really support this claim?
-- does this code actually belong to the module that claims it?
+Suppose the repo still says this is live:
 
-This gets worse in brownfield codebases, but it is not limited to brownfield
-work. If your main problem is "AI dev starts fast, then quickly bogs down
-because you no longer fully trust what the agent is doing or what the repo
-actually implements," `special` is aimed at that problem.
+```text
+/**
+@spec APP.DELETE.REMOTE
+Delete immediately removes the remote file from storage.
+*/
+```
+
+But the only nearby test is really checking something weaker:
+
+```text
+/**
+@verifies APP.DELETE.REMOTE
+*/
+#[test]
+fn delete_returns_202() {
+    assert_eq!(delete("/files/123").status(), 202);
+}
+```
+
+That is the kind of drift that causes real damage: the claim says “immediately
+removes,” the test only proves “request accepted,” and an agent may happily
+refactor around the stronger sentence because it looks supported.
+
+Run:
+
+```sh
+special specs --unsupported --verbose
+special specs APP.DELETE.REMOTE --verbose
+```
+
+The first command catches live claims with no direct support at all. The second
+shows the exact verify body attached to one claim so you can judge whether the
+proof matches the sentence.
+
+Example shape when support is missing:
+
+```text
+$ special specs --unsupported --verbose
+
+APP.DELETE.REMOTE [unsupported]
+  text: Delete immediately removes the remote file from storage.
+  verifies: 0
+  attests: 0
+```
+
+Example shape when support exists but is too weak:
+
+```text
+$ special specs APP.DELETE.REMOTE --verbose
+
+APP.DELETE.REMOTE
+  text: Delete immediately removes the remote file from storage.
+  verify body:
+    #[test]
+    fn delete_returns_202() {
+        assert_eq!(delete("/files/123").status(), 202);
+    }
+```
+
+What you can do with that evidence:
+
+- downgrade, narrow, or directly verify unsupported live claims
+- replace weak “request accepted” or helper-only verifies with real
+  command/API-boundary proof
+- stop your agents and reviewers from treating “tagged somewhere” as the same
+  thing as “proved”
+
+### 2. Driving an architecture refactor from evidence instead of vibes
+
+Suppose the architecture still claims this:
+
+```text
+/**
+@module APP.PARSER
+Parses user query text into a structured search request.
+*/
+// @fileimplements APP.PARSER
+```
+
+But the file has slowly accumulated parsing, validation, normalization,
+projection, and a little bit of logging glue. Everyone knows it feels wrong,
+but “the parser is too big” is still too vague to refactor cleanly.
+
+Run:
+
+```sh
+special modules APP.PARSER --metrics --verbose
+```
+
+You get the declared boundary plus the evidence inside it: ownership
+granularity, item counts, coupling, complexity, and unreached items.
+
+Example shape:
+
+```text
+$ special modules APP.PARSER --metrics
+
+APP.PARSER
+  file-scoped implements: 1
+  item-scoped implements: 0
+  public items: 2
+  internal items: 18
+  module coupling: 6
+  unreached items: 5
+```
+
+That is not “a parser module with one rough edge.” That is a broad file-owned
+bucket with multiple concerns hiding inside it.
+
+What you can do with that evidence:
+
+- aim refactors at the actually overloaded boundary instead of the one people
+  complain about abstractly
+- tighten broad `@fileimplements` ownership into item-scoped ownership
+- split a suspected “parser” bucket into smaller parse, syntax, validation, or
+  projection layers based on visible evidence instead of instinct
+
+### 3. Finding repo-wide cleanup that architecture views miss
+
+Suppose the module tree looks fine, but the repo still has repeated code across
+multiple integration points:
+
+```text
+fn normalize_customer_record(...) -> ...
+fn normalize_customer_record(...) -> ...
+```
+
+Neither copy is “wrong” in its own module view, so the duplication never gets
+prioritized.
+
+Run:
+
+```sh
+special repo --verbose
+```
+
+You get repo-wide signals that are not naturally owned by one module.
+
+Example shape:
+
+```text
+$ special repo --verbose
+
+special repo
+repo-wide signals
+duplicate items: 2
+duplicate item: APP:billing/stripe.rs:normalize_customer_record [function; duplicate peers 1]
+duplicate item: APP:billing/paypal.rs:normalize_customer_record [function; duplicate peers 1]
+unowned unreached items: 0
+```
+
+What you can do with that evidence:
+
+- turn repeated logic into explicit cleanup candidates instead of vague smells
+- spot unowned implementation that is hiding outside the architecture tree
+- use experimental traceability to ask whether code is actually connected to a
+  spec path, even when no module view would have surfaced that question
+
+If you want to ask that last question directly:
+
+```sh
+special repo --experimental --verbose
+```
+
+Example shape:
+
+```text
+experimental traceability
+live spec item: APP:delete_remote_file
+unknown item: APP:legacy_cleanup_path
+```
+
+That does not prove “dead code” or “safe to delete.” It tells you which code
+the current analyzers can and cannot connect to a spec path.
 
 ## Quick Start
 
@@ -176,103 +328,7 @@ In practice:
 - use `special repo --verbose` when you want repo-wide cleanup or quality
   signals that do not belong to one module
 
-## Contract Views
-
-The core command is `special specs` (`special spec` also works as an alias).
-
-Useful variants:
-
-```sh
-special specs
-special specs --all
-special specs APP.CONFIG
-special specs APP.CONFIG.FILE --verbose
-special specs --unsupported
-special specs --json
-special specs --html
-special specs --html --verbose
-special specs APP.EXPORT --json --verbose
-```
-
-`special specs` gives you the current live contract by default. `--all` includes
-planned items. `--unsupported` shows live items with zero verifies and zero
-attests. Deprecated claims remain visible in the live view and surface their
-retirement metadata when present.
-
-Verbose spec views surface the attached `@verifies` and `@attests` bodies so a
-human or agent can inspect the support directly.
-
-Example shape:
-
-```text
-$ special specs --unsupported --verbose
-
-APP.EXPORT.CSV [unsupported]
-  text: CSV exports include a header row with the selected column names.
-  verifies: 0
-  attests: 0
-```
-
-## Architecture Views
-
-The core command is `special modules` (`special module` also works as an alias).
-
-Useful variants:
-
-```sh
-special modules
-special modules --all
-special modules APP.PARSER --verbose
-special modules --metrics
-special modules --metrics --verbose
-special repo
-special repo --verbose
-special repo --experimental
-special modules --json
-special modules --json --metrics
-special modules --html --verbose
-```
-
-`special modules` materializes the declared architecture tree.
-
-`special modules --metrics` adds architecture-as-implemented evidence, including:
-
-- module ownership granularity
-- per-module implementation summaries
-- public and internal item counts when a built-in analyzer can extract them
-- dependency and coupling evidence when a built-in analyzer can resolve them
-- quality evidence summaries when a built-in analyzer can extract them honestly
-- unreached-code indicators within owned implementation when a built-in analyzer
-  can identify them honestly
-
-`file-scoped implements` and `item-scoped implements` are ownership-granularity
-signals, not file-coverage grades. A module can be honestly owned at file scope
-while still being coarser than item-scoped ownership.
-
-`special repo` surfaces repo-wide quality signals that are not tied to one
-architecture module, including:
-
-- repo-wide duplicate-logic signals across owned implementation
-- unowned unreached-code indicators outside any declared module
-- experimental implementation traceability when requested with `--experimental`
-
-Use `special repo --verbose` when you want fuller repo-wide drilldown, including
-unowned unreached item locations and complete duplicate-item clusters when the
-built-in analyzers can identify them honestly.
-
-Example shape:
-
-```text
-$ special modules APP.PARSER --metrics
-
-APP.PARSER
-  file-scoped implements: 1
-  item-scoped implements: 3
-  public items: 2
-  internal items: 7
-  module coupling: 2
-  unreached items: 1
-```
+## Command Surface
 
 Today the built-in implementation analysis is strongest for owned Rust code,
 and it also surfaces first-pass implementation evidence for owned TypeScript
@@ -306,6 +362,28 @@ For Go modules, `--metrics` can surface:
 `special repo --experimental` also surfaces early implementation traceability
 indicators when a built-in analyzer can connect owned code through tests to
 declared specs.
+
+Useful command shapes:
+
+```sh
+special specs
+special specs --all
+special specs APP.CONFIG --verbose
+special specs --unsupported
+special specs --json
+
+special modules
+special modules --all
+special modules APP.PARSER --verbose
+special modules --metrics
+special modules --metrics --verbose
+special modules --json --metrics
+
+special repo
+special repo --verbose
+special repo --experimental
+special repo --json
+```
 
 Example shape:
 
@@ -370,6 +448,7 @@ For local repo development, use the tool-managed commands:
 mise exec -- cargo test
 mise exec -- cargo run -- lint
 mise exec -- cargo run -- specs --all
+mise exec -- cargo run -- repo
 mise exec -- cargo run -- modules --metrics
 ```
 
