@@ -1,0 +1,17 @@
+<section class="node">
+  <div class="node-header">
+    <span class="node-id">repo-wide signals</span>
+  </div>
+  <div class="meta counts">
+    {{ counts_html|safe }}
+  </div>
+  {{ explanations_html|safe }}
+  {% if verbose %}
+  {% for item in unowned_items %}
+  <div class="meta">unowned item {{ item }}</div>
+  {% endfor %}
+  {% for item in duplicate_items %}
+  <div class="meta">duplicate item {{ item }}</div>
+  {% endfor %}
+  {% endif %}
+</section>

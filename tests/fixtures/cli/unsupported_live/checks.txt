@@ -1,0 +1,2 @@
+// @verifies DEMO
+fn verifies_demo_root() {}

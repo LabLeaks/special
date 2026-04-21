@@ -1,0 +1,16 @@
+{{ intro[0] }}
+
+{{ intro[1] }}
+
+Command shapes:
+{% for (command, description) in command_shapes %}  {{ command }}
+    {{ description }}
+{% endfor %}
+
+Available skill ids:
+{% for skill in skills %}  {{ skill.id }}  {{ skill.summary }}
+{% endfor %}
+
+Install destinations:
+{% for (name, description) in destinations %}  {{ name }}  {{ description }}
+{% endfor %}

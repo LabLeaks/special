@@ -1,0 +1,53 @@
+# Changelog
+
+## 0.6.0 - 2026-04-20
+
+- Reframed the product around four stable command surfaces: `special`, `special specs`, `special arch`, and `special health`, with a consistent `--metrics` / `--verbose` ladder and a compact root overview.
+- Promoted implementation traceability into the default `special health` surface, including built-in Rust, TypeScript, Go, Python, and TSX/React-style analysis under the compile-time language-pack registry.
+- Added shared parsed and analysis caching across overview, specs, architecture, and health, including lock recovery, contention hardening, and real-time cache-wait status so concurrent agent runs explain when they are reusing another run’s analysis.
+- Tightened architecture ownership and self-hosting boundaries across the repo, including summary-first `special arch --metrics`, explicit ownership for previously unowned implementation files, and removal of legacy health heuristics that were dominated by traceability.
+- Updated bundled skills, README guidance, release automation, and self-hosted contracts to match the shipped command model and current/planned terminology.
+
+## 0.5.0 - 2026-04-17
+
+- Added lightweight claim retirement metadata with `@deprecated <release>`, surfaced across `special specs` text, JSON, and HTML views without changing live-claim support semantics.
+- Added a shared cross-language syntax and analysis substrate, with shipped built-in module metrics for owned Rust, TypeScript, and Go code on the same provider seam.
+- Tightened `special modules --metrics` around annotated architecture: module ownership granularity, implementation summaries, dependencies, coupling, quality evidence, and conservative unreached-code indicators now stay on the module side, while repo-wide quality signals moved out.
+- Added `special repo` as the repo-wide quality surface, including duplication and unowned unreached-code signals, with `--verbose` for fuller drilldown and `--experimental` for early implementation traceability.
+- Landed an initial experimental impl-to-test-to-spec traceability indicator behind `special repo --experimental`, while keeping deeper cross-language traceability hardening planned for later releases.
+- Hardened release and parser correctness around the new surfaces, including stricter Homebrew formula verification and consistent planned/deprecated lifecycle validation across block and markdown parsing.
+
+## 0.4.1 - 2026-04-16
+
+- Added `@fileattests` as the file-scoped attestation companion to `@attests`, so long review artifacts can attach predictably without item-scope ambiguity.
+- Tightened the self-hosted architecture around the metrics POC by splitting the extractor, markdown declaration parsing, architecture declaration helpers, and skill-install transaction flow into clearer module boundaries.
+- Refreshed the Homebrew install support record for the current release line and relaxed help-surface verifies so they prove semantic command/help contracts instead of incidental prose.
+- Hardened the reusable spec and architecture audit skills so delegated fan-out reviews explicitly use `special spec ... --verbose` and `special modules ... --verbose/--metrics --verbose` as their primary evidence source.
+
+## 0.4.0 - 2026-04-15
+
+- Added `special modules --metrics` as a Rust-first architecture-as-implemented view, including ownership coverage, complexity, dependency and coupling evidence, quality signals, and item-level outlier surfacing inside claimed module boundaries.
+- Added explicit file-scoped architecture and verification annotations with `@fileimplements` and `@fileverifies`, which makes ownership and support attachment more predictable across languages and removes brittle header-position inference.
+- Generalized annotation discovery with shared ignore handling, default `.gitignore` / `.jjignore` respect, markdown heading annotations as a first-class declaration surface, and no reliance on a privileged architecture or spec directory.
+- Pushed self-hosted contracts much closer to their owning boundaries, leaving only minimal central structural/planned residue in `specs/root.md`.
+- Refactored major internal hotspots uncovered by the new metrics, including parser block handling and module-analysis rendering, around clearer module boundaries and a shared projection/viewmodel layer for text and HTML output.
+- Added top-level `special help`, `special -h`, `special -v`, and `special --version`.
+- Upgraded local release publication so `scripts/tag-release.py` runs an explicit prerelease checklist before pushing `main`, tagging, verifying the GitHub release, and updating Homebrew.
+
+### Migration Notes
+
+- If a file-level ownership marker previously used `@implements`, change it to `@fileimplements`. Plain `@implements` is now item-scoped only.
+- If a file-level verification marker previously used `@verifies`, change it to `@fileverifies`. Plain `@verifies` is now item-scoped only.
+- If you used fake source files as centralized contract containers, prefer moving current claims into the owning source or test files. Use markdown heading annotations only for real declarative residue that has no honest code home yet.
+- Do not rely on a privileged architecture/spec directory. Discovery is now shared across the project root and respects `special.toml` ignores plus VCS ignore files.
+
+## 0.3.0 - 2026-04-14
+
+- Added plural primary command surfaces: `special specs` and `special modules`, while keeping singular aliases for compatibility.
+- Added architecture annotations and materialization: `@module`, `@area`, and `@implements`, plus `special modules` text/JSON/HTML/verbose views and matching lint support.
+- Moved toward distributed authoring by supporting source-local module declarations and implementation ownership markers, with `ARCHITECTURE.md` reduced to project-specific rationale and cross-cutting structure.
+- Added versioned `@planned` parsing rules with explicit `special.toml` `version` support, legacy compatibility fallback with warnings, and optional planned release metadata surfaced in spec and module views.
+- Reworked `special skills` so `special skills` prints overview help, `special skills SKILL_ID` prints a specific skill to stdout, and `special skills install [SKILL_ID]` supports project/global/custom destinations, overwrite handling, and non-interactive destination flags.
+- Split product-contract validation from architecture validation by shipping a dedicated `validate-architecture-implementation` skill alongside the existing product-spec workflow skills.
+- Added a local-only Rust release review and tagging flow in `scripts/tag-release.py`, including diff-scoped review by default, `--fast`/`--smart` model selection, and an explicit `--skip-review` escape hatch for local release use.
+- Tightened release, parser, and install robustness across the repo, including exact distribution asset validation, real TOML parsing for `special.toml`, stricter reserved-tag handling, directory-only config roots, and safer staged skill installation.

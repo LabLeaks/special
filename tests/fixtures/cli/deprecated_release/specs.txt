@@ -1,0 +1,7 @@
+/**
+@spec DEMO
+Demo root.
+
+@spec DEMO.DEPRECATED @deprecated 0.6.0
+Deprecated child for a target release.
+*/

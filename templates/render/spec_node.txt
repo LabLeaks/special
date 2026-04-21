@@ -1,0 +1,5 @@
+{{ self.indent() }}{{ node.id }}{% if self.is_group() %} [group]{% endif %}{% if node.is_planned() %} [{{ self.planned_badge() }}]{% endif %}{% if node.is_deprecated() %} [{{ self.deprecated_badge() }}]{% endif %}{% if node.is_unverified() %} [unverified]{% endif %}
+{% if !node.text.is_empty() %}{{ self.indent() }}  {{ node.text }}
+{% endif %}{{ self.indent() }}  verifies: {{ node.verifies.len() }}
+{{ self.indent() }}  attests: {{ node.attests.len() }}
+{{ self.verbose_section() }}{{ self.children_section() }}

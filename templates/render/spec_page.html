@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>special specs</title>
+  <style>{{ style }}</style>
+</head>
+<body>
+  <main>
+    <h1>special specs</h1>
+    <p class="lede">Materialized spec view for the current repository.</p>
+    {{ metrics_html|safe }}
+    <ul class="tree">
+      {{ self.tree_html()|safe }}
+    </ul>
+  </main>
+</body>
+</html>

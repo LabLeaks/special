@@ -1,0 +1,2 @@
+{% for diagnostic in report.diagnostics %}{{ diagnostic.path.display() }}:{{ diagnostic.line }}: {{ self.severity_label(diagnostic.severity) }}: {{ diagnostic.message }}
+{% endfor %}

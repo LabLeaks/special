@@ -1,0 +1,8 @@
+/target
+special-spec.html
+.agents/skills/
+.projector/
+__pycache__/
+*.pyc
+AGENTS.md
+_project/
