@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0 - 2026-04-23
+
+- Landed a shared projected-contract proof architecture across the shipped Rust,
+  TypeScript, and Go language packs, including a normalized proof object in
+  core, pack-local adapters, a top-level proof-boundary harness, and Lean
+  sidecar theorem files that now speak to the same public semantic kernel.
+- Hardened the shipped backward-trace surfaces around exact scoped closure,
+  contract-only tool discovery, fail-closed cache/tool/runtime behavior, and
+  cleaner repo-level `special arch --metrics` coupling summaries.
+- Tightened internal structure around the new proof-heavy surfaces, including
+  owned proof-boundary modules, refactored TypeScript test helpers, and a
+  durable native review wrapper for full-system `codex exec review` passes.
+- Removed the Python language pack from the shipped built-in registry for this
+  release line while preserving the in-progress implementation in-tree as
+  dormant work to reactivate once its bridge, toolchain contract, and honesty
+  story are hardened enough to ship.
+
 ## 0.6.0 - 2026-04-20
 
 - Reframed the product around four stable command surfaces: `special`, `special specs`, `special arch`, and `special health`, with a consistent `--metrics` / `--verbose` ladder and a compact root overview.

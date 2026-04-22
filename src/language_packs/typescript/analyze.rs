@@ -4,9 +4,11 @@ Owns the built-in TypeScript implementation analysis provider, including pack-sp
 */
 // @fileimplements SPECIAL.LANGUAGE_PACKS.TYPESCRIPT.ANALYZE
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Result, anyhow};
@@ -18,19 +20,28 @@ use crate::model::{
     ModuleMetricsSummary, ParsedArchitecture, ParsedRepo,
 };
 use crate::syntax::{ParsedSourceGraph, SourceCall, parse_source_graph};
+use crate::config::{ProjectToolchain, supported_project_toolchain_contracts};
 
 use crate::modules::analyze::source_item_signals::summarize_source_item_signals;
 use crate::modules::analyze::traceability_core::{
     TraceGraph, TraceabilityAnalysis, TraceabilityInputs, TraceabilityLanguagePack,
-    TraceabilityOwnedItem, build_root_supports, build_traceability_analysis,
-    merge_trace_graph_edges, owned_module_ids_for_path, summarize_module_traceability,
-    summarize_repo_traceability as summarize_shared_repo_traceability,
+    TraceabilityItemSupport, TraceabilityOwnedItem, build_root_supports,
+    build_traceability_analysis, merge_trace_graph_edges, owned_module_ids_for_path,
+    summarize_module_traceability, summarize_repo_traceability as summarize_shared_repo_traceability,
 };
 use crate::modules::analyze::{
     FileOwnership, ModuleCouplingInput, ProviderModuleAnalysis, build_dependency_summary,
     emit_analysis_status,
     read_owned_file_text, visit_owned_texts,
 };
+
+#[path = "analyze/boundary.rs"]
+mod boundary;
+#[cfg(test)]
+#[path = "analyze/tests.rs"]
+mod scoped_tests;
+
+use boundary::{derive_projected_traceability_boundary, derive_scoped_traceability_boundary};
 
 pub(crate) fn analyze_module(
     root: &Path,
@@ -101,16 +112,14 @@ pub(crate) fn build_repo_analysis_context(
     include_traceability: bool,
 ) -> TypeScriptRepoAnalysisContext {
     let traceability_pack = TypeScriptTraceabilityPack;
-    let traceability_unavailable_reason = traceability_pack
-        .backward_trace_availability()
-        .unavailable_reason()
-        .map(ToString::to_string);
+    let traceability_unavailable_reason = typescript_backward_trace_unavailable_reason(root);
     let (traceability, traceability_unavailable_reason) = if include_traceability
         && traceability_unavailable_reason.is_none()
     {
         match build_traceability_analysis_for_typescript(
             root,
             source_files,
+            _scoped_source_files,
             traceability_graph_facts,
             parsed_repo,
             parsed_architecture,
@@ -151,13 +160,9 @@ impl TraceabilityLanguagePack for TypeScriptTraceabilityPack {
     fn backward_trace_availability(
         &self,
     ) -> crate::modules::analyze::traceability_core::BackwardTraceAvailability {
-        if typescript_runtime().is_some() {
-            crate::modules::analyze::traceability_core::BackwardTraceAvailability::default()
-        } else {
-            crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
-                "TypeScript backward trace is unavailable because the required Node runtime is not installed through `mise`",
-            )
-        }
+        crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
+            "TypeScript backward trace availability must be resolved from the analyzed project root",
+        )
     }
 
     fn owned_items_for_implementations(
@@ -173,18 +178,44 @@ impl TraceabilityLanguagePack for TypeScriptTraceabilityPack {
 fn build_traceability_analysis_for_typescript(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: Option<&[PathBuf]>,
     traceability_graph_facts: Option<&[u8]>,
     parsed_repo: &ParsedRepo,
     parsed_architecture: &ParsedArchitecture,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<TraceabilityAnalysis> {
+    let inputs = build_traceability_inputs_for_typescript(
+        root,
+        source_files,
+        traceability_graph_facts,
+        parsed_repo,
+        parsed_architecture,
+        file_ownership,
+    )?;
+    Ok(build_traceability_analysis(
+        narrow_scoped_traceability_inputs_for_typescript(source_files, scoped_source_files, inputs),
+    ))
+}
+
+fn build_traceability_inputs_for_typescript(
+    root: &Path,
+    source_files: &[PathBuf],
+    traceability_graph_facts: Option<&[u8]>,
+    parsed_repo: &ParsedRepo,
+    parsed_architecture: &ParsedArchitecture,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+) -> Result<TraceabilityInputs> {
     let (source_graphs, tool_call_edges) =
-        decode_traceability_graph_facts(traceability_graph_facts).unwrap_or_else(|| {
-            let source_graphs = parse_typescript_source_graphs(root, source_files);
-            let tool_call_edges = build_tool_call_edges(root, &source_graphs)?;
-            Ok((source_graphs, tool_call_edges))
-        })?;
+        match decode_traceability_graph_facts(traceability_graph_facts) {
+            Some(Ok(decoded)) => decoded,
+            None | Some(Err(_)) => {
+                let source_graphs = parse_typescript_source_graphs(root, source_files);
+                let tool_call_edges = build_tool_call_edges(root, &source_graphs)?;
+                (source_graphs, tool_call_edges)
+            }
+        };
     let repo_items = collect_repo_items(&source_graphs, file_ownership);
+    let context_items = collect_context_items(&source_graphs, file_ownership);
     let mut graph = TraceGraph {
         edges: build_parser_call_edges(&source_graphs),
         root_supports: BTreeMap::new(),
@@ -195,37 +226,148 @@ fn build_traceability_analysis_for_typescript(
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
     let _ = parsed_architecture;
-    Ok(build_traceability_analysis(TraceabilityInputs {
+    Ok(TraceabilityInputs {
         repo_items,
+        context_items,
         graph,
-    }))
+    })
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TypeScriptTraceabilityScopeFacts {
+    pub(crate) adjacency: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    source_graphs: BTreeMap<PathBuf, CachedParsedSourceGraph>,
+    tool_call_edges: BTreeMap<String, BTreeSet<String>>,
+    root_supports: BTreeMap<String, CachedTraceabilityItemSupport>,
 }
 
 pub(crate) fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
 ) -> Result<Vec<u8>> {
+    let source_graphs = parse_typescript_source_graphs(root, source_files);
+    let tool_call_edges = build_tool_call_edges(root, &source_graphs)?;
+    let root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
+        parse_source_graph(path, body)
+            .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
+    });
     let facts = TypeScriptTraceabilityScopeFacts {
         adjacency: build_tool_module_graph(root, source_files)?,
+        source_graphs: source_graphs
+            .iter()
+            .map(|(path, graph)| (path.clone(), CachedParsedSourceGraph::from_parsed(graph)))
+            .collect(),
+        tool_call_edges,
+        root_supports: root_supports
+            .into_iter()
+            .map(|(stable_id, support)| (stable_id, CachedTraceabilityItemSupport::from_runtime(support)))
+            .collect(),
     };
     Ok(serde_json::to_vec(&facts)?)
+}
+
+fn narrow_scoped_traceability_inputs_for_typescript(
+    source_files: &[PathBuf],
+    scoped_source_files: Option<&[PathBuf]>,
+    inputs: TraceabilityInputs,
+) -> TraceabilityInputs {
+    let Some(scoped_source_files) = scoped_source_files else {
+        return inputs;
+    };
+    if scoped_source_files.is_empty() {
+        return inputs;
+    }
+
+    let boundary = derive_projected_traceability_boundary(source_files, scoped_source_files);
+    let reference = boundary.reference(source_files, &inputs);
+    let projected_item_ids = &reference.contract.projected_item_ids;
+    let preserved_item_ids = &reference.contract.preserved_item_ids;
+    let repo_items = inputs
+        .repo_items
+        .into_iter()
+        .filter(|item| projected_item_ids.contains(&item.stable_id))
+        .collect::<Vec<_>>();
+    let context_items = inputs
+        .context_items
+        .into_iter()
+        .filter(|item| preserved_item_ids.contains(&item.stable_id))
+        .collect::<Vec<_>>();
+    let graph = TraceGraph {
+        edges: inputs
+            .graph
+            .edges
+            .into_iter()
+            .filter(|(caller, _)| preserved_item_ids.contains(caller))
+            .map(|(caller, callees)| {
+                (
+                    caller,
+                    callees
+                        .into_iter()
+                        .filter(|callee| preserved_item_ids.contains(callee))
+                        .collect(),
+                )
+            })
+            .collect(),
+        root_supports: inputs
+            .graph
+            .root_supports
+            .into_iter()
+            .filter(|(item_id, _)| preserved_item_ids.contains(item_id))
+            .collect(),
+    };
+
+    TraceabilityInputs {
+        repo_items,
+        context_items,
+        graph,
+    }
 }
 
 pub(crate) fn expand_traceability_closure_from_facts(
     source_files: &[PathBuf],
     scoped_source_files: &[PathBuf],
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
     facts: &[u8],
 ) -> Result<Vec<PathBuf>> {
-    let seed_files = scoped_source_files.to_vec();
-    if seed_files.is_empty() {
+    if scoped_source_files.is_empty() {
         return Ok(source_files.to_vec());
     }
     let facts: TypeScriptTraceabilityScopeFacts = serde_json::from_slice(facts)?;
-    let closure_files = expand_file_closure(source_files, &seed_files, &facts.adjacency);
+    let boundary =
+        derive_scoped_traceability_boundary(source_files, scoped_source_files, &facts.adjacency);
+    let source_graphs = facts
+        .source_graphs
+        .iter()
+        .map(|(path, graph)| (path.clone(), graph.clone().into_parsed()))
+        .collect::<BTreeMap<_, _>>();
+    let repo_items = collect_repo_items(&source_graphs, file_ownership);
+    let context_items = collect_context_items(&source_graphs, file_ownership);
+    let mut graph = TraceGraph {
+        edges: build_parser_call_edges(&source_graphs),
+        root_supports: facts
+            .root_supports
+            .into_iter()
+            .map(|(stable_id, support)| (stable_id, support.into_runtime()))
+            .collect(),
+    };
+    merge_trace_graph_edges(&mut graph.edges, facts.tool_call_edges);
+    let full_inputs = TraceabilityInputs {
+        repo_items,
+        context_items,
+        graph,
+    };
+    // TypeScript scope facts now carry enough cached graph material to rebuild
+    // the exact scoped contract at live narrowing time rather than widening to
+    // the broad working file closure.
+    let working_contract = boundary.working_contract();
+    let exact_contract = boundary.exact_contract(source_files, &full_inputs);
+    let closure_files = exact_contract.preserved_file_closure;
     emit_analysis_status(&format!(
-        "typescript scoped traceability closure covers {} of {} file(s)",
+        "typescript scoped exact traceability closure covers {} of {} file(s) (working closure {})",
         closure_files.len(),
-        source_files.len()
+        source_files.len(),
+        working_contract.preserved_file_closure.len()
     ));
     Ok(closure_files)
 }
@@ -360,6 +502,9 @@ fn resolve_internal_import(root: &Path, source_path: &Path, target: &str) -> Opt
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
@@ -383,15 +528,6 @@ struct SourceCallableItem {
     start_line: usize,
     end_line: usize,
     start_column: usize,
-}
-
-#[derive(Deserialize)]
-struct MiseNodeInstall {
-    version: String,
-    install_path: PathBuf,
-    installed: bool,
-    #[serde(default)]
-    active: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -444,6 +580,37 @@ fn collect_repo_items(
                     module_ids: module_ids.clone(),
                     mediated_reason: None,
                 })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    items
+}
+
+fn collect_context_items(
+    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+) -> Vec<TraceabilityOwnedItem> {
+    let mut items = source_graphs
+        .iter()
+        .flat_map(|(path, graph)| {
+            let module_ids = owned_module_ids_for_path(file_ownership, path);
+            let test_file = is_test_file_path(path);
+            graph.items.iter().map(move |item| TraceabilityOwnedItem {
+                stable_id: item.stable_id.clone(),
+                name: item.name.clone(),
+                kind: source_item_kind(item.kind),
+                path: path.clone(),
+                public: item.public,
+                review_surface: is_review_surface(item.public, &item.name, item.kind, test_file),
+                test_file,
+                module_ids: module_ids.clone(),
+                mediated_reason: None,
+            })
         })
         .collect::<Vec<_>>();
     items.sort_by(|left, right| {
@@ -536,7 +703,7 @@ fn build_tool_call_edges(
         return Ok(BTreeMap::new());
     }
 
-    let Some((node_binary, node_modules_root)) = typescript_runtime() else {
+    let Some(runtime) = typescript_runtime(root) else {
         return Ok(BTreeMap::new());
     };
     let Some(script) = write_embedded_tool_script(
@@ -568,11 +735,11 @@ fn build_tool_call_edges(
 
     let json_input = serde_json::to_vec(&input)?;
 
-    let mut child = Command::new(node_binary)
-        .args([
-            script.path().to_string_lossy().as_ref(),
-            node_modules_root.to_string_lossy().as_ref(),
-        ])
+    let mut child = runtime
+        .toolchain
+        .command("node")
+        .arg(script.path().to_string_lossy().as_ref())
+        .arg(runtime.typescript_entry.to_string_lossy().as_ref())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -631,7 +798,7 @@ fn build_tool_module_graph(
         return Ok(BTreeMap::new());
     }
 
-    let Some((node_binary, node_modules_root)) = typescript_runtime() else {
+    let Some(runtime) = typescript_runtime(root) else {
         return Ok(BTreeMap::new());
     };
     let Some(script) = write_embedded_tool_script(
@@ -661,11 +828,11 @@ fn build_tool_module_graph(
     };
     let json_input = serde_json::to_vec(&input)?;
 
-    let mut child = Command::new(node_binary)
-        .args([
-            script.path().to_string_lossy().as_ref(),
-            node_modules_root.to_string_lossy().as_ref(),
-        ])
+    let mut child = runtime
+        .toolchain
+        .command("node")
+        .arg(script.path().to_string_lossy().as_ref())
+        .arg(runtime.typescript_entry.to_string_lossy().as_ref())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -711,12 +878,7 @@ fn build_tool_module_graph(
     Ok(graph)
 }
 
-#[derive(Serialize, Deserialize)]
-struct TypeScriptTraceabilityScopeFacts {
-    adjacency: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct TypeScriptTraceabilityGraphFacts {
     source_graphs: BTreeMap<PathBuf, CachedParsedSourceGraph>,
     tool_call_edges: BTreeMap<String, BTreeSet<String>>,
@@ -747,7 +909,7 @@ fn decode_traceability_graph_facts(
     )
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedParsedSourceGraph {
     items: Vec<CachedSourceItem>,
 }
@@ -771,7 +933,7 @@ impl CachedParsedSourceGraph {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceItem {
     source_path: String,
     stable_id: String,
@@ -834,7 +996,7 @@ impl CachedSourceItem {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 enum CachedSourceItemKind {
     Function,
     Method,
@@ -856,7 +1018,7 @@ impl CachedSourceItemKind {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceSpan {
     start_line: usize,
     end_line: usize,
@@ -890,7 +1052,7 @@ impl CachedSourceSpan {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceCall {
     name: String,
     qualifier: Option<String>,
@@ -918,7 +1080,7 @@ impl CachedSourceCall {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 enum CachedCallSyntaxKind {
     Identifier,
     ScopedIdentifier,
@@ -943,32 +1105,38 @@ impl CachedCallSyntaxKind {
     }
 }
 
-fn expand_file_closure(
-    candidate_files: &[PathBuf],
-    seed_files: &[PathBuf],
-    adjacency: &BTreeMap<PathBuf, BTreeSet<PathBuf>>,
-) -> Vec<PathBuf> {
-    let candidate_set = candidate_files.iter().cloned().collect::<BTreeSet<_>>();
-    let mut closure = seed_files.iter().cloned().collect::<BTreeSet<_>>();
-    let mut frontier = seed_files.to_vec();
+#[derive(Clone, Serialize, Deserialize)]
+struct CachedTraceabilityItemSupport {
+    name: String,
+    has_item_scoped_support: bool,
+    has_file_scoped_support: bool,
+    current_specs: BTreeSet<String>,
+    planned_specs: BTreeSet<String>,
+    deprecated_specs: BTreeSet<String>,
+}
 
-    while let Some(file) = frontier.pop() {
-        let Some(neighbors) = adjacency.get(&file) else {
-            continue;
-        };
-        for neighbor in neighbors {
-            if !candidate_set.contains(neighbor) || !closure.insert(neighbor.clone()) {
-                continue;
-            }
-            frontier.push(neighbor.clone());
+impl CachedTraceabilityItemSupport {
+    fn from_runtime(support: TraceabilityItemSupport) -> Self {
+        Self {
+            name: support.name,
+            has_item_scoped_support: support.has_item_scoped_support,
+            has_file_scoped_support: support.has_file_scoped_support,
+            current_specs: support.current_specs,
+            planned_specs: support.planned_specs,
+            deprecated_specs: support.deprecated_specs,
         }
     }
 
-    candidate_files
-        .iter()
-        .filter(|path| closure.contains(*path))
-        .cloned()
-        .collect()
+    fn into_runtime(self) -> TraceabilityItemSupport {
+        TraceabilityItemSupport {
+            name: self.name,
+            has_item_scoped_support: self.has_item_scoped_support,
+            has_file_scoped_support: self.has_file_scoped_support,
+            current_specs: self.current_specs,
+            planned_specs: self.planned_specs,
+            deprecated_specs: self.deprecated_specs,
+        }
+    }
 }
 
 fn collect_callable_items(
@@ -1078,48 +1246,110 @@ fn source_item_kind(kind: crate::syntax::SourceItemKind) -> ModuleItemKind {
     }
 }
 
-fn typescript_runtime() -> Option<(PathBuf, PathBuf)> {
-    let output = Command::new("mise")
-        .args(["ls", "--json", "node"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
+struct TypeScriptRuntime {
+    toolchain: ProjectToolchain,
+    typescript_entry: PathBuf,
+}
+
+fn typescript_runtime(root: &Path) -> Option<TypeScriptRuntime> {
+    let toolchain = ProjectToolchain::discover(root).ok().flatten()?;
+    let node_ok = toolchain.command("node").arg("--version").output().ok()?;
+    if !node_ok.status.success() {
         return None;
     }
-    let installs: Vec<MiseNodeInstall> = serde_json::from_slice(&output.stdout).ok()?;
-    let install = installs
-        .into_iter()
-        .filter(|install| install.installed)
-        .max_by(|left, right| {
-            left.active
-                .cmp(&right.active)
-                .then_with(|| compare_semver(&left.version, &right.version))
-        })?;
-    let node_binary = install.install_path.join("bin/node");
-    let module_root = install.install_path.join("lib/node_modules");
-    (node_binary.exists() && module_root.exists()).then_some((node_binary, module_root))
+    let typescript_entry = resolve_typescript_entry(root, &toolchain)?;
+    typescript_entry.exists().then_some(TypeScriptRuntime {
+        toolchain,
+        typescript_entry,
+    })
 }
 
-pub(crate) fn analysis_environment_fingerprint() -> String {
-    typescript_runtime()
-        .map(|(node_binary, node_modules_root)| {
+fn resolve_typescript_entry(root: &Path, toolchain: &ProjectToolchain) -> Option<PathBuf> {
+    let output = toolchain
+        .command("node")
+        .args([
+            "-e",
+            "process.stdout.write(require.resolve('typescript'))",
+        ])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let resolved = String::from_utf8(output.stdout).ok()?;
+        let path = PathBuf::from(resolved.trim());
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let npm_root = toolchain
+        .command("npm")
+        .args(["root", "-g"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !npm_root.status.success() {
+        return None;
+    }
+    let global_root = PathBuf::from(String::from_utf8(npm_root.stdout).ok()?.trim());
+    let global_entry = global_root.join("typescript/lib/typescript.js");
+    global_entry.exists().then_some(global_entry)
+}
+
+fn typescript_backward_trace_unavailable_reason(root: &Path) -> Option<String> {
+    typescript_runtime(root).is_none().then(|| {
+        format!(
+            "TypeScript backward trace is unavailable because the analyzed project does not declare a supported {} contract with a resolvable `typescript` package",
+            supported_project_toolchain_contracts()
+        )
+    })
+}
+
+pub(crate) fn analysis_environment_fingerprint(root: &Path) -> String {
+    typescript_runtime(root)
+        .map(|runtime| {
+            let node = tool_version_fingerprint(&runtime.toolchain, "node", &["--version"]);
+            let typescript = typescript_entry_fingerprint(&runtime.typescript_entry);
             format!(
-                "node={};modules={}",
-                node_binary.display(),
-                node_modules_root.display()
+                "tool_manager={};node={};typescript={}",
+                runtime.toolchain.launcher_label("node"),
+                node,
+                typescript
             )
         })
-        .unwrap_or_else(|| "node=unavailable".to_string())
+        .unwrap_or_else(|| "project_toolchain_or_typescript=unavailable".to_string())
 }
 
-fn compare_semver(left: &str, right: &str) -> std::cmp::Ordering {
-    let parse = |value: &str| {
-        value
-            .split('.')
-            .map(|part| part.parse::<u64>().unwrap_or(0))
-            .collect::<Vec<_>>()
-    };
-    parse(left).cmp(&parse(right))
+fn tool_version_fingerprint(
+    toolchain: &ProjectToolchain,
+    tool: &str,
+    version_args: &[&str],
+) -> String {
+    let available = toolchain.tool_available(tool, version_args);
+    let output = toolchain.command(tool).args(version_args).output();
+    output
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let version = if !stdout.is_empty() {
+                stdout
+            } else if !stderr.is_empty() {
+                stderr
+            } else {
+                "available".to_string()
+            };
+            version.replace(['\n', '\r'], " ")
+        })
+        .unwrap_or_else(|| available.to_string())
+}
+
+fn typescript_entry_fingerprint(entry: &Path) -> String {
+    let bytes = fs::read(entry).unwrap_or_default();
+    let mut hasher = DefaultHasher::new();
+    entry.hash(&mut hasher);
+    bytes.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 static EMBEDDED_TOOL_SCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1200,8 +1430,9 @@ struct ToolFileEdge {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::write_embedded_tool_script;
+    use super::{typescript_entry_fingerprint, write_embedded_tool_script};
 
     #[test]
     fn embedded_tool_script_uses_unique_paths_and_cleans_up_on_drop() {
@@ -1229,5 +1460,23 @@ mod tests {
 
         drop(second);
         assert!(!second_path.exists());
+    }
+
+    #[test]
+    fn typescript_entry_fingerprint_changes_with_file_contents() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("special-typescript-entry-{unique}.js"));
+        fs::write(&path, "export const version = 'a';").expect("fixture should be written");
+        let first = typescript_entry_fingerprint(&path);
+
+        fs::write(&path, "export const version = 'b';").expect("fixture should be rewritten");
+        let second = typescript_entry_fingerprint(&path);
+
+        assert_ne!(first, second);
+
+        let _ = fs::remove_file(&path);
     }
 }

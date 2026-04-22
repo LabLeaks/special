@@ -89,26 +89,15 @@ fn is_marker_present(path: PathBuf) -> bool {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::resolve_project_root;
     use crate::config::RootSource;
-
-    fn temp_dir(prefix: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should move forward")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("{prefix}-{unique}"));
-        fs::create_dir_all(&path).expect("temp dir should be created");
-        path.canonicalize().expect("temp dir should canonicalize")
-    }
+    use crate::config::test_support::temp_config_test_dir;
 
     #[test]
     // @verifies SPECIAL.CONFIG.SPECIAL_TOML
     fn prefers_special_toml_as_project_anchor() {
-        let root = temp_dir("special-config-special-toml");
+        let root = temp_config_test_dir("special-config-special-toml");
         let nested = root.join("a/b/c");
         fs::create_dir_all(&nested).expect("nested dir should be created");
         fs::write(root.join("special.toml"), "").expect("special.toml should be created");
@@ -125,7 +114,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.SPECIAL_TOML.EXPLICIT_ROOT
     fn uses_root_from_special_toml() {
-        let repo_root = temp_dir("special-config-explicit-root");
+        let repo_root = temp_config_test_dir("special-config-explicit-root");
         let configured_root = repo_root.join("workspace/specs");
         let nested = repo_root.join("workspace/specs/a/b");
         fs::create_dir_all(&nested).expect("nested dir should be created");
@@ -151,7 +140,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.SPECIAL_TOML.ROOT_MUST_BE_DIRECTORY
     fn rejects_file_root_from_special_toml() {
-        let repo_root = temp_dir("special-config-file-root");
+        let repo_root = temp_config_test_dir("special-config-file-root");
         let nested = repo_root.join("workspace/specs");
         fs::create_dir_all(&nested).expect("nested dir should be created");
         fs::write(repo_root.join("workspace/specs.rs"), "// fixture")
@@ -175,7 +164,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.SPECIAL_TOML.OPTIONAL
     fn does_not_require_special_toml_for_resolution() {
-        let root = temp_dir("special-config-optional");
+        let root = temp_config_test_dir("special-config-optional");
 
         let resolved = resolve_project_root(&root).expect("root should resolve");
 
@@ -187,7 +176,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.SPECIAL_TOML.SUPPRESSES_IMPLICIT_ROOT_WARNING
     fn does_not_warn_when_special_toml_is_present() {
-        let root = temp_dir("special-config-no-warning");
+        let root = temp_config_test_dir("special-config-no-warning");
         let nested = root.join("a/b/c");
         fs::create_dir_all(&nested).expect("nested dir should be created");
         fs::write(root.join("special.toml"), "").expect("special.toml should be created");
@@ -202,7 +191,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.ROOT_DISCOVERY.VCS_DEFAULT
     fn falls_back_to_vcs_root_without_special_toml() {
-        let root = temp_dir("special-config-vcs");
+        let root = temp_config_test_dir("special-config-vcs");
         let nested = root.join("a/b");
         fs::create_dir_all(&nested).expect("nested dir should be created");
         fs::write(root.join(".git"), "gitdir: /tmp/example\n").expect(".git file should exist");
@@ -219,7 +208,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.ROOT_DISCOVERY.CWD_FALLBACK
     fn falls_back_to_current_directory_without_config_or_vcs() {
-        let root = temp_dir("special-config-cwd");
+        let root = temp_config_test_dir("special-config-cwd");
         let nested = root.join("a/b");
         fs::create_dir_all(&nested).expect("nested dir should be created");
 
@@ -238,7 +227,7 @@ mod tests {
     #[test]
     // @verifies SPECIAL.CONFIG.ROOT_DISCOVERY.IMPLICIT_ROOT_WARNING
     fn warns_when_root_is_inferred() {
-        let root = temp_dir("special-config-warning");
+        let root = temp_config_test_dir("special-config-warning");
         let nested = root.join("a/b");
         fs::create_dir_all(&nested).expect("nested dir should be created");
         fs::write(root.join(".git"), "gitdir: /tmp/example\n").expect(".git file should exist");

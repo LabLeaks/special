@@ -289,13 +289,22 @@ fn release_tag_dry_run_force_pushes_existing_tag_when_requested() {
         payload["push_tag_command"]
             .as_array()
             .expect("push_tag_command should be an array"),
-        &vec![
-            Value::String("git".to_string()),
-            Value::String("push".to_string()),
-            Value::String("--force".to_string()),
-            Value::String("origin".to_string()),
-            Value::String(format!("refs/tags/v{version}")),
-        ]
+        &if tag_exists(&format!("v{version}")) {
+            vec![
+                Value::String("git".to_string()),
+                Value::String("push".to_string()),
+                Value::String("--force".to_string()),
+                Value::String("origin".to_string()),
+                Value::String(format!("refs/tags/v{version}")),
+            ]
+        } else {
+            vec![
+                Value::String("git".to_string()),
+                Value::String("push".to_string()),
+                Value::String("origin".to_string()),
+                Value::String(format!("refs/tags/v{version}")),
+            ]
+        }
     );
 }
 

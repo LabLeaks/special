@@ -102,6 +102,14 @@ pub(super) fn language_pack_scope_facts_fingerprint(
     Ok(hasher.finish())
 }
 
+pub(super) fn parsed_repo_contract_fingerprint(parsed_repo: &ParsedRepo) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_vec(parsed_repo)
+        .expect("parsed repo should serialize for cache fingerprinting")
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
 pub(super) fn architecture_analysis_fingerprint(
     root: &Path,
     ignore_patterns: &[String],

@@ -20,6 +20,13 @@ pub fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+pub fn python3_command() -> Command {
+    let mut command = Command::new("mise");
+    command.args(["exec", "--", "python3"]);
+    command.current_dir(repo_root());
+    command
+}
+
 pub fn clippy_script() -> String {
     fs::read_to_string(repo_root().join("scripts/verify-rust-clippy.sh"))
         .expect("clippy verification script should be readable")
@@ -57,11 +64,10 @@ pub fn release_review_schema() -> Value {
 }
 
 pub fn release_review_dry_run(args: &[&str]) -> Value {
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("scripts/review-rust-release-style.py")
         .args(args)
         .arg("--dry-run")
-        .current_dir(repo_root())
         .output()
         .expect("release review dry-run should run");
     assert!(
@@ -74,10 +80,9 @@ pub fn release_review_dry_run(args: &[&str]) -> Value {
 }
 
 pub fn current_python_executable() -> String {
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("-c")
         .arg("import sys; print(sys.executable)")
-        .current_dir(repo_root())
         .output()
         .expect("python executable probe should run");
     assert!(output.status.success());
@@ -88,12 +93,11 @@ pub fn current_python_executable() -> String {
 }
 
 pub fn release_review_python_helper(script: &str, args: &[&str]) -> Value {
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("-c")
         .arg(script)
         .arg(repo_root())
         .args(args)
-        .current_dir(repo_root())
         .output()
         .expect("release review helper should run");
 
@@ -288,12 +292,11 @@ except SystemExit as err:
     raise
 "#;
 
-    Command::new("python3")
+    python3_command()
         .arg("-c")
         .arg(script)
         .arg(repo_root())
         .arg(payload)
-        .current_dir(repo_root())
         .output()
         .expect("response validation helper should run")
 }
@@ -351,11 +354,10 @@ spec.loader.exec_module(module)
 print(json.dumps({"dont_write_bytecode": sys.dont_write_bytecode}))
 "#;
     let script_arg = script_path.to_string_lossy().into_owned();
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("-c")
         .arg(script)
         .arg(script_arg)
-        .current_dir(repo_root())
         .output()
         .expect("entrypoint runtime flag helper should run");
     assert!(
@@ -417,14 +419,13 @@ spec.loader.exec_module(module)
 print(module.discover_latest_semver_tag(target_root, backend, head))
 "#;
 
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("-c")
         .arg(script)
         .arg(repo_root())
         .arg(root)
         .arg(backend)
         .arg(head)
-        .current_dir(repo_root())
         .output()
         .expect("reachable tag helper should run");
     assert!(
@@ -546,7 +547,7 @@ pub fn tag_points_at_current_revision(tag: &str) -> bool {
 }
 
 pub fn release_tag_command_output(version: &str, extra_args: &[&str]) -> std::process::Output {
-    let mut command = Command::new("python3");
+    let mut command = python3_command();
     command
         .arg("scripts/tag-release.py")
         .arg(version)
@@ -574,8 +575,8 @@ fn release_mock_log_path() -> PathBuf {
         .expect("system time should be after unix epoch")
         .as_nanos();
     let counter = RELEASE_MOCK_LOG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    repo_root().join(format!(
-        ".tmp-release-mock-log-{}-{nanos}-{counter}",
+    std::env::temp_dir().join(format!(
+        "special-release-mock-log-{}-{nanos}-{counter}",
         std::process::id()
     ))
 }
@@ -593,7 +594,7 @@ fn read_release_tag_mock_log(path: &PathBuf) -> Vec<Value> {
 
 pub fn release_tag_live_output(version: &str, extra_args: &[&str]) -> ReleaseTagExecution {
     let log_path = release_mock_log_path();
-    let mut command = Command::new("python3");
+    let mut command = python3_command();
     command
         .arg("scripts/tag-release.py")
         .arg(version)
@@ -615,7 +616,7 @@ pub fn release_tag_live_output_with_input(
     input: &str,
 ) -> ReleaseTagExecution {
     let log_path = release_mock_log_path();
-    let mut command = Command::new("python3");
+    let mut command = python3_command();
     command
         .arg("scripts/tag-release.py")
         .arg(version)

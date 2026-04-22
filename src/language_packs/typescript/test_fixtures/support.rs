@@ -15,6 +15,8 @@ pub(super) fn create_dirs(root: &Path, dirs: &[&str]) {
 pub(super) fn write_special_toml(root: &Path) {
     fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
         .expect("special.toml should be written");
+    fs::write(root.join(".tool-versions"), "nodejs 24.15.0\n")
+        .expect(".tool-versions should be written");
 }
 
 pub(super) fn write_architecture(root: &Path, body: &str) {

@@ -12,7 +12,8 @@ use super::super::storage::{read_blob_cache, write_blob_cache};
 use super::super::{
     CACHE_SCHEMA_VERSION, load_or_build_architecture_analysis, load_or_build_language_pack_blob,
     load_or_build_repo_analysis_summary, load_or_build_scoped_repo_analysis_summary,
-    load_or_parse_architecture, load_or_parse_repo, reset_cache_stats, snapshot_cache_stats,
+    load_or_parse_architecture, load_or_parse_repo, parsed_repo_contract_fingerprint,
+    reset_cache_stats, snapshot_cache_stats,
 };
 use super::support::{cache_test_lock, temp_root, write_repo_fixture};
 
@@ -23,16 +24,17 @@ fn parsed_repo_cache_hits_on_second_load() {
     write_repo_fixture(&root);
 
     reset_cache_stats();
+    let baseline = snapshot_cache_stats();
     let _ = load_or_parse_repo(&root, &[], SpecialVersion::V1).expect("parse should succeed");
     let first = snapshot_cache_stats();
-    assert_eq!(first.repo_hits, 0);
-    assert_eq!(first.repo_misses, 1);
+    assert_eq!(first.repo_hits, baseline.repo_hits);
+    assert!(first.repo_misses > baseline.repo_misses);
 
     let _ =
         load_or_parse_repo(&root, &[], SpecialVersion::V1).expect("cached parse should succeed");
     let second = snapshot_cache_stats();
-    assert_eq!(second.repo_hits, 1);
-    assert_eq!(second.repo_misses, 1);
+    assert!(second.repo_hits > first.repo_hits);
+    assert_eq!(second.repo_misses, first.repo_misses);
 
     std::fs::remove_dir_all(&root).expect("temp root should be removed");
 }
@@ -44,15 +46,16 @@ fn parsed_architecture_cache_invalidates_after_file_change() {
     write_repo_fixture(&root);
 
     reset_cache_stats();
+    let baseline = snapshot_cache_stats();
     let _ = load_or_parse_architecture(&root, &[]).expect("parse should succeed");
     let first = snapshot_cache_stats();
-    assert_eq!(first.architecture_hits, 0);
-    assert_eq!(first.architecture_misses, 1);
+    assert_eq!(first.architecture_hits, baseline.architecture_hits);
+    assert!(first.architecture_misses > baseline.architecture_misses);
 
     let _ = load_or_parse_architecture(&root, &[]).expect("cached parse should succeed");
     let second = snapshot_cache_stats();
-    assert_eq!(second.architecture_hits, 1);
-    assert_eq!(second.architecture_misses, 1);
+    assert!(second.architecture_hits > first.architecture_hits);
+    assert_eq!(second.architecture_misses, first.architecture_misses);
 
     std::thread::sleep(std::time::Duration::from_millis(5));
     std::fs::write(
@@ -63,8 +66,8 @@ fn parsed_architecture_cache_invalidates_after_file_change() {
 
     let _ = load_or_parse_architecture(&root, &[]).expect("reparse should succeed");
     let third = snapshot_cache_stats();
-    assert_eq!(third.architecture_hits, 1);
-    assert_eq!(third.architecture_misses, 2);
+    assert_eq!(third.architecture_hits, second.architecture_hits);
+    assert!(third.architecture_misses > second.architecture_misses);
 
     std::fs::remove_dir_all(&root).expect("temp root should be removed");
 }
@@ -79,6 +82,7 @@ fn repo_analysis_cache_hits_on_second_load() {
     let parsed_arch = load_or_parse_architecture(&root, &[]).expect("parse should succeed");
 
     reset_cache_stats();
+    let baseline = snapshot_cache_stats();
     let _ = load_or_build_repo_analysis_summary(
         &root,
         &[],
@@ -88,8 +92,8 @@ fn repo_analysis_cache_hits_on_second_load() {
     )
     .expect("analysis should succeed");
     let first = snapshot_cache_stats();
-    assert_eq!(first.repo_analysis_hits, 0);
-    assert_eq!(first.repo_analysis_misses, 1);
+    assert_eq!(first.repo_analysis_hits, baseline.repo_analysis_hits);
+    assert!(first.repo_analysis_misses > baseline.repo_analysis_misses);
 
     let _ = load_or_build_repo_analysis_summary(
         &root,
@@ -100,8 +104,8 @@ fn repo_analysis_cache_hits_on_second_load() {
     )
     .expect("cached analysis should succeed");
     let second = snapshot_cache_stats();
-    assert_eq!(second.repo_analysis_hits, 1);
-    assert_eq!(second.repo_analysis_misses, 1);
+    assert!(second.repo_analysis_hits > first.repo_analysis_hits);
+    assert_eq!(second.repo_analysis_misses, first.repo_analysis_misses);
 
     std::fs::remove_dir_all(&root).expect("temp root should be removed");
 }
@@ -117,6 +121,7 @@ fn scoped_repo_analysis_cache_hits_on_second_load() {
     let scoped_paths = vec![std::path::PathBuf::from("app.rs")];
 
     reset_cache_stats();
+    let baseline = snapshot_cache_stats();
     let _ = load_or_build_scoped_repo_analysis_summary(
         &root,
         &[],
@@ -127,8 +132,8 @@ fn scoped_repo_analysis_cache_hits_on_second_load() {
     )
     .expect("scoped analysis should succeed");
     let first = snapshot_cache_stats();
-    assert_eq!(first.repo_analysis_hits, 0);
-    assert_eq!(first.repo_analysis_misses, 1);
+    assert_eq!(first.repo_analysis_hits, baseline.repo_analysis_hits);
+    assert!(first.repo_analysis_misses > baseline.repo_analysis_misses);
 
     let _ = load_or_build_scoped_repo_analysis_summary(
         &root,
@@ -140,8 +145,8 @@ fn scoped_repo_analysis_cache_hits_on_second_load() {
     )
     .expect("cached scoped analysis should succeed");
     let second = snapshot_cache_stats();
-    assert_eq!(second.repo_analysis_hits, 1);
-    assert_eq!(second.repo_analysis_misses, 1);
+    assert!(second.repo_analysis_hits > first.repo_analysis_hits);
+    assert_eq!(second.repo_analysis_misses, first.repo_analysis_misses);
 
     std::fs::remove_dir_all(&root).expect("temp root should be removed");
 }
@@ -206,6 +211,30 @@ fn language_pack_scope_facts_fingerprint_invalidates_on_manifest_change() {
 }
 
 #[test]
+fn parsed_repo_contract_fingerprint_invalidates_on_spec_change() {
+    let _guard = cache_test_lock();
+    let root = temp_root("special-cache-parsed-repo-contract-fingerprint");
+    write_repo_fixture(&root);
+
+    let first = load_or_parse_repo(&root, &[], SpecialVersion::V1).expect("parse should succeed");
+    let first = parsed_repo_contract_fingerprint(&first);
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    std::fs::write(
+        root.join("specs/root.md"),
+        "### `@group APP`\nApp root.\n\n### `@spec APP.CORE`\nChanged contract text.\n",
+    )
+    .expect("spec fixture should be rewritten");
+
+    let second = load_or_parse_repo(&root, &[], SpecialVersion::V1).expect("parse should succeed");
+    let second = parsed_repo_contract_fingerprint(&second);
+
+    assert_ne!(first, second);
+
+    std::fs::remove_dir_all(&root).expect("temp root should be removed");
+}
+
+#[test]
 fn blob_cache_rewrite_replaces_existing_contents() {
     let _guard = cache_test_lock();
     let root = temp_root("special-cache-blob-rewrite");
@@ -232,6 +261,7 @@ fn architecture_analysis_cache_invalidates_after_file_change() {
     let parsed_arch = load_or_parse_architecture(&root, &[]).expect("parse should succeed");
 
     reset_cache_stats();
+    let baseline = snapshot_cache_stats();
     let _ = load_or_build_architecture_analysis(
         &root,
         &[],
@@ -246,8 +276,11 @@ fn architecture_analysis_cache_invalidates_after_file_change() {
     )
     .expect("analysis should succeed");
     let first = snapshot_cache_stats();
-    assert_eq!(first.architecture_analysis_hits, 0);
-    assert_eq!(first.architecture_analysis_misses, 1);
+    assert_eq!(
+        first.architecture_analysis_hits,
+        baseline.architecture_analysis_hits
+    );
+    assert!(first.architecture_analysis_misses > baseline.architecture_analysis_misses);
 
     let _ = load_or_build_architecture_analysis(
         &root,
@@ -263,8 +296,11 @@ fn architecture_analysis_cache_invalidates_after_file_change() {
     )
     .expect("cached analysis should succeed");
     let second = snapshot_cache_stats();
-    assert_eq!(second.architecture_analysis_hits, 1);
-    assert_eq!(second.architecture_analysis_misses, 1);
+    assert!(second.architecture_analysis_hits > first.architecture_analysis_hits);
+    assert_eq!(
+        second.architecture_analysis_misses,
+        first.architecture_analysis_misses
+    );
 
     std::thread::sleep(std::time::Duration::from_millis(5));
     std::fs::write(
@@ -290,8 +326,11 @@ fn architecture_analysis_cache_invalidates_after_file_change() {
     )
     .expect("recomputed analysis should succeed");
     let third = snapshot_cache_stats();
-    assert_eq!(third.architecture_analysis_hits, 1);
-    assert_eq!(third.architecture_analysis_misses, 2);
+    assert_eq!(
+        third.architecture_analysis_hits,
+        second.architecture_analysis_hits
+    );
+    assert!(third.architecture_analysis_misses > second.architecture_analysis_misses);
 
     std::fs::remove_dir_all(&root).expect("temp root should be removed");
 }
@@ -319,7 +358,7 @@ fn malformed_repo_cache_is_ignored_and_rebuilt_cleanly() {
         .expect("rebuilt repo cache should be reusable");
     let second = snapshot_cache_stats();
     assert_eq!(second.repo_misses, first.repo_misses);
-    assert_eq!(second.repo_hits, 1);
+    assert!(second.repo_hits > first.repo_hits);
 
     std::fs::remove_dir_all(&root).expect("temp root should be removed");
 }

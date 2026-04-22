@@ -9,7 +9,6 @@ use std::fs;
 use serde_json::Value;
 
 use crate::go_test_fixtures::write_go_module_analysis_fixture;
-use crate::python_test_fixtures::write_python_module_analysis_fixture;
 use crate::support::{find_node_by_id, run_special, temp_repo_dir};
 use crate::typescript_test_fixtures::write_typescript_module_analysis_fixture;
 
@@ -160,63 +159,6 @@ fn modules_metrics_json_includes_structured_go_analysis() {
             "isolatedExternal".to_string(),
             "unreachedClusterEntry".to_string(),
             "unreachedClusterLeaf".to_string(),
-        ])
-    );
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.MODULE_COMMAND.METRICS.PYTHON
-fn modules_metrics_surface_python_analysis() {
-    let root = temp_repo_dir("special-cli-modules-metrics-python");
-    write_python_module_analysis_fixture(&root);
-
-    let output = run_special(&root, &["arch", "--metrics", "--verbose"]);
-    assert!(output.status.success());
-
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    assert!(stdout.contains("DEMO"));
-    assert!(stdout.contains("public items: 1"));
-    assert!(stdout.contains("internal items: 4"));
-    assert!(stdout.contains("unreached items: 3"));
-    assert!(stdout.contains("isolated item: _isolated_external"));
-    assert!(stdout.contains("unreached item: _unreached_cluster_entry"));
-    assert!(stdout.contains("unreached item: _unreached_cluster_leaf"));
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.MODULE_COMMAND.METRICS.JSON.PYTHON
-fn modules_metrics_json_includes_structured_python_analysis() {
-    let root = temp_repo_dir("special-cli-modules-metrics-python-json");
-    write_python_module_analysis_fixture(&root);
-
-    let output = run_special(&root, &["arch", "--metrics", "--json", "--verbose"]);
-    assert!(output.status.success());
-
-    let json: Value =
-        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-    let demo = json["nodes"]
-        .as_array()
-        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "DEMO")))
-        .expect("demo module should be present");
-    assert_eq!(demo["analysis"]["metrics"]["public_items"], Value::from(1));
-    assert_eq!(
-        demo["analysis"]["metrics"]["internal_items"],
-        Value::from(4)
-    );
-    assert_eq!(
-        demo["analysis"]["item_signals"]["unreached_item_count"],
-        Value::from(3)
-    );
-    assert_eq!(
-        unreached_item_names(demo),
-        BTreeSet::from([
-            "_isolated_external".to_string(),
-            "_unreached_cluster_entry".to_string(),
-            "_unreached_cluster_leaf".to_string(),
         ])
     );
 

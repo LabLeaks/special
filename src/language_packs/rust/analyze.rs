@@ -54,6 +54,28 @@ pub(crate) fn build_traceability_graph_facts(
     traceability::build_traceability_graph_facts(root, source_files)
 }
 
+pub(crate) fn build_traceability_scope_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
+) -> Result<Vec<u8>> {
+    traceability::build_traceability_scope_facts(root, source_files, parsed_repo)
+}
+
+pub(crate) fn expand_traceability_closure_from_facts(
+    source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    facts: &[u8],
+) -> Result<Vec<PathBuf>> {
+    traceability::expand_traceability_closure_from_facts(
+        source_files,
+        scoped_source_files,
+        file_ownership,
+        facts,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_repo_analysis_context(
     root: &Path,
@@ -67,32 +89,41 @@ pub(crate) fn build_repo_analysis_context(
 ) -> RustRepoAnalysisContext {
     let traceability_pack =
         traceability::RustTraceabilityPack::new(toolchain::probe_local_toolchain_project(root));
-    let traceability_unavailable_reason = traceability_pack
+    let base_traceability_unavailable_reason = traceability_pack
         .backward_trace_availability()
         .unavailable_reason()
         .map(ToString::to_string);
-    let traceability = (include_traceability && traceability_unavailable_reason.is_none()).then(|| {
-        if let Some(scoped_source_files) = scoped_source_files.filter(|files| !files.is_empty()) {
-            traceability::build_scoped_traceability_analysis_from_cached_or_live_graph_facts(
-                root,
-                source_files,
-                scoped_source_files,
-                traceability_graph_facts,
-                parsed_repo,
-                file_ownership,
-                &traceability_pack,
-            )
+    let (traceability, traceability_unavailable_reason) =
+        if !include_traceability || base_traceability_unavailable_reason.is_some() {
+            (None, base_traceability_unavailable_reason)
         } else {
-            traceability::build_traceability_analysis_from_cached_or_live_graph_facts(
-                root,
-                source_files,
-                traceability_graph_facts,
-                parsed_repo,
-                file_ownership,
-                &traceability_pack,
-            )
-        }
-    });
+            let analysis = if let Some(scoped_source_files) =
+                scoped_source_files.filter(|files| !files.is_empty())
+            {
+                traceability::build_scoped_traceability_analysis_from_cached_or_live_graph_facts(
+                    root,
+                    source_files,
+                    scoped_source_files,
+                    traceability_graph_facts,
+                    parsed_repo,
+                    file_ownership,
+                    &traceability_pack,
+                )
+            } else {
+                traceability::build_traceability_analysis_from_cached_or_live_graph_facts(
+                    root,
+                    source_files,
+                    traceability_graph_facts,
+                    parsed_repo,
+                    file_ownership,
+                    &traceability_pack,
+                )
+            };
+            match analysis {
+                Ok(traceability) => (Some(traceability), None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        };
     RustRepoAnalysisContext {
         traceability,
         traceability_pack,

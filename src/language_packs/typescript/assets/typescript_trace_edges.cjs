@@ -2,11 +2,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 function normalize(p) {
-  return path.resolve(p).replace(/\\/g, '/');
+  const resolved = path.resolve(p);
+  try {
+    return fs.realpathSync.native(resolved).replace(/\\/g, '/');
+  } catch {
+    return resolved.replace(/\\/g, '/');
+  }
 }
 
-function loadTypeScript(moduleRoot) {
-  return require(path.join(moduleRoot, 'typescript'));
+function loadTypeScript(moduleEntry) {
+  return require(moduleEntry);
 }
 
 function resolveImportedFiles(ts, sourceFile, options, host, trackedFiles) {
@@ -100,13 +105,13 @@ function matchDeclaredItem(ts, grouped, decl) {
 }
 
 function main() {
-  const moduleRoot = process.argv[2];
-  if (!moduleRoot) {
-    process.stderr.write('typescript module root is required\n');
+  const moduleEntry = process.argv[2];
+  if (!moduleEntry) {
+    process.stderr.write('typescript module entry is required\n');
     process.exit(1);
   }
 
-  const ts = loadTypeScript(moduleRoot);
+  const ts = loadTypeScript(moduleEntry);
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const mode = input.mode || 'trace_edges';
   const grouped = groupItemsByPath(input.items);

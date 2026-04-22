@@ -13,11 +13,46 @@ use toml::Table;
 use super::SpecialVersion;
 
 #[derive(Debug, Default)]
-pub(super) struct SpecialToml {
-    pub(super) root: Option<PathBuf>,
-    pub(super) version: SpecialVersion,
-    pub(super) version_explicit: bool,
-    pub(super) ignore_patterns: Vec<String>,
+pub(crate) struct SpecialToml {
+    pub(crate) root: Option<PathBuf>,
+    pub(crate) version: SpecialVersion,
+    pub(crate) version_explicit: bool,
+    pub(crate) ignore_patterns: Vec<String>,
+    pub(crate) toolchain_manager: Option<ToolchainManager>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolchainManager {
+    Mise,
+    Asdf,
+}
+
+impl ToolchainManager {
+    fn parse(value: &str, line: usize) -> Result<Self> {
+        match value {
+            "mise" => Ok(Self::Mise),
+            "asdf" => Ok(Self::Asdf),
+            _ => bail!(
+                "line {} uses unsupported toolchain manager `{}`; expected `mise` or `asdf`",
+                line,
+                value
+            ),
+        }
+    }
+
+    pub(crate) fn command(self) -> &'static str {
+        match self {
+            Self::Mise => "mise",
+            Self::Asdf => "asdf",
+        }
+    }
+
+    pub(crate) fn exec_prefix(self) -> &'static [&'static str] {
+        match self {
+            Self::Mise => &["exec", "--"],
+            Self::Asdf => &["exec"],
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -26,9 +61,16 @@ struct RawSpecialToml {
     root: Option<String>,
     version: Option<String>,
     ignore: Option<Vec<String>>,
+    toolchain: Option<RawToolchainConfig>,
 }
 
-pub(super) fn load_special_toml(path: &Path) -> Result<SpecialToml> {
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawToolchainConfig {
+    manager: Option<String>,
+}
+
+pub(crate) fn load_special_toml(path: &Path) -> Result<SpecialToml> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read special.toml at `{}`", path.display()))?;
     parse_special_toml(&content)
@@ -41,7 +83,7 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
     let key_lines = collect_top_level_key_lines(content);
 
     for key in table.keys() {
-        if key != "root" && key != "version" && key != "ignore" {
+        if key != "root" && key != "version" && key != "ignore" && key != "toolchain" {
             let line = key_lines.get(key.as_str()).copied().unwrap_or(1);
             bail!("line {} uses unknown key `{key}`", line);
         }
@@ -77,6 +119,13 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
         config.ignore_patterns = ignore_patterns;
     }
 
+    if let Some(toolchain) = raw.toolchain
+        && let Some(manager) = toolchain.manager
+    {
+        let line = key_lines.get("toolchain").copied().unwrap_or(1);
+        config.toolchain_manager = Some(ToolchainManager::parse(&manager, line)?);
+    }
+
     Ok(config)
 }
 
@@ -84,7 +133,16 @@ fn collect_top_level_key_lines(content: &str) -> std::collections::BTreeMap<Stri
     let mut key_lines = std::collections::BTreeMap::new();
     for (index, raw_line) in content.lines().enumerate() {
         let trimmed = raw_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with('[') {
+            if trimmed == "[toolchain]" {
+                key_lines
+                    .entry("toolchain".to_string())
+                    .or_insert(index + 1);
+            }
             continue;
         }
 
@@ -152,7 +210,7 @@ fn line_for_offset(content: &str, offset: usize) -> usize {
 mod tests {
     use std::path::PathBuf;
 
-    use super::parse_special_toml;
+    use super::{ToolchainManager, parse_special_toml};
     use crate::config::SpecialVersion;
 
     #[test]
@@ -220,5 +278,24 @@ mod tests {
         let err = parse_special_toml("root = \"\"\n").expect_err("empty root should fail");
 
         assert!(err.to_string().contains("must not use an empty root path"));
+    }
+
+    #[test]
+    fn parses_supported_toolchain_manager() {
+        let config =
+            parse_special_toml("[toolchain]\nmanager = \"mise\"\n").expect("config should parse");
+
+        assert_eq!(config.toolchain_manager, Some(ToolchainManager::Mise));
+    }
+
+    #[test]
+    fn rejects_unknown_toolchain_manager() {
+        let err = parse_special_toml("[toolchain]\nmanager = \"npm\"\n")
+            .expect_err("unknown manager should fail");
+
+        assert!(
+            err.to_string()
+                .contains("unsupported toolchain manager `npm`")
+        );
     }
 }

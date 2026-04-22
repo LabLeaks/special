@@ -24,7 +24,10 @@ fn main() {
                 return None;
             }
             let stem = path.file_stem()?.to_str()?;
-            (stem != "mod").then(|| stem.to_string())
+            // Python stays in-tree as dormant work, but it is intentionally
+            // excluded from the shipped built-in pack registry for 0.7.0 until
+            // its toolchain and bridge honesty are hardened enough to ship.
+            (stem != "mod" && stem != "python").then(|| stem.to_string())
         })
         .collect::<Vec<_>>();
     pack_modules.sort();

@@ -32,7 +32,7 @@ pub(super) fn execute_init(current_dir: &Path) -> Result<ExitCode> {
     fs::write(
         &config_path,
         format!(
-            "version = \"{}\"\nroot = \".\"\n",
+            "version = \"{}\"\nroot = \".\"\n\n# Optional: tell tool-backed traceability to use the project's declared toolchain.\n# Out of the box, special understands these project contracts:\n#   - `mise.toml`\n#   - `.tool-versions` (asdf-compatible)\n#\n# If your project root is not where the toolchain file lives, or you want to pin the\n# contract explicitly, uncomment this block:\n#\n# [toolchain]\n# manager = \"mise\" # or \"asdf\"\n",
             SpecialVersion::CURRENT.as_str()
         ),
     )?;

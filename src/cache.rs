@@ -22,7 +22,7 @@ mod storage;
 #[cfg(test)]
 pub use stats::CacheStats;
 
-const CACHE_SCHEMA_VERSION: u32 = 6;
+const CACHE_SCHEMA_VERSION: u32 = 7;
 const CACHE_LOCK_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
 const CACHE_LOCK_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const CACHE_LOCK_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -38,6 +38,10 @@ pub fn snapshot_cache_stats() -> CacheStats {
 
 pub fn format_cache_stats_summary() -> Option<String> {
     stats::format_cache_stats_summary()
+}
+
+pub fn parsed_repo_contract_fingerprint(parsed_repo: &ParsedRepo) -> u64 {
+    fingerprint::parsed_repo_contract_fingerprint(parsed_repo)
 }
 
 pub fn with_cache_status_notifier<T>(

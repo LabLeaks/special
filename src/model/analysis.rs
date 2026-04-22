@@ -109,6 +109,7 @@ pub struct ArchitectureDuplicateItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArchitectureTraceabilityItem {
     pub path: std::path::PathBuf,
+    pub line: usize,
     pub name: String,
     pub kind: ModuleItemKind,
     pub public: bool,
@@ -134,6 +135,7 @@ pub struct ArchitectureTraceabilityItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleTraceabilityItem {
+    pub line: usize,
     pub name: String,
     pub kind: ModuleItemKind,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,6 +207,7 @@ impl ModuleTraceabilitySummary {
             items.sort_by(|left, right| {
                 left.name
                     .cmp(&right.name)
+                    .then_with(|| left.line.cmp(&right.line))
                     .then_with(|| left.kind.cmp(&right.kind))
             });
         }
@@ -252,6 +255,7 @@ impl ArchitectureTraceabilitySummary {
             items.sort_by(|left, right| {
                 left.path
                     .cmp(&right.path)
+                    .then_with(|| left.line.cmp(&right.line))
                     .then_with(|| left.name.cmp(&right.name))
                     .then_with(|| left.kind.cmp(&right.kind))
             });

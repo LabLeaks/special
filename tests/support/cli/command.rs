@@ -114,17 +114,6 @@ pub fn go_toolchain_available() -> bool {
         .unwrap_or(false)
 }
 
-pub fn pyright_langserver_available() -> bool {
-    Command::new("mise")
-        .args(["exec", "--", "pyright-langserver", "--help"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
 pub fn typescript_traceability_available() -> bool {
     Command::new("mise")
         .args(["exec", "--", "node", "--version"])

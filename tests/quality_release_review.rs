@@ -83,7 +83,7 @@ use std::{
 
 use support::{
     latest_reachable_semver_tag, latest_reachable_semver_tag_for_repo,
-    python_entrypoint_runtime_flag, release_review_changed_line_ranges,
+    python_entrypoint_runtime_flag, python3_command, release_review_changed_line_ranges,
     release_review_chunk_helper, release_review_dry_run, release_review_extract_context_ranges,
     release_review_extract_full_scan_context_ranges, release_review_merge_responses,
     release_review_passes_for, release_review_schema, release_review_validate_response_shape_err,
@@ -98,10 +98,9 @@ fn unique_review_temp_repo(prefix: &str) -> PathBuf {
         .expect("system time should be after unix epoch")
         .as_nanos();
     let counter = TEMP_REVIEW_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
-    support::repo_root().join(format!(
-        ".tmp-release-review-{prefix}-{}-{nanos}-{counter}",
-        std::process::id()
-    ))
+    std::env::temp_dir()
+        .join("special-release-review")
+        .join(format!("{prefix}-{}-{nanos}-{counter}", std::process::id()))
 }
 
 #[test]
@@ -750,7 +749,7 @@ index 1111111..2222222 100644
 #[test]
 // @verifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.WARN_ONLY
 fn release_review_exits_successfully_when_codex_returns_warnings() {
-    let mut command = Command::new("python3");
+    let mut command = python3_command();
     command
         .arg("scripts/review-rust-release-style.py")
         .arg("--allow-mock")
@@ -804,10 +803,9 @@ fn release_review_exits_successfully_when_codex_returns_warnings() {
 
 #[test]
 fn release_review_rejects_mock_env_without_explicit_test_flag() {
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("scripts/review-rust-release-style.py")
         .arg("--full")
-        .current_dir(support::repo_root())
         .env("SPECIAL_RUST_RELEASE_REVIEW_ALLOW_MOCK", "1")
         .env(
             "SPECIAL_RUST_RELEASE_REVIEW_MOCK_OUTPUT",
@@ -827,10 +825,9 @@ fn release_review_rejects_mock_env_without_explicit_test_flag() {
 #[test]
 // @verifies SPECIAL.QUALITY.RUST.RELEASE_REVIEW.LOCAL_ONLY
 fn release_review_refuses_live_codex_invocation_in_ci() {
-    let output = Command::new("python3")
+    let output = python3_command()
         .arg("scripts/review-rust-release-style.py")
         .arg("--full")
-        .current_dir(support::repo_root())
         .env("CI", "true")
         .output()
         .expect("release review script should run");

@@ -174,7 +174,7 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct ParsedRepo {
     pub specs: Vec<SpecDecl>,
     pub verifies: Vec<VerifyRef>,

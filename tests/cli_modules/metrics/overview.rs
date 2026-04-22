@@ -9,9 +9,9 @@ use serde_json::Value;
 
 use crate::support::{
     find_node_by_id, run_special, temp_repo_dir, write_binary_entrypoint_root_fixture,
-    write_dependency_module_analysis_fixture, write_item_scoped_module_analysis_fixture,
-    write_module_analysis_fixture, write_restricted_visibility_root_fixture,
-    write_source_local_module_analysis_fixture,
+    write_coupling_module_analysis_fixture, write_dependency_module_analysis_fixture,
+    write_item_scoped_module_analysis_fixture, write_module_analysis_fixture,
+    write_restricted_visibility_root_fixture, write_source_local_module_analysis_fixture,
 };
 use crate::typescript_test_fixtures::write_typescript_module_analysis_fixture;
 
@@ -69,6 +69,23 @@ fn modules_metrics_default_unscoped_view_omits_per_module_analysis_blocks() {
     assert!(stdout.contains("external dependency targets by module"));
     assert!(!stdout.contains("dependency refs:"));
     assert!(!stdout.contains("dependency targets:"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn modules_metrics_default_unscoped_view_surfaces_repo_level_coupling_rankings() {
+    let root = temp_repo_dir("special-cli-modules-metrics-unscoped-coupling-summary");
+    write_coupling_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["arch", "--metrics"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("fan out by module"));
+    assert!(stdout.contains("DEMO.API: 1"));
+    assert!(stdout.contains("fan in by module"));
+    assert!(stdout.contains("DEMO.SHARED: 1"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -172,6 +189,38 @@ fn modules_metrics_json_scoped_view_keeps_node_analysis_without_verbose() {
     assert_eq!(
         demo["analysis"]["dependencies"]["distinct_targets"],
         Value::from(2)
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn modules_metrics_json_default_unscoped_view_includes_repo_level_coupling_rankings() {
+    let root = temp_repo_dir("special-cli-modules-metrics-json-unscoped-coupling-summary");
+    write_coupling_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["arch", "--metrics", "--json"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    assert!(
+        json["metrics"]["fan_out_by_module"]
+            .as_array()
+            .expect("fan_out_by_module should be an array")
+            .iter()
+            .any(|entry| {
+                entry["value"].as_str() == Some("DEMO.API") && entry["count"].as_u64() == Some(1)
+            })
+    );
+    assert!(
+        json["metrics"]["fan_in_by_module"]
+            .as_array()
+            .expect("fan_in_by_module should be an array")
+            .iter()
+            .any(|entry| {
+                entry["value"].as_str() == Some("DEMO.SHARED") && entry["count"].as_u64() == Some(1)
+            })
     );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

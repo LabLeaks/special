@@ -117,8 +117,11 @@ fn package_metadata() -> Value {
 }
 
 fn base64_encode(input: &str) -> String {
-    let mut child = Command::new("python3")
+    let mut child = Command::new("mise")
         .args([
+            "exec",
+            "--",
+            "python3",
             "-c",
             "import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())",
         ])

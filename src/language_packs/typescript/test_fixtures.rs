@@ -23,8 +23,8 @@ pub use callbacks::{
     write_typescript_hook_callback_traceability_fixture,
 };
 pub use traceability::{
-    write_typescript_reference_traceability_fixture, write_typescript_tool_traceability_fixture,
-    write_typescript_traceability_fixture,
+    write_typescript_cycle_traceability_fixture, write_typescript_reference_traceability_fixture,
+    write_typescript_tool_traceability_fixture, write_typescript_traceability_fixture,
 };
 pub use ui::{
     write_typescript_next_traceability_fixture, write_typescript_react_traceability_fixture,

@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::{
-    LanguagePackAnalysisContext, LanguagePackDescriptor, TraceabilityGraphFactsDescriptor,
+    LanguagePackAnalysisContext, LanguagePackDescriptor, ProjectToolRequirement,
+    ProjectToolingDescriptor, TraceabilityGraphFactsDescriptor,
+    TraceabilityScopeFactsDescriptor,
 };
 use crate::model::{
     ArchitectureTraceabilitySummary, ImplementRef, ModuleAnalysisOptions, ParsedArchitecture,
@@ -27,12 +29,35 @@ pub(crate) const DESCRIPTOR: LanguagePackDescriptor = LanguagePackDescriptor {
     parse_source_graph,
     build_repo_analysis_context,
     analysis_environment_fingerprint,
-    traceability_scope_facts: None,
+    project_tooling: Some(&PROJECT_TOOLING),
+    traceability_scope_facts: Some(&TRACEABILITY_SCOPE_FACTS),
     traceability_graph_facts: Some(&TRACEABILITY_GRAPH_FACTS),
+};
+
+const PROJECT_TOOLING: ProjectToolingDescriptor = ProjectToolingDescriptor {
+    requirements: &[
+        ProjectToolRequirement {
+            tool: "cargo",
+            probe_args: &["metadata", "--no-deps", "--format-version", "1"],
+        },
+        ProjectToolRequirement {
+            tool: "rustc",
+            probe_args: &["--version", "--verbose"],
+        },
+        ProjectToolRequirement {
+            tool: "rust-analyzer",
+            probe_args: &["--version"],
+        },
+    ],
 };
 
 const TRACEABILITY_GRAPH_FACTS: TraceabilityGraphFactsDescriptor = TraceabilityGraphFactsDescriptor {
     build_facts: build_traceability_graph_facts,
+};
+
+const TRACEABILITY_SCOPE_FACTS: TraceabilityScopeFactsDescriptor = TraceabilityScopeFactsDescriptor {
+    build_facts: build_traceability_scope_facts,
+    expand_closure: expand_traceability_closure_from_facts,
 };
 
 impl LanguagePackAnalysisContext for analyze::RustRepoAnalysisContext {
@@ -84,6 +109,28 @@ fn analysis_environment_fingerprint(root: &Path) -> String {
 
 fn build_traceability_graph_facts(root: &Path, source_files: &[PathBuf]) -> Result<Vec<u8>> {
     analyze::build_traceability_graph_facts(root, source_files)
+}
+
+fn build_traceability_scope_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
+) -> Result<Vec<u8>> {
+    analyze::build_traceability_scope_facts(root, source_files, parsed_repo)
+}
+
+fn expand_traceability_closure_from_facts(
+    source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    facts: &[u8],
+) -> Result<Vec<PathBuf>> {
+    analyze::expand_traceability_closure_from_facts(
+        source_files,
+        scoped_source_files,
+        file_ownership,
+        facts,
+    )
 }
 
 fn is_rust_path(path: &Path) -> bool {

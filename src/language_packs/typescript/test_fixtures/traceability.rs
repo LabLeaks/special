@@ -102,3 +102,46 @@ pub fn write_typescript_reference_traceability_fixture(root: &Path) {
         "import { runLive } from \"./app\";\n\n// @verifies APP.LIVE\nexport function verifies_run_live() {\n    return runLive();\n}\n",
     );
 }
+
+pub fn write_typescript_cycle_traceability_fixture(root: &Path) {
+    create_dirs(root, &["_project", "specs", "src"]);
+    write_special_toml(root);
+    write_architecture(
+        root,
+        "# Architecture\n\n### `@module DEMO`\nDemo module.\n\n### `@area LIVE`\nLive cycle modules.\n\n### `@module LIVE.A`\nLive cycle entry module.\n\n### `@module LIVE.B`\nLive cycle leaf module.\n\n### `@area DEAD`\nDead cycle modules.\n\n### `@module DEAD.A`\nDead cycle entry module.\n\n### `@module DEAD.B`\nDead cycle leaf module.\n",
+    );
+    write_specs(
+        root,
+        "### `@group APP`\nApp root.\n\n### `@spec APP.LIVE`\nLive behavior routed through a cyclic module graph should preserve only the reachable cycle.\n",
+    );
+    write_file(
+        root,
+        "src/app.ts",
+        "// @fileimplements DEMO\nimport { liveEntry } from \"./bridge-a\";\n\nexport function runLive() {\n    return liveEntry();\n}\n\nexport function orphanImpl() {\n    return 0;\n}\n",
+    );
+    write_file(
+        root,
+        "src/bridge-a.ts",
+        "// @fileimplements LIVE.A\nimport { liveLeaf } from \"./bridge-b\";\n\nexport function liveEntry() {\n    return liveLeaf();\n}\n\nexport function bridgeSeed() {\n    return 1;\n}\n",
+    );
+    write_file(
+        root,
+        "src/bridge-b.ts",
+        "// @fileimplements LIVE.B\nimport { bridgeSeed } from \"./bridge-a\";\n\nexport function liveLeaf() {\n    return bridgeSeed();\n}\n\nexport function orphanLiveLeaf() {\n    return 0;\n}\n",
+    );
+    write_file(
+        root,
+        "src/dead-a.ts",
+        "// @fileimplements DEAD.A\nimport { deadLeaf } from \"./dead-b\";\n\nexport function deadEntry() {\n    return deadLeaf();\n}\n",
+    );
+    write_file(
+        root,
+        "src/dead-b.ts",
+        "// @fileimplements DEAD.B\nimport { deadEntry } from \"./dead-a\";\n\nexport function deadLeaf() {\n    return deadEntry();\n}\n",
+    );
+    write_file(
+        root,
+        "src/app.test.ts",
+        "import { runLive } from \"./app\";\n\n// @verifies APP.LIVE\nexport function verifies_run_live() {\n    return runLive();\n}\n",
+    );
+}

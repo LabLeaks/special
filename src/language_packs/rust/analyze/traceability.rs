@@ -6,30 +6,50 @@ Builds conservative Rust implementation traceability from analyzable Rust source
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use anyhow::{Result, anyhow};
 
-use crate::model::{
-    ArchitectureTraceabilitySummary, ImplementRef, ModuleItemKind, ParsedRepo,
-};
-use crate::syntax::{
-    ParsedSourceGraph, SourceCall, SourceInvocation, parse_source_graph, rust::file_module_segments,
-};
+use crate::model::{ArchitectureTraceabilitySummary, ImplementRef, ParsedRepo};
+use crate::syntax::{ParsedSourceGraph, parse_source_graph, rust::file_module_segments};
 
 use crate::modules::analyze::{
     FileOwnership, read_owned_file_text,
     traceability_core::{
         BackwardTraceAvailability, TraceGraph, TraceabilityAnalysis, TraceabilityInputs,
         TraceabilityLanguagePack, TraceabilityOwnedItem, build_root_supports,
-        merge_trace_graph_edges,
-        owned_module_ids_for_path,
+        merge_trace_graph_edges, preserved_graph_item_ids_for_reference,
+        preserved_item_ids_for_reference,
         summarize_repo_traceability as summarize_shared_repo_traceability,
     },
 };
-use super::rust_analyzer::RustAnalyzerCallableItem;
 use super::semantic::{RustSemanticFactSourceKind, selected_semantic_fact_source};
 use super::toolchain::RustToolchainProject;
-use super::use_tree::collect_use_aliases;
+
+#[path = "traceability/boundary.rs"]
+mod boundary;
+#[path = "traceability/call_graph.rs"]
+mod call_graph;
+#[path = "traceability/facts.rs"]
+mod facts;
+#[cfg(test)]
+#[path = "traceability/tests.rs"]
+mod tests;
+
+use boundary::{
+    collect_repo_items, derive_scoped_traceability_boundary, is_review_surface, is_test_file_path,
+    source_item_kind,
+};
+#[cfg(test)]
+use boundary::ScopedTraceabilityBoundary;
+use call_graph::{
+    build_parser_call_edges_with_toolchain, build_rust_analyzer_call_edges,
+    collect_cargo_binary_entrypoints, collect_rust_analyzer_reference_items,
+    collect_toolchain_binary_entrypoints,
+};
+use facts::{
+    CachedRustMediatedReason, CachedParsedSourceGraph, CachedTraceabilityItemSupport,
+    RustTraceabilityGraphFacts, RustTraceabilityScopeFacts,
+    decode_traceability_graph_facts,
+};
 
 pub(super) struct RustTraceabilityPack {
     toolchain_project: Option<RustToolchainProject>,
@@ -66,27 +86,6 @@ impl TraceabilityLanguagePack for RustTraceabilityPack {
     }
 }
 
-#[derive(Debug, Clone)]
-struct SourceCallableItem {
-    stable_id: String,
-    name: String,
-    qualified_name: String,
-    module_path: Vec<String>,
-    container_path: Vec<String>,
-    path: PathBuf,
-    span: crate::syntax::SourceSpan,
-    calls: Vec<SourceCall>,
-    invocations: Vec<SourceInvocation>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CallableIndexes {
-    global_name_counts: BTreeMap<String, usize>,
-    same_file_name_counts: BTreeMap<(PathBuf, String), usize>,
-    global_qualified_name_counts: BTreeMap<String, usize>,
-    same_file_qualified_name_counts: BTreeMap<(PathBuf, String), usize>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RustMediatedReason {
     TraitImplEntrypoint,
@@ -113,7 +112,11 @@ fn build_traceability_inputs_from_parts(
         parse_source_graph(path, body)
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
-    TraceabilityInputs { repo_items, graph }
+    TraceabilityInputs {
+        repo_items,
+        context_items: Vec::new(),
+        graph,
+    }
 }
 
 pub(super) fn summarize_repo_traceability(
@@ -149,6 +152,120 @@ pub(super) fn build_traceability_graph_facts(
     Ok(serde_json::to_vec(&facts)?)
 }
 
+pub(super) fn build_traceability_scope_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
+) -> Result<Vec<u8>> {
+    let toolchain_project = super::toolchain::probe_local_toolchain_project(root);
+    let semantic_fact_source = selected_semantic_fact_source(toolchain_project.as_ref());
+    if semantic_fact_source.is_none() {
+        return Err(anyhow!(
+            "Rust backward trace is unavailable because `rust-analyzer` is not installed"
+        ));
+    }
+    let source_graphs = parse_rust_source_graphs(root, source_files);
+    let parser_edges = build_parser_call_edges_with_toolchain(
+        root,
+        source_files,
+        &source_graphs,
+        toolchain_project.as_ref(),
+    );
+    let edges = build_full_trace_edges(
+        root,
+        &source_graphs,
+        toolchain_project.as_ref(),
+        semantic_fact_source,
+        &parser_edges,
+    )?;
+    let root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
+        parse_source_graph(path, body)
+            .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
+    });
+    let facts = RustTraceabilityScopeFacts {
+        source_graphs: source_graphs
+            .iter()
+            .map(|(path, graph)| (path.clone(), CachedParsedSourceGraph::from_parsed(graph)))
+            .collect(),
+        edges,
+        mediated_reasons: collect_mediated_reasons(root, source_files, &source_graphs)
+            .into_iter()
+            .map(|(stable_id, reason)| (stable_id, CachedRustMediatedReason::from_parsed(reason)))
+            .collect(),
+        root_supports: root_supports
+            .into_iter()
+            .map(|(stable_id, support)| {
+                (stable_id, CachedTraceabilityItemSupport::from_runtime(support))
+            })
+            .collect(),
+    };
+    Ok(serde_json::to_vec(&facts)?)
+}
+
+pub(super) fn expand_traceability_closure_from_facts(
+    source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    facts: &[u8],
+) -> Result<Vec<PathBuf>> {
+    if scoped_source_files.is_empty() {
+        return Ok(source_files.to_vec());
+    }
+    let RustTraceabilityScopeFacts {
+        source_graphs,
+        edges,
+        mediated_reasons,
+        root_supports,
+    } = serde_json::from_slice(facts)?;
+    let source_graphs = source_graphs
+        .into_iter()
+        .map(|(path, graph)| (path, graph.into_parsed()))
+        .collect::<BTreeMap<_, _>>();
+    let repo_items = collect_repo_items(
+        &source_graphs,
+        file_ownership,
+        &mediated_reasons
+            .into_iter()
+            .map(|(stable_id, reason)| (stable_id, reason.into_parsed()))
+            .collect(),
+    );
+    let boundary = derive_scoped_traceability_boundary(repo_items, scoped_source_files);
+    let working_files = boundary
+        .context_items
+        .iter()
+        .map(|item| item.path.clone())
+        .collect::<BTreeSet<_>>();
+    let graph = TraceGraph {
+        edges,
+        root_supports: root_supports
+            .into_iter()
+            .map(|(stable_id, support)| (stable_id, support.into_runtime()))
+            .collect(),
+    };
+    let reference = boundary.reference(&graph);
+    let preserved_graph_item_ids = preserved_graph_item_ids_for_reference(&reference);
+    let item_paths = collect_item_paths_by_stable_id(&source_graphs);
+    let kept_files = source_files
+        .iter()
+        .filter(|path| {
+            scoped_source_files.contains(path)
+                || item_paths
+                    .iter()
+                    .any(|(stable_id, item_path)| {
+                        preserved_graph_item_ids.contains(stable_id) && item_path == *path
+                    })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    crate::modules::analyze::emit_analysis_status(&format!(
+        "rust scoped exact traceability closure covers {} of {} file(s) (working closure {})",
+        kept_files.len(),
+        source_files.len(),
+        working_files.len()
+    ));
+    Ok(kept_files)
+}
+
 pub(super) fn build_traceability_analysis_from_cached_or_live_graph_facts(
     root: &Path,
     source_files: &[PathBuf],
@@ -156,38 +273,59 @@ pub(super) fn build_traceability_analysis_from_cached_or_live_graph_facts(
     parsed_repo: &ParsedRepo,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
     traceability_pack: &RustTraceabilityPack,
-) -> TraceabilityAnalysis {
-    let (source_graphs, parser_edges, mediated_reasons) = decode_traceability_graph_facts(graph_facts)
-        .unwrap_or_else(|| {
-            let source_graphs = parse_rust_source_graphs(root, source_files);
-            let parser_edges = build_parser_call_edges_with_toolchain(
-                root,
-                source_files,
-                &source_graphs,
-                traceability_pack.toolchain_project.as_ref(),
-            );
-            let mediated_reasons = collect_mediated_reasons(root, source_files, &source_graphs);
-            (source_graphs, parser_edges, mediated_reasons)
-        });
+) -> Result<TraceabilityAnalysis> {
+    Ok(crate::modules::analyze::traceability_core::build_traceability_analysis(
+        build_traceability_inputs_from_cached_or_live_graph_facts(
+            root,
+            source_files,
+            graph_facts,
+            parsed_repo,
+            file_ownership,
+            traceability_pack,
+        )?,
+    ))
+}
+
+fn build_traceability_inputs_from_cached_or_live_graph_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    graph_facts: Option<&[u8]>,
+    parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    traceability_pack: &RustTraceabilityPack,
+) -> Result<TraceabilityInputs> {
+    let (source_graphs, parser_edges, mediated_reasons) =
+        match decode_traceability_graph_facts(graph_facts) {
+            Ok(Some(decoded)) => decoded,
+            Ok(None) | Err(_) => {
+                let source_graphs = parse_rust_source_graphs(root, source_files);
+                let parser_edges = build_parser_call_edges_with_toolchain(
+                    root,
+                    source_files,
+                    &source_graphs,
+                    traceability_pack.toolchain_project.as_ref(),
+                );
+                let mediated_reasons = collect_mediated_reasons(root, source_files, &source_graphs);
+                (source_graphs, parser_edges, mediated_reasons)
+            }
+        };
     let edges = build_full_trace_edges(
         root,
         &source_graphs,
         traceability_pack.toolchain_project.as_ref(),
         traceability_pack.semantic_fact_source,
         &parser_edges,
-    );
-    crate::modules::analyze::traceability_core::build_traceability_analysis(
-        build_traceability_inputs_from_parts(
-            parsed_repo,
-            &source_graphs,
-            file_ownership,
-            TraceGraph {
-                edges,
-                root_supports: BTreeMap::new(),
-            },
-            &mediated_reasons,
-        ),
-    )
+    )?;
+    Ok(build_traceability_inputs_from_parts(
+        parsed_repo,
+        &source_graphs,
+        file_ownership,
+        TraceGraph {
+            edges,
+            root_supports: BTreeMap::new(),
+        },
+        &mediated_reasons,
+    ))
 }
 
 pub(super) fn build_scoped_traceability_analysis_from_cached_or_live_graph_facts(
@@ -198,31 +336,55 @@ pub(super) fn build_scoped_traceability_analysis_from_cached_or_live_graph_facts
     parsed_repo: &ParsedRepo,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
     traceability_pack: &RustTraceabilityPack,
-) -> TraceabilityAnalysis {
-    let (source_graphs, parser_edges, mediated_reasons) = decode_traceability_graph_facts(graph_facts)
-        .unwrap_or_else(|| {
-            let source_graphs = parse_rust_source_graphs(root, source_files);
-            let parser_edges = build_parser_call_edges_with_toolchain(
-                root,
-                source_files,
-                &source_graphs,
-                traceability_pack.toolchain_project.as_ref(),
-            );
-            let mediated_reasons = collect_mediated_reasons(root, source_files, &source_graphs);
-            (source_graphs, parser_edges, mediated_reasons)
-        });
-    let repo_items = select_scoped_repo_items(
+) -> Result<TraceabilityAnalysis> {
+    Ok(crate::modules::analyze::traceability_core::build_traceability_analysis(
+        build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
+            root,
+            source_files,
+            scoped_source_files,
+            graph_facts,
+            parsed_repo,
+            file_ownership,
+            traceability_pack,
+        )?,
+    ))
+}
+
+fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
+    graph_facts: Option<&[u8]>,
+    parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    traceability_pack: &RustTraceabilityPack,
+) -> Result<TraceabilityInputs> {
+    let (source_graphs, parser_edges, mediated_reasons) =
+        match decode_traceability_graph_facts(graph_facts) {
+            Ok(Some(decoded)) => decoded,
+            Ok(None) | Err(_) => {
+                let source_graphs = parse_rust_source_graphs(root, source_files);
+                let parser_edges = build_parser_call_edges_with_toolchain(
+                    root,
+                    source_files,
+                    &source_graphs,
+                    traceability_pack.toolchain_project.as_ref(),
+                );
+                let mediated_reasons = collect_mediated_reasons(root, source_files, &source_graphs);
+                (source_graphs, parser_edges, mediated_reasons)
+            }
+        };
+    let scoped_boundary = derive_scoped_traceability_boundary(
         collect_repo_items(&source_graphs, file_ownership, &mediated_reasons),
         scoped_source_files,
     );
-    let scoped_seed_ids = repo_items
-        .iter()
-        .map(|item| item.stable_id.clone())
-        .collect::<BTreeSet<_>>();
+    let working_contract = scoped_boundary.working_contract();
     crate::modules::analyze::emit_analysis_status(&format!(
-        "rust scoped traceability targets {} item(s) across {} file(s)",
-        scoped_seed_ids.len(),
-        repo_items
+        "rust scoped traceability targets {} projected item(s), walks reverse callers from {} seed(s), across {} file(s)",
+        working_contract.projected_item_ids.len(),
+        working_contract.preserved_reverse_closure_target_ids.len(),
+        scoped_boundary
+            .context_items
             .iter()
             .map(|item| item.path.clone())
             .collect::<BTreeSet<_>>()
@@ -233,17 +395,14 @@ pub(super) fn build_scoped_traceability_analysis_from_cached_or_live_graph_facts
         traceability_pack.semantic_fact_source,
         Some(RustSemanticFactSourceKind::RustAnalyzer)
     ) {
-        match super::rust_analyzer::build_reverse_reachable_call_edges(
+        let semantic_edges = super::rust_analyzer::build_reverse_reachable_call_edges(
             root,
             &collect_rust_analyzer_reference_items(&source_graphs),
-            &scoped_seed_ids,
+            &scoped_boundary.seed_ids,
             &parser_edges,
-        ) {
-            Ok(semantic_edges) => merge_trace_graph_edges(&mut edges, semantic_edges),
-            Err(error) => {
-                eprintln!("rust-analyzer backward trace failed: {error:#}");
-            }
-        }
+        )
+        .map_err(rust_backward_trace_failure)?;
+        merge_trace_graph_edges(&mut edges, semantic_edges);
     }
     let mut graph = TraceGraph {
         edges,
@@ -252,10 +411,64 @@ pub(super) fn build_scoped_traceability_analysis_from_cached_or_live_graph_facts
     graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
         parse_source_graph(path, body).and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
-    crate::modules::analyze::traceability_core::build_traceability_analysis(TraceabilityInputs {
+    let reference = scoped_boundary.reference(&graph);
+    let projected_item_ids = &reference.contract.projected_item_ids;
+    let preserved_graph_item_ids = preserved_graph_item_ids_for_reference(&reference);
+    let owned_item_ids = scoped_boundary
+        .context_items
+        .iter()
+        .map(|item| item.stable_id.clone());
+    let preserved_context_item_ids = preserved_item_ids_for_reference(&reference, owned_item_ids);
+    let repo_items = scoped_boundary
+        .context_items
+        .iter()
+        .filter(|item| projected_item_ids.contains(&item.stable_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let context_items = scoped_boundary
+        .context_items
+        .into_iter()
+        .filter(|item| preserved_context_item_ids.contains(&item.stable_id))
+        .collect::<Vec<_>>();
+    let graph = TraceGraph {
+        edges: graph
+            .edges
+            .into_iter()
+            .filter(|(caller, _)| preserved_graph_item_ids.contains(caller))
+            .map(|(caller, callees)| {
+                (
+                    caller,
+                    callees
+                        .into_iter()
+                        .filter(|callee| preserved_graph_item_ids.contains(callee))
+                        .collect(),
+                )
+            })
+            .collect(),
+        root_supports: graph
+            .root_supports
+            .into_iter()
+            .filter(|(item_id, _)| preserved_graph_item_ids.contains(item_id))
+            .collect(),
+    };
+    Ok(TraceabilityInputs {
         repo_items,
+        context_items,
         graph,
     })
+}
+
+fn collect_item_paths_by_stable_id(
+    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
+) -> BTreeMap<String, PathBuf> {
+    source_graphs
+        .iter()
+        .flat_map(|(path, graph)| {
+            graph.items
+                .iter()
+                .map(move |item| (item.stable_id.clone(), path.clone()))
+        })
+        .collect()
 }
 
 fn build_full_trace_edges(
@@ -264,7 +477,7 @@ fn build_full_trace_edges(
     toolchain_project: Option<&RustToolchainProject>,
     semantic_fact_source: Option<RustSemanticFactSourceKind>,
     parser_edges: &BTreeMap<String, BTreeSet<String>>,
-) -> BTreeMap<String, BTreeSet<String>> {
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
     let cargo_binary_entrypoints = toolchain_project
         .map(|project| collect_toolchain_binary_entrypoints(project, source_graphs))
         .unwrap_or_else(|| collect_cargo_binary_entrypoints(root, source_graphs));
@@ -274,60 +487,15 @@ fn build_full_trace_edges(
         Some(RustSemanticFactSourceKind::RustAnalyzer)
     ) {
         build_rust_analyzer_call_edges(root, source_graphs, cargo_binary_entrypoints, parser_edges)
-            .unwrap_or_else(|error| {
-                eprintln!("rust-analyzer backward trace failed: {error:#}");
-                parser_edges.clone()
-            })
+            .map_err(rust_backward_trace_failure)
     } else {
-        parser_edges.clone()
+        Ok(parser_edges.clone())
     }
 }
 
-fn build_parser_call_edges_with_toolchain(
-    root: &Path,
-    source_files: &[PathBuf],
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-    toolchain_project: Option<&RustToolchainProject>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let cargo_binary_entrypoints = toolchain_project
-        .map(|project| collect_toolchain_binary_entrypoints(project, source_graphs))
-        .unwrap_or_else(|| collect_cargo_binary_entrypoints(root, source_graphs));
-    let crate_root_aliases = toolchain_project
-        .map(RustToolchainProject::crate_root_aliases)
-        .unwrap_or_else(|| collect_crate_root_aliases(root));
-
-    build_parser_call_edges(
-        root,
-        source_files,
-        source_graphs,
-        cargo_binary_entrypoints,
-        crate_root_aliases,
-    )
+fn rust_backward_trace_failure(error: anyhow::Error) -> anyhow::Error {
+    anyhow!("Rust backward trace is unavailable because `rust-analyzer` trace collection failed: {error:#}")
 }
-
-fn select_scoped_repo_items(
-    repo_items: Vec<TraceabilityOwnedItem>,
-    scoped_source_files: &[PathBuf],
-) -> Vec<TraceabilityOwnedItem> {
-    let scoped_file_set = scoped_source_files.iter().cloned().collect::<BTreeSet<_>>();
-    let scoped_module_ids = repo_items
-        .iter()
-        .filter(|item| scoped_file_set.contains(&item.path))
-        .flat_map(|item| item.module_ids.iter().cloned())
-        .collect::<BTreeSet<_>>();
-
-    repo_items
-        .into_iter()
-        .filter(|item| {
-            scoped_file_set.contains(&item.path)
-                || item
-                    .module_ids
-                    .iter()
-                    .any(|module_id| scoped_module_ids.contains(module_id))
-        })
-        .collect()
-}
-
 
 fn collect_owned_items(
     root: &Path,
@@ -399,58 +567,6 @@ fn owned_items_from_implementation(
         .collect()
 }
 
-fn collect_repo_items(
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
-    mediated_reasons: &BTreeMap<String, RustMediatedReason>,
-) -> Vec<TraceabilityOwnedItem> {
-    let mut items = source_graphs
-        .iter()
-        .flat_map(|(path, graph)| {
-            let module_ids = owned_module_ids_for_path(file_ownership, path);
-            let test_file = is_test_file_path(path);
-            graph
-                .items
-                .iter()
-                .filter(|item| !item.is_test)
-                .map(move |item| TraceabilityOwnedItem {
-                    stable_id: item.stable_id.clone(),
-                    name: item.name.clone(),
-                    kind: source_item_kind(item.kind),
-                    path: path.clone(),
-                    public: item.public,
-                    review_surface: is_review_surface(item, test_file),
-                    test_file,
-                    module_ids: module_ids.clone(),
-                    mediated_reason: mediated_reasons
-                        .get(&item.stable_id)
-                        .map(|reason| reason.as_str()),
-                })
-        })
-        .collect::<Vec<_>>();
-    items.sort_by(|left, right| {
-        left.path
-            .cmp(&right.path)
-            .then_with(|| left.name.cmp(&right.name))
-            .then_with(|| left.kind.cmp(&right.kind))
-    });
-    items
-}
-
-fn is_test_file_path(path: &Path) -> bool {
-    path.components()
-        .any(|component| component.as_os_str() == "tests")
-        || path.file_stem().and_then(|stem| stem.to_str()) == Some("tests")
-}
-
-fn is_process_entrypoint_name(name: &str, kind: crate::syntax::SourceItemKind) -> bool {
-    kind == crate::syntax::SourceItemKind::Function && name == "main"
-}
-
-fn is_review_surface(item: &crate::syntax::SourceItem, test_file: bool) -> bool {
-    !test_file && (item.public || is_process_entrypoint_name(&item.name, item.kind))
-}
-
 fn parse_owned_implementation_graph(
     root: &Path,
     implementation: &ImplementRef,
@@ -481,399 +597,6 @@ fn parse_rust_source_graphs(
             parse_source_graph(path, &text).map(|graph| (path.clone(), graph))
         })
         .collect()
-}
-
-fn collect_callable_items(
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-) -> Vec<SourceCallableItem> {
-    let mut items = Vec::new();
-    for (path, graph) in source_graphs {
-        items.extend(graph.items.iter().cloned().map(|item| SourceCallableItem {
-            stable_id: item.stable_id,
-            name: item.name,
-            qualified_name: item.qualified_name,
-            module_path: item.module_path,
-            container_path: item.container_path,
-            path: path.clone(),
-            span: item.span,
-            calls: item.calls,
-            invocations: item.invocations,
-        }));
-    }
-    items
-}
-
-fn build_parser_call_edges(
-    root: &Path,
-    source_files: &[PathBuf],
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-    cargo_binary_entrypoints: BTreeMap<String, BTreeSet<String>>,
-    crate_root_aliases: BTreeSet<String>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let callable_items = collect_callable_items(source_graphs);
-    let callable_indexes = build_callable_indexes(&callable_items);
-    let imported_call_aliases = collect_imported_call_aliases(root, source_files);
-    build_call_edges(
-        &callable_items,
-        &callable_indexes,
-        &cargo_binary_entrypoints,
-        &crate_root_aliases,
-        &imported_call_aliases,
-    )
-}
-
-fn build_rust_analyzer_call_edges(
-    root: &Path,
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-    cargo_binary_entrypoints: BTreeMap<String, BTreeSet<String>>,
-    parser_call_edges: &BTreeMap<String, BTreeSet<String>>,
-) -> anyhow::Result<BTreeMap<String, BTreeSet<String>>> {
-    let callable_items = collect_callable_items(source_graphs);
-    let seed_ids = source_graphs
-        .values()
-        .flat_map(|graph| graph.items.iter().filter(|item| item.is_test))
-        .map(|item| item.stable_id.clone())
-        .collect::<BTreeSet<_>>();
-    let items = callable_items
-        .iter()
-        .map(|item| RustAnalyzerCallableItem {
-            stable_id: item.stable_id.clone(),
-            name: item.name.clone(),
-            path: root.join(&item.path),
-            span: item.span,
-            calls: item.calls.clone(),
-            invocation_targets: item
-                .invocations
-                .iter()
-                .flat_map(|invocation| {
-                    resolve_invocation_targets(invocation, &cargo_binary_entrypoints)
-                })
-                .collect(),
-        })
-        .collect::<Vec<_>>();
-    super::rust_analyzer::build_reachable_call_edges(root, &items, &seed_ids, parser_call_edges)
-}
-
-fn build_callable_indexes(items: &[SourceCallableItem]) -> CallableIndexes {
-    let mut indexes = CallableIndexes::default();
-    for item in items {
-        *indexes
-            .global_name_counts
-            .entry(item.name.clone())
-            .or_default() += 1;
-        *indexes
-            .same_file_name_counts
-            .entry((item.path.clone(), item.name.clone()))
-            .or_default() += 1;
-        *indexes
-            .global_qualified_name_counts
-            .entry(item.qualified_name.clone())
-            .or_default() += 1;
-        *indexes
-            .same_file_qualified_name_counts
-            .entry((item.path.clone(), item.qualified_name.clone()))
-            .or_default() += 1;
-    }
-    indexes
-}
-
-fn build_call_edges(
-    items: &[SourceCallableItem],
-    indexes: &CallableIndexes,
-    cargo_binary_entrypoints: &BTreeMap<String, BTreeSet<String>>,
-    crate_root_aliases: &BTreeSet<String>,
-    imported_call_aliases: &BTreeMap<PathBuf, BTreeMap<String, Vec<String>>>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mut edges = BTreeMap::new();
-    for item in items {
-        let mut callees = item
-            .calls
-            .iter()
-            .filter_map(|call| {
-                resolve_call_target(
-                    item,
-                    call,
-                    items,
-                    indexes,
-                    crate_root_aliases,
-                    imported_call_aliases,
-                )
-            })
-            .collect::<BTreeSet<_>>();
-        for invocation in &item.invocations {
-            for entrypoint_id in resolve_invocation_targets(invocation, cargo_binary_entrypoints) {
-                callees.insert(entrypoint_id);
-            }
-        }
-        edges.insert(item.stable_id.clone(), callees);
-    }
-    edges
-}
-
-fn resolve_call_target(
-    caller: &SourceCallableItem,
-    call: &SourceCall,
-    items: &[SourceCallableItem],
-    indexes: &CallableIndexes,
-    crate_root_aliases: &BTreeSet<String>,
-    imported_call_aliases: &BTreeMap<PathBuf, BTreeMap<String, Vec<String>>>,
-) -> Option<String> {
-    if let Some(qualifier) = call.qualifier.as_ref() {
-        for qualified_name in
-            qualified_name_candidates(caller, qualifier, &call.name, crate_root_aliases)
-        {
-            if indexes
-                .global_qualified_name_counts
-                .get(&qualified_name)
-                .copied()
-                .unwrap_or(0)
-                == 1
-            {
-                return items
-                    .iter()
-                    .find(|item| item.qualified_name == qualified_name)
-                    .map(|item| item.stable_id.clone());
-            }
-
-            if indexes
-                .same_file_qualified_name_counts
-                .get(&(caller.path.clone(), qualified_name.clone()))
-                .copied()
-                .unwrap_or(0)
-                == 1
-            {
-                return items
-                    .iter()
-                    .find(|item| item.path == caller.path && item.qualified_name == qualified_name)
-                    .map(|item| item.stable_id.clone());
-            }
-        }
-    }
-
-    if indexes
-        .same_file_name_counts
-        .get(&(caller.path.clone(), call.name.clone()))
-        .copied()
-        .unwrap_or(0)
-        == 1
-    {
-        return items
-            .iter()
-            .find(|item| item.path == caller.path && item.name == call.name)
-            .map(|item| item.stable_id.clone());
-    }
-
-    if indexes
-        .global_name_counts
-        .get(&call.name)
-        .copied()
-        .unwrap_or(0)
-        == 1
-    {
-        return items
-            .iter()
-            .find(|item| item.name == call.name)
-            .map(|item| item.stable_id.clone());
-    }
-
-    if let Some(imports) = imported_call_aliases
-        .get(&caller.path)
-        .and_then(|aliases| aliases.get(&call.name))
-    {
-        for imported_path in imports {
-            let Some((qualifier, imported_name)) = imported_path.rsplit_once("::") else {
-                continue;
-            };
-            for qualified_name in
-                qualified_name_candidates(caller, qualifier, imported_name, crate_root_aliases)
-            {
-                if indexes
-                    .global_qualified_name_counts
-                    .get(&qualified_name)
-                    .copied()
-                    .unwrap_or(0)
-                    == 1
-                {
-                    return items
-                        .iter()
-                        .find(|item| item.qualified_name == qualified_name)
-                        .map(|item| item.stable_id.clone());
-                }
-
-                if indexes
-                    .same_file_qualified_name_counts
-                    .get(&(caller.path.clone(), qualified_name.clone()))
-                    .copied()
-                    .unwrap_or(0)
-                    == 1
-                {
-                    return items
-                        .iter()
-                        .find(|item| {
-                            item.path == caller.path && item.qualified_name == qualified_name
-                        })
-                        .map(|item| item.stable_id.clone());
-                }
-            }
-        }
-    }
-
-    None
-}
-
-fn resolve_invocation_targets(
-    invocation: &SourceInvocation,
-    cargo_binary_entrypoints: &BTreeMap<String, BTreeSet<String>>,
-) -> BTreeSet<String> {
-    match &invocation.kind {
-        crate::syntax::SourceInvocationKind::LocalCargoBinary { binary_name } => {
-            cargo_binary_entrypoints
-                .get(binary_name)
-                .cloned()
-                .unwrap_or_default()
-        }
-    }
-}
-
-fn collect_cargo_binary_entrypoints(
-    _root: &Path,
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let cargo_toml_path = _root.join("Cargo.toml");
-    let Ok(cargo_toml_text) = std::fs::read_to_string(cargo_toml_path) else {
-        return BTreeMap::new();
-    };
-    let Ok(cargo_toml) = cargo_toml_text.parse::<toml::Value>() else {
-        return BTreeMap::new();
-    };
-    let Some(bin_entries) = cargo_toml.get("bin").and_then(|value| value.as_array()) else {
-        return BTreeMap::new();
-    };
-
-    let binary_sources = bin_entries.iter().filter_map(|bin_entry| {
-        let bin_name = bin_entry.get("name").and_then(|value| value.as_str())?;
-        let bin_path = bin_entry.get("path").and_then(|value| value.as_str())?;
-        Some((bin_name.to_string(), PathBuf::from(bin_path)))
-    });
-
-    collect_binary_entrypoints_for_sources(source_graphs, binary_sources)
-}
-
-fn collect_toolchain_binary_entrypoints(
-    project: &RustToolchainProject,
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    collect_binary_entrypoints_for_sources(
-        source_graphs,
-        project
-            .binary_target_sources()
-            .into_iter()
-            .flat_map(|(bin_name, paths)| {
-                paths
-                    .into_iter()
-                    .map(move |path| (bin_name.clone(), path))
-                    .collect::<Vec<_>>()
-            }),
-    )
-}
-
-fn collect_binary_entrypoints_for_sources<I>(
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-    binary_sources: I,
-) -> BTreeMap<String, BTreeSet<String>>
-where
-    I: IntoIterator<Item = (String, PathBuf)>,
-{
-    let mut entrypoints: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-
-    for (bin_name, bin_path) in binary_sources {
-        let Some(graph) = find_source_graph_for_path(source_graphs, &bin_path) else {
-            continue;
-        };
-        let main_ids = graph
-            .items
-            .iter()
-            .filter(|item| item.name == "main")
-            .map(|item| item.stable_id.clone())
-            .collect::<BTreeSet<_>>();
-        if !main_ids.is_empty() {
-            entrypoints.entry(bin_name).or_default().extend(main_ids);
-        }
-    }
-
-    entrypoints
-}
-
-fn find_source_graph_for_path<'a>(
-    source_graphs: &'a BTreeMap<PathBuf, ParsedSourceGraph>,
-    target_path: &Path,
-) -> Option<&'a ParsedSourceGraph> {
-    source_graphs
-        .iter()
-        .find(|(path, _)| *path == target_path || path.ends_with(target_path))
-        .map(|(_, graph)| graph)
-}
-
-fn collect_crate_root_aliases(root: &Path) -> BTreeSet<String> {
-    let mut aliases = BTreeSet::new();
-    let cargo_toml_path = root.join("Cargo.toml");
-    let Ok(cargo_toml_text) = std::fs::read_to_string(cargo_toml_path) else {
-        return aliases;
-    };
-    let Ok(cargo_toml) = cargo_toml_text.parse::<toml::Value>() else {
-        return aliases;
-    };
-
-    if let Some(lib_name) = cargo_toml
-        .get("lib")
-        .and_then(|value| value.get("name"))
-        .and_then(|value| value.as_str())
-    {
-        aliases.insert(lib_name.to_string());
-    }
-
-    if let Some(package_name) = cargo_toml
-        .get("package")
-        .and_then(|value| value.get("name"))
-        .and_then(|value| value.as_str())
-    {
-        aliases.insert(package_name.replace('-', "_"));
-    }
-
-    aliases
-}
-
-fn collect_imported_call_aliases(
-    root: &Path,
-    source_files: &[PathBuf],
-) -> BTreeMap<PathBuf, BTreeMap<String, Vec<String>>> {
-    let mut aliases_by_file = BTreeMap::new();
-
-    for path in source_files
-        .iter()
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
-    {
-        let Ok(text) = read_owned_file_text(root, path) else {
-            continue;
-        };
-        let Ok(file) = syn::parse_file(&text) else {
-            continue;
-        };
-        let mut aliases = BTreeMap::<String, Vec<String>>::new();
-        for item in &file.items {
-            let syn::Item::Use(item_use) = item else {
-                continue;
-            };
-            for (alias, targets) in collect_use_aliases(&item_use.tree) {
-                aliases.entry(alias).or_default().extend(targets);
-            }
-        }
-        if !aliases.is_empty() {
-            aliases_by_file.insert(path.clone(), aliases);
-        }
-    }
-
-    aliases_by_file
 }
 
 fn collect_mediated_reasons(
@@ -987,443 +710,4 @@ fn build_local_qualified_name(
     segments.extend(container_path.iter().cloned());
     segments.push(name.to_string());
     segments.join("::")
-}
-
-fn qualified_name_candidates(
-    caller: &SourceCallableItem,
-    qualifier: &str,
-    call_name: &str,
-    crate_root_aliases: &BTreeSet<String>,
-) -> Vec<String> {
-    let prefixes = qualifier_prefix_candidates(caller, qualifier, crate_root_aliases);
-    let mut seen = BTreeSet::new();
-    prefixes
-        .into_iter()
-        .filter_map(|mut segments| {
-            segments.push(call_name.to_string());
-            let qualified_name = segments.join("::");
-            seen.insert(qualified_name.clone())
-                .then_some(qualified_name)
-        })
-        .collect()
-}
-
-fn collect_rust_analyzer_reference_items(
-    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
-) -> Vec<RustAnalyzerCallableItem> {
-    collect_callable_items(source_graphs)
-        .into_iter()
-        .map(|item| RustAnalyzerCallableItem {
-            stable_id: item.stable_id,
-            name: item.name,
-            path: item.path,
-            span: item.span,
-            calls: item.calls,
-            invocation_targets: BTreeSet::new(),
-        })
-        .collect()
-}
-
-fn qualifier_prefix_candidates(
-    caller: &SourceCallableItem,
-    qualifier: &str,
-    crate_root_aliases: &BTreeSet<String>,
-) -> Vec<Vec<String>> {
-    let segments = qualifier
-        .split("::")
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| segment.to_string())
-        .collect::<Vec<_>>();
-    if segments.is_empty() {
-        return Vec::new();
-    }
-
-    if segments.first().map(String::as_str) == Some("crate") {
-        return vec![segments.into_iter().skip(1).collect()];
-    }
-
-    if segments
-        .first()
-        .is_some_and(|segment| crate_root_aliases.contains(segment))
-    {
-        return vec![segments.into_iter().skip(1).collect()];
-    }
-
-    if segments.first().map(String::as_str) == Some("self") {
-        if segments.len() == 1 && !caller.container_path.is_empty() {
-            return vec![
-                caller
-                    .module_path
-                    .iter()
-                    .cloned()
-                    .chain(caller.container_path.iter().cloned())
-                    .collect(),
-            ];
-        }
-        return vec![
-            caller
-                .module_path
-                .iter()
-                .cloned()
-                .chain(segments.into_iter().skip(1))
-                .collect(),
-        ];
-    }
-
-    if segments.first().map(String::as_str) == Some("Self") {
-        if caller.container_path.is_empty() {
-            return Vec::new();
-        }
-        return vec![
-            caller
-                .module_path
-                .iter()
-                .cloned()
-                .chain(caller.container_path.iter().cloned())
-                .chain(segments.into_iter().skip(1))
-                .collect(),
-        ];
-    }
-
-    if segments.first().map(String::as_str) == Some("super") {
-        let mut ancestor_depth = 0usize;
-        while segments.get(ancestor_depth).map(String::as_str) == Some("super") {
-            ancestor_depth += 1;
-        }
-        if ancestor_depth > caller.module_path.len() {
-            return Vec::new();
-        }
-        let base_len = caller.module_path.len().saturating_sub(ancestor_depth);
-        return vec![
-            caller.module_path[..base_len]
-                .iter()
-                .cloned()
-                .chain(segments.into_iter().skip(ancestor_depth))
-                .collect(),
-        ];
-    }
-
-    let mut candidates = Vec::new();
-    for ancestor_len in (0..=caller.module_path.len()).rev() {
-        candidates.push(
-            caller.module_path[..ancestor_len]
-                .iter()
-                .cloned()
-                .chain(segments.iter().cloned())
-                .collect(),
-        );
-    }
-    candidates
-}
-
-fn source_item_kind(kind: crate::syntax::SourceItemKind) -> ModuleItemKind {
-    match kind {
-        crate::syntax::SourceItemKind::Function => ModuleItemKind::Function,
-        crate::syntax::SourceItemKind::Method => ModuleItemKind::Method,
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct RustTraceabilityGraphFacts {
-    source_graphs: BTreeMap<PathBuf, CachedParsedSourceGraph>,
-    parser_edges: BTreeMap<String, BTreeSet<String>>,
-    mediated_reasons: BTreeMap<String, CachedRustMediatedReason>,
-}
-
-type RustGraphFactsDecoded = (
-    BTreeMap<PathBuf, ParsedSourceGraph>,
-    BTreeMap<String, BTreeSet<String>>,
-    BTreeMap<String, RustMediatedReason>,
-);
-
-fn decode_traceability_graph_facts(
-    facts: Option<&[u8]>,
-) -> Option<RustGraphFactsDecoded> {
-    let facts = facts?;
-    let facts = serde_json::from_slice::<RustTraceabilityGraphFacts>(facts).ok()?;
-    Some((
-        facts
-            .source_graphs
-            .into_iter()
-            .map(|(path, graph)| (path, graph.into_parsed()))
-            .collect(),
-        facts.parser_edges,
-        facts
-            .mediated_reasons
-            .into_iter()
-            .map(|(stable_id, reason)| (stable_id, reason.into_parsed()))
-            .collect(),
-    ))
-}
-
-#[derive(Serialize, Deserialize)]
-struct CachedParsedSourceGraph {
-    items: Vec<CachedSourceItem>,
-}
-
-impl CachedParsedSourceGraph {
-    fn from_parsed(graph: &ParsedSourceGraph) -> Self {
-        Self {
-            items: graph.items.iter().map(CachedSourceItem::from_parsed).collect(),
-        }
-    }
-
-    fn into_parsed(self) -> ParsedSourceGraph {
-        ParsedSourceGraph {
-            language: crate::syntax::SourceLanguage::new("rust"),
-            items: self
-                .items
-                .into_iter()
-                .map(CachedSourceItem::into_parsed)
-                .collect(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct CachedSourceItem {
-    source_path: String,
-    stable_id: String,
-    name: String,
-    qualified_name: String,
-    module_path: Vec<String>,
-    container_path: Vec<String>,
-    shape_fingerprint: String,
-    shape_node_count: usize,
-    kind: CachedSourceItemKind,
-    span: CachedSourceSpan,
-    public: bool,
-    root_visible: bool,
-    is_test: bool,
-    calls: Vec<CachedSourceCall>,
-    invocations: Vec<CachedSourceInvocation>,
-}
-
-impl CachedSourceItem {
-    fn from_parsed(item: &crate::syntax::SourceItem) -> Self {
-        Self {
-            source_path: item.source_path.clone(),
-            stable_id: item.stable_id.clone(),
-            name: item.name.clone(),
-            qualified_name: item.qualified_name.clone(),
-            module_path: item.module_path.clone(),
-            container_path: item.container_path.clone(),
-            shape_fingerprint: item.shape_fingerprint.clone(),
-            shape_node_count: item.shape_node_count,
-            kind: CachedSourceItemKind::from_parsed(item.kind),
-            span: CachedSourceSpan::from_parsed(item.span),
-            public: item.public,
-            root_visible: item.root_visible,
-            is_test: item.is_test,
-            calls: item.calls.iter().map(CachedSourceCall::from_parsed).collect(),
-            invocations: item
-                .invocations
-                .iter()
-                .map(CachedSourceInvocation::from_parsed)
-                .collect(),
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::SourceItem {
-        crate::syntax::SourceItem {
-            source_path: self.source_path,
-            stable_id: self.stable_id,
-            name: self.name,
-            qualified_name: self.qualified_name,
-            module_path: self.module_path,
-            container_path: self.container_path,
-            shape_fingerprint: self.shape_fingerprint,
-            shape_node_count: self.shape_node_count,
-            kind: self.kind.into_parsed(),
-            span: self.span.into_parsed(),
-            public: self.public,
-            root_visible: self.root_visible,
-            is_test: self.is_test,
-            calls: self
-                .calls
-                .into_iter()
-                .map(CachedSourceCall::into_parsed)
-                .collect(),
-            invocations: self
-                .invocations
-                .into_iter()
-                .map(CachedSourceInvocation::into_parsed)
-                .collect(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum CachedSourceItemKind {
-    Function,
-    Method,
-}
-
-impl CachedSourceItemKind {
-    fn from_parsed(kind: crate::syntax::SourceItemKind) -> Self {
-        match kind {
-            crate::syntax::SourceItemKind::Function => Self::Function,
-            crate::syntax::SourceItemKind::Method => Self::Method,
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::SourceItemKind {
-        match self {
-            Self::Function => crate::syntax::SourceItemKind::Function,
-            Self::Method => crate::syntax::SourceItemKind::Method,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct CachedSourceSpan {
-    start_line: usize,
-    end_line: usize,
-    start_column: usize,
-    end_column: usize,
-    start_byte: usize,
-    end_byte: usize,
-}
-
-impl CachedSourceSpan {
-    fn from_parsed(span: crate::syntax::SourceSpan) -> Self {
-        Self {
-            start_line: span.start_line,
-            end_line: span.end_line,
-            start_column: span.start_column,
-            end_column: span.end_column,
-            start_byte: span.start_byte,
-            end_byte: span.end_byte,
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::SourceSpan {
-        crate::syntax::SourceSpan {
-            start_line: self.start_line,
-            end_line: self.end_line,
-            start_column: self.start_column,
-            end_column: self.end_column,
-            start_byte: self.start_byte,
-            end_byte: self.end_byte,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct CachedSourceCall {
-    name: String,
-    qualifier: Option<String>,
-    syntax: CachedCallSyntaxKind,
-    span: CachedSourceSpan,
-}
-
-impl CachedSourceCall {
-    fn from_parsed(call: &crate::syntax::SourceCall) -> Self {
-        Self {
-            name: call.name.clone(),
-            qualifier: call.qualifier.clone(),
-            syntax: CachedCallSyntaxKind::from_parsed(&call.syntax),
-            span: CachedSourceSpan::from_parsed(call.span),
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::SourceCall {
-        crate::syntax::SourceCall {
-            name: self.name,
-            qualifier: self.qualifier,
-            syntax: self.syntax.into_parsed(),
-            span: self.span.into_parsed(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum CachedCallSyntaxKind {
-    Identifier,
-    ScopedIdentifier,
-    Field,
-}
-
-impl CachedCallSyntaxKind {
-    fn from_parsed(kind: &crate::syntax::CallSyntaxKind) -> Self {
-        match kind {
-            crate::syntax::CallSyntaxKind::Identifier => Self::Identifier,
-            crate::syntax::CallSyntaxKind::ScopedIdentifier => Self::ScopedIdentifier,
-            crate::syntax::CallSyntaxKind::Field => Self::Field,
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::CallSyntaxKind {
-        match self {
-            Self::Identifier => crate::syntax::CallSyntaxKind::Identifier,
-            Self::ScopedIdentifier => crate::syntax::CallSyntaxKind::ScopedIdentifier,
-            Self::Field => crate::syntax::CallSyntaxKind::Field,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct CachedSourceInvocation {
-    kind: CachedSourceInvocationKind,
-    span: CachedSourceSpan,
-}
-
-impl CachedSourceInvocation {
-    fn from_parsed(invocation: &crate::syntax::SourceInvocation) -> Self {
-        Self {
-            kind: CachedSourceInvocationKind::from_parsed(&invocation.kind),
-            span: CachedSourceSpan::from_parsed(invocation.span),
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::SourceInvocation {
-        crate::syntax::SourceInvocation {
-            kind: self.kind.into_parsed(),
-            span: self.span.into_parsed(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum CachedSourceInvocationKind {
-    LocalCargoBinary { binary_name: String },
-}
-
-impl CachedSourceInvocationKind {
-    fn from_parsed(kind: &crate::syntax::SourceInvocationKind) -> Self {
-        match kind {
-            crate::syntax::SourceInvocationKind::LocalCargoBinary { binary_name } => {
-                Self::LocalCargoBinary {
-                    binary_name: binary_name.clone(),
-                }
-            }
-        }
-    }
-
-    fn into_parsed(self) -> crate::syntax::SourceInvocationKind {
-        match self {
-            Self::LocalCargoBinary { binary_name } => {
-                crate::syntax::SourceInvocationKind::LocalCargoBinary { binary_name }
-            }
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum CachedRustMediatedReason {
-    TraitImplEntrypoint,
-}
-
-impl CachedRustMediatedReason {
-    fn from_parsed(reason: RustMediatedReason) -> Self {
-        match reason {
-            RustMediatedReason::TraitImplEntrypoint => Self::TraitImplEntrypoint,
-        }
-    }
-
-    fn into_parsed(self) -> RustMediatedReason {
-        match self {
-            Self::TraitImplEntrypoint => RustMediatedReason::TraitImplEntrypoint,
-        }
-    }
 }

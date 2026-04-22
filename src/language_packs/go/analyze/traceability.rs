@@ -6,23 +6,25 @@ Builds Go traceability inputs and tool-assisted call edges for the built-in Go p
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::config::ProjectToolchain;
 use crate::model::{ArchitectureTraceabilitySummary, ImplementRef, ParsedArchitecture, ParsedRepo};
 use crate::syntax::{CallSyntaxKind, ParsedSourceGraph, SourceCall, parse_source_graph};
 
 use crate::modules::analyze::traceability_core::{
     TraceGraph, TraceabilityAnalysis, TraceabilityInputs, TraceabilityLanguagePack,
-    TraceabilityOwnedItem, build_root_supports, merge_trace_graph_edges, owned_module_ids_for_path,
+    TraceabilityItemSupport, TraceabilityOwnedItem, build_root_supports,
+    merge_trace_graph_edges, owned_module_ids_for_path,
     summarize_repo_traceability as summarize_shared_repo_traceability,
 };
 use crate::modules::analyze::{FileOwnership, emit_analysis_status, read_owned_file_text};
+use super::scope;
 use super::dependencies::collect_go_import_aliases;
 use super::surface::{is_go_path, is_review_surface, is_test_file_path, source_item_kind};
-use super::toolchain::{create_temp_dir, discover_go_binary, go_list_packages};
+use super::toolchain::{create_temp_dir, go_list_packages};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GoTraceabilityPack;
@@ -31,22 +33,9 @@ impl TraceabilityLanguagePack for GoTraceabilityPack {
     fn backward_trace_availability(
         &self,
     ) -> crate::modules::analyze::traceability_core::BackwardTraceAvailability {
-        let Some(go_binary) = discover_go_binary() else {
-            return crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
-                "Go backward trace is unavailable because `go` is not installed through `mise`",
-            );
-        };
-        let Some(go_bin_dir) = go_binary.parent() else {
-            return crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
-                "Go backward trace is unavailable because the installed `go` binary has no parent directory",
-            );
-        };
-        if !go_bin_dir.join("gopls").exists() {
-            return crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
-                "Go backward trace is unavailable because `gopls` is not installed alongside `go`",
-            );
-        }
-        crate::modules::analyze::traceability_core::BackwardTraceAvailability::default()
+        crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
+            "Go backward trace availability must be resolved from the analyzed project root",
+        )
     }
 
     fn owned_items_for_implementations(
@@ -90,13 +79,33 @@ pub(super) fn build_traceability_analysis_from_cached_or_live_graph_facts(
     _parsed_architecture: &ParsedArchitecture,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
     _traceability_pack: &GoTraceabilityPack,
-) -> TraceabilityAnalysis {
-    let (source_graphs, static_edges) = decode_traceability_graph_facts(graph_facts)
-        .unwrap_or_else(|| {
+) -> Result<TraceabilityAnalysis> {
+    Ok(crate::modules::analyze::traceability_core::build_traceability_analysis(
+        build_traceability_inputs_from_cached_or_live_graph_facts(
+            root,
+            source_files,
+            graph_facts,
+            parsed_repo,
+            file_ownership,
+        )?,
+    ))
+}
+
+pub(super) fn build_traceability_inputs_from_cached_or_live_graph_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    graph_facts: Option<&[u8]>,
+    parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+) -> Result<TraceabilityInputs> {
+    let (source_graphs, static_edges) = match decode_traceability_graph_facts(graph_facts) {
+        Ok(Some(decoded)) => decoded,
+        Ok(None) | Err(_) => {
             let source_graphs = parse_go_source_graphs(root, source_files);
             let static_edges = build_static_call_edges(root, &source_graphs);
             (source_graphs, static_edges)
-        });
+        }
+    };
     let repo_items = collect_repo_items(&source_graphs, file_ownership);
     let mut graph = TraceGraph {
         edges: static_edges,
@@ -107,73 +116,18 @@ pub(super) fn build_traceability_analysis_from_cached_or_live_graph_facts(
         build_gopls_reference_edges(root, &collect_callable_items(&source_graphs)),
     );
     graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
-        parse_source_graph(path, body)
+        parse_source_graph(&scope::normalize_go_path(root, path), body)
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
-    crate::modules::analyze::traceability_core::build_traceability_analysis(TraceabilityInputs {
+
+    Ok(TraceabilityInputs {
         repo_items,
+        context_items: Vec::new(),
         graph,
     })
 }
 
-pub(super) fn build_scoped_traceability_analysis_from_cached_or_live_graph_facts(
-    root: &Path,
-    source_files: &[PathBuf],
-    scoped_source_files: &[PathBuf],
-    graph_facts: Option<&[u8]>,
-    parsed_repo: &ParsedRepo,
-    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
-) -> TraceabilityAnalysis {
-    let (source_graphs, static_edges) = decode_traceability_graph_facts(graph_facts)
-        .unwrap_or_else(|| {
-            let source_graphs = parse_go_source_graphs(root, source_files);
-            let static_edges = build_static_call_edges(root, &source_graphs);
-            (source_graphs, static_edges)
-        });
-    let repo_items = select_scoped_repo_items(
-        collect_repo_items(&source_graphs, file_ownership),
-        scoped_source_files,
-    );
-    let scoped_seed_ids = repo_items
-        .iter()
-        .map(|item| item.stable_id.clone())
-        .collect::<BTreeSet<_>>();
-    emit_analysis_status(&format!(
-        "go scoped traceability targets {} item(s) across {} file(s)",
-        scoped_seed_ids.len(),
-        repo_items
-            .iter()
-            .map(|item| item.path.clone())
-            .collect::<BTreeSet<_>>()
-            .len()
-    ));
-
-    let mut edges = static_edges;
-    let reverse_seed_edges = edges.clone();
-    merge_trace_graph_edges(
-        &mut edges,
-        build_reverse_reachable_reference_edges(
-            root,
-            &collect_callable_items(&source_graphs),
-            &scoped_seed_ids,
-            &reverse_seed_edges,
-        ),
-    );
-    let mut graph = TraceGraph {
-        edges,
-        root_supports: BTreeMap::new(),
-    };
-    graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
-        parse_source_graph(path, body)
-            .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
-    });
-    crate::modules::analyze::traceability_core::build_traceability_analysis(TraceabilityInputs {
-        repo_items,
-        graph,
-    })
-}
-
-fn parse_go_source_graphs(
+pub(super) fn parse_go_source_graphs(
     root: &Path,
     source_files: &[PathBuf],
 ) -> BTreeMap<PathBuf, ParsedSourceGraph> {
@@ -181,13 +135,17 @@ fn parse_go_source_graphs(
         .iter()
         .filter(|path| is_go_path(path))
         .filter_map(|path| {
-            let text = read_owned_file_text(root, path).ok()?;
-            parse_source_graph(path, &text).map(|graph| (path.clone(), graph))
+            let repo_path = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_path_buf();
+            let text = read_owned_file_text(root, &repo_path).ok()?;
+            parse_source_graph(&repo_path, &text).map(|graph| (repo_path, graph))
         })
         .collect()
 }
 
-fn collect_repo_items(
+pub(super) fn collect_repo_items(
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Vec<TraceabilityOwnedItem> {
@@ -313,7 +271,7 @@ fn build_tool_call_edges(
     edges
 }
 
-fn build_static_call_edges(
+pub(super) fn build_static_call_edges(
     root: &Path,
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
 ) -> BTreeMap<String, BTreeSet<String>> {
@@ -402,40 +360,30 @@ fn build_go_list_package_edges(
     edges
 }
 
-fn build_gopls_reference_edges(
+pub(super) fn build_gopls_reference_edges(
     root: &Path,
     callable_items: &[SourceCallableItem],
 ) -> BTreeMap<String, BTreeSet<String>> {
-    let Some(go_binary) = discover_go_binary() else {
+    let Some(toolchain) = ProjectToolchain::discover(root).ok().flatten() else {
         return BTreeMap::new();
     };
-    let Some(go_bin_dir) = go_binary.parent() else {
+    if !toolchain.tool_available("gopls", &["version"]) {
         return BTreeMap::new();
     };
-    let gopls_binary = go_bin_dir.join("gopls");
-    if !gopls_binary.exists() {
-        return BTreeMap::new();
-    }
     let Some(cache_dir) = create_temp_dir("special-go-build-cache") else {
         return BTreeMap::new();
     };
     let grouped_items = group_callable_items_by_path(root, callable_items);
-    let path_env = format!(
-        "{}:{}",
-        go_bin_dir.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
     let mut edges = BTreeMap::<String, BTreeSet<String>>::new();
     for item in callable_items {
         let Some((line, column)) = item_name_position(root, item) else {
             continue;
         };
-        let output = Command::new(&gopls_binary)
+        let output = toolchain
+            .command("gopls")
             .arg("references")
             .arg("-d")
             .arg(format!("{}:{}:{}", item.path.display(), line, column))
-            .current_dir(root)
-            .env("PATH", &path_env)
             .env("GOCACHE", cache_dir.path())
             .output();
         let Ok(output) = output else {
@@ -462,22 +410,18 @@ fn build_gopls_reference_edges(
     edges
 }
 
-fn build_reverse_reachable_reference_edges(
+pub(super) fn build_reverse_reachable_reference_edges(
     root: &Path,
     callable_items: &[SourceCallableItem],
     seed_ids: &BTreeSet<String>,
     parser_edges: &BTreeMap<String, BTreeSet<String>>,
 ) -> BTreeMap<String, BTreeSet<String>> {
-    let Some(go_binary) = discover_go_binary() else {
+    let Some(toolchain) = ProjectToolchain::discover(root).ok().flatten() else {
         return BTreeMap::new();
     };
-    let Some(go_bin_dir) = go_binary.parent() else {
+    if !toolchain.tool_available("gopls", &["version"]) {
         return BTreeMap::new();
     };
-    let gopls_binary = go_bin_dir.join("gopls");
-    if !gopls_binary.exists() {
-        return BTreeMap::new();
-    }
     let Some(cache_dir) = create_temp_dir("special-go-build-cache") else {
         return BTreeMap::new();
     };
@@ -495,11 +439,6 @@ fn build_reverse_reachable_reference_edges(
                 .insert(caller.clone());
         }
     }
-    let path_env = format!(
-        "{}:{}",
-        go_bin_dir.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
     emit_analysis_status(&format!(
         "starting gopls reverse caller walk for {} file(s), {} callable item(s), {} seed root(s)",
         callable_items
@@ -527,12 +466,11 @@ fn build_reverse_reachable_reference_edges(
         let Some((line, column)) = item_name_position(root, callee) else {
             continue;
         };
-        let output = Command::new(&gopls_binary)
+        let output = toolchain
+            .command("gopls")
             .arg("references")
             .arg("-d")
             .arg(format!("{}:{}:{}", callee.path.display(), line, column))
-            .current_dir(root)
-            .env("PATH", &path_env)
             .env("GOCACHE", cache_dir.path())
             .output();
         let Ok(output) = output else {
@@ -566,7 +504,7 @@ fn build_reverse_reachable_reference_edges(
 }
 
 #[derive(Debug, Clone)]
-struct SourceCallableItem {
+pub(super) struct SourceCallableItem {
     stable_id: String,
     name: String,
     qualified_name: String,
@@ -584,7 +522,7 @@ struct CallableIndexes {
     global_qualified_name_counts: BTreeMap<String, usize>,
 }
 
-fn collect_callable_items(
+pub(super) fn collect_callable_items(
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
 ) -> Vec<SourceCallableItem> {
     let mut items = Vec::new();
@@ -715,33 +653,19 @@ fn resolve_call_target(
     None
 }
 
-fn select_scoped_repo_items(
-    repo_items: Vec<TraceabilityOwnedItem>,
-    scoped_source_files: &[PathBuf],
-) -> Vec<TraceabilityOwnedItem> {
-    let scoped_file_set = scoped_source_files.iter().cloned().collect::<BTreeSet<_>>();
-    let scoped_module_ids = repo_items
-        .iter()
-        .filter(|item| scoped_file_set.contains(&item.path))
-        .flat_map(|item| item.module_ids.iter().cloned())
-        .collect::<BTreeSet<_>>();
-
-    repo_items
-        .into_iter()
-        .filter(|item| {
-            scoped_file_set.contains(&item.path)
-                || item
-                    .module_ids
-                    .iter()
-                    .any(|module_id| scoped_module_ids.contains(module_id))
-        })
-        .collect()
-}
-
 #[derive(Serialize, Deserialize)]
 struct GoTraceabilityGraphFacts {
     source_graphs: BTreeMap<PathBuf, CachedParsedSourceGraph>,
     static_edges: BTreeMap<String, BTreeSet<String>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct GoTraceabilityScopeFacts {
+    pub(super) source_graphs: BTreeMap<PathBuf, CachedParsedSourceGraph>,
+    pub(super) file_adjacency: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    pub(super) static_edges: BTreeMap<String, BTreeSet<String>>,
+    pub(super) tool_reference_edges: BTreeMap<String, BTreeSet<String>>,
+    pub(super) root_supports: BTreeMap<String, CachedTraceabilityItemSupport>,
 }
 
 type GoGraphFactsDecoded = (
@@ -749,34 +673,36 @@ type GoGraphFactsDecoded = (
     BTreeMap<String, BTreeSet<String>>,
 );
 
-fn decode_traceability_graph_facts(
+pub(super) fn decode_traceability_graph_facts(
     facts: Option<&[u8]>,
-) -> Option<GoGraphFactsDecoded> {
-    let facts = facts?;
-    let facts = serde_json::from_slice::<GoTraceabilityGraphFacts>(facts).ok()?;
-    Some((
+) -> Result<Option<GoGraphFactsDecoded>> {
+    let Some(facts) = facts else {
+        return Ok(None);
+    };
+    let facts = serde_json::from_slice::<GoTraceabilityGraphFacts>(facts)?;
+    Ok(Some((
         facts
             .source_graphs
             .into_iter()
             .map(|(path, graph)| (path, graph.into_parsed()))
             .collect(),
         facts.static_edges,
-    ))
+    )))
 }
 
-#[derive(Serialize, Deserialize)]
-struct CachedParsedSourceGraph {
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct CachedParsedSourceGraph {
     items: Vec<CachedSourceItem>,
 }
 
 impl CachedParsedSourceGraph {
-    fn from_parsed(graph: &ParsedSourceGraph) -> Self {
+    pub(super) fn from_parsed(graph: &ParsedSourceGraph) -> Self {
         Self {
             items: graph.items.iter().map(CachedSourceItem::from_parsed).collect(),
         }
     }
 
-    fn into_parsed(self) -> ParsedSourceGraph {
+    pub(super) fn into_parsed(self) -> ParsedSourceGraph {
         ParsedSourceGraph {
             language: crate::syntax::SourceLanguage::new("go"),
             items: self
@@ -788,7 +714,41 @@ impl CachedParsedSourceGraph {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct CachedTraceabilityItemSupport {
+    name: String,
+    has_item_scoped_support: bool,
+    has_file_scoped_support: bool,
+    current_specs: BTreeSet<String>,
+    planned_specs: BTreeSet<String>,
+    deprecated_specs: BTreeSet<String>,
+}
+
+impl CachedTraceabilityItemSupport {
+    pub(super) fn from_runtime(support: TraceabilityItemSupport) -> Self {
+        Self {
+            name: support.name,
+            has_item_scoped_support: support.has_item_scoped_support,
+            has_file_scoped_support: support.has_file_scoped_support,
+            current_specs: support.current_specs,
+            planned_specs: support.planned_specs,
+            deprecated_specs: support.deprecated_specs,
+        }
+    }
+
+    pub(super) fn into_runtime(self) -> TraceabilityItemSupport {
+        TraceabilityItemSupport {
+            name: self.name,
+            has_item_scoped_support: self.has_item_scoped_support,
+            has_file_scoped_support: self.has_file_scoped_support,
+            current_specs: self.current_specs,
+            planned_specs: self.planned_specs,
+            deprecated_specs: self.deprecated_specs,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceItem {
     source_path: String,
     stable_id: String,
@@ -861,7 +821,7 @@ impl CachedSourceItem {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 enum CachedSourceItemKind {
     Function,
     Method,
@@ -883,7 +843,7 @@ impl CachedSourceItemKind {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceSpan {
     start_line: usize,
     end_line: usize,
@@ -917,7 +877,7 @@ impl CachedSourceSpan {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceCall {
     name: String,
     qualifier: Option<String>,
@@ -945,7 +905,7 @@ impl CachedSourceCall {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 enum CachedCallSyntaxKind {
     Identifier,
     ScopedIdentifier,
@@ -970,7 +930,7 @@ impl CachedCallSyntaxKind {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CachedSourceInvocation {
     span: CachedSourceSpan,
     kind: CachedSourceInvocationKind,
@@ -992,7 +952,7 @@ impl CachedSourceInvocation {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 enum CachedSourceInvocationKind {
     LocalCargoBinary { binary_name: String },
 }
@@ -1040,6 +1000,16 @@ mod tests {
             "module example.com/demo\n\ngo 1.23\n",
         )
         .expect("go.mod should be written");
+        fs::write(
+            root.path().join(".tool-versions"),
+            "go 1.23.12\n",
+        )
+        .expect(".tool-versions should be written");
+        fs::write(
+            root.path().join("special.toml"),
+            "root = \".\"\n\n[toolchain]\nmanager = \"mise\"\n",
+        )
+        .expect("special.toml should be written");
         fs::write(
             root.path().join("app/main.go"),
             "// @fileimplements DEMO\npackage app\n\nimport l \"example.com/demo/left\"\n\nfunc LiveImpl() int {\n    return helper() + l.SharedValue()\n}\n\nfunc helper() int {\n    return 1\n}\n",
@@ -1159,5 +1129,94 @@ mod tests {
             .expect("LiveImpl should have tool-derived edges");
         assert!(callees.contains(&left_shared));
         assert!(!callees.contains(&right_shared));
+    }
+
+    #[test]
+    fn build_tool_call_edges_resolves_nested_go_constructor_calls() {
+        let root = super::create_temp_dir("special-go-tool-edges-interface")
+            .expect("root dir should be created");
+        fs::create_dir_all(root.path().join("app")).expect("app dir should be created");
+        fs::create_dir_all(root.path().join("live")).expect("live dir should be created");
+        fs::create_dir_all(root.path().join("dead")).expect("dead dir should be created");
+        fs::write(
+            root.path().join("go.mod"),
+            "module example.com/demo\n\ngo 1.23\n",
+        )
+        .expect("go.mod should be written");
+        fs::write(root.path().join(".tool-versions"), "go 1.23.12\n")
+            .expect(".tool-versions should be written");
+        fs::write(
+            root.path().join("special.toml"),
+            "version = \"1\"\nroot = \".\"\n",
+        )
+        .expect("special.toml should be written");
+        fs::write(
+            root.path().join("app/main.go"),
+            "// @fileimplements DEMO\npackage app\n\nimport live \"example.com/demo/live\"\n\ntype Runner interface {\n    Run() int\n}\n\nfunc LiveImpl() int {\n    return invoke(live.NewRunner())\n}\n\nfunc invoke(r Runner) int {\n    return r.Run()\n}\n",
+        )
+        .expect("main.go should be written");
+        fs::write(
+            root.path().join("live/live.go"),
+            "// @fileimplements LIVE\npackage live\n\ntype LiveRunner struct{}\n\nfunc NewRunner() LiveRunner {\n    return LiveRunner{}\n}\n\nfunc (LiveRunner) Run() int {\n    return 1\n}\n",
+        )
+        .expect("live/live.go should be written");
+        fs::write(
+            root.path().join("dead/dead.go"),
+            "// @fileimplements DEAD\npackage dead\n\ntype DeadRunner struct{}\n\nfunc NewRunner() DeadRunner {\n    return DeadRunner{}\n}\n\nfunc (DeadRunner) Run() int {\n    return 2\n}\n",
+        )
+        .expect("dead/dead.go should be written");
+
+        let mut source_graphs = BTreeMap::new();
+        for relative in ["app/main.go", "live/live.go", "dead/dead.go"] {
+            let path = PathBuf::from(relative);
+            let text = fs::read_to_string(root.path().join(&path))
+                .expect("fixture file should be readable");
+            let graph = parse_source_graph(&path, &text).expect("source graph should parse");
+            source_graphs.insert(path, graph);
+        }
+
+        let main_graph = source_graphs
+            .get(&PathBuf::from("app/main.go"))
+            .expect("main graph should be present");
+        let live_impl_item = main_graph
+            .items
+            .iter()
+            .find(|item| item.name == "LiveImpl")
+            .expect("LiveImpl should be present");
+        assert!(
+            live_impl_item.calls.iter().any(|call| {
+                call.name == "NewRunner" && call.qualifier.as_deref() == Some("live")
+            }),
+            "expected nested constructor call to be parsed",
+        );
+
+        let aliases = collect_go_import_aliases(
+            &fs::read_to_string(root.path().join("app/main.go"))
+                .expect("main.go should be readable"),
+        );
+        assert_eq!(
+            aliases.get("live").map(String::as_str),
+            Some("example.com/demo/live")
+        );
+
+        let packages = go_list_packages(root.path()).expect("go list should find packages");
+        assert!(
+            packages
+                .iter()
+                .any(|package| package.import_path == "example.com/demo/live")
+        );
+
+        let edges = build_tool_call_edges(root.path(), &source_graphs);
+        let live_impl = "app/main.go:app::LiveImpl:10".to_string();
+        let live_constructor = "live/live.go:live::live::NewRunner:6".to_string();
+        let dead_constructor = "dead/dead.go:dead::NewRunner:6".to_string();
+        let callees = edges
+            .get(&live_impl)
+            .expect("LiveImpl should have tool-derived edges");
+        assert!(
+            callees.contains(&live_constructor),
+            "expected nested constructor edge; actual={callees:?}"
+        );
+        assert!(!callees.contains(&dead_constructor));
     }
 }

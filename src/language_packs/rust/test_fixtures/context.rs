@@ -6,7 +6,8 @@ Rust fixture scenarios for repo-health context and support-surface traceability 
 use std::path::Path;
 
 use super::support::{
-    create_dirs, write_architecture, write_file, write_special_toml, write_specs,
+    create_dirs, write_architecture, write_file, write_rust_toolchain_contract, write_special_toml,
+    write_specs,
 };
 
 pub fn write_traceability_module_analysis_fixture(root: &Path) {
@@ -32,7 +33,7 @@ pub fn write_traceability_module_analysis_fixture(root: &Path) {
 
 pub fn write_traceability_module_context_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
-    write_special_toml(root);
+    write_rust_toolchain_contract(root);
     write_architecture(root, "# Architecture\n\n### `@module DEMO`\nDemo module.\n");
     write_specs(
         root,
@@ -57,7 +58,7 @@ pub fn write_traceability_module_context_fixture(root: &Path) {
 
 pub fn write_traceability_multiple_supports_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
-    write_special_toml(root);
+    write_rust_toolchain_contract(root);
     write_architecture(root, "# Architecture\n\n### `@module DEMO`\nDemo module.\n");
     write_specs(
         root,
@@ -87,7 +88,7 @@ pub fn write_traceability_multiple_supports_fixture(root: &Path) {
 
 pub fn write_traceability_review_surface_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests/support"]);
-    write_special_toml(root);
+    write_rust_toolchain_contract(root);
     write_architecture(
         root,
         "# Architecture\n\n### `@module DEMO`\nDemo module.\n\n### `@module DEMO.TESTS`\nDemo test helpers.\n",

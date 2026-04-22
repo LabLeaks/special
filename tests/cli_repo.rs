@@ -2,9 +2,6 @@
 #[path = "../src/language_packs/go/test_fixtures.rs"]
 mod go_test_fixtures;
 #[allow(dead_code)]
-#[path = "../src/language_packs/python/test_fixtures.rs"]
-mod python_test_fixtures;
-#[allow(dead_code)]
 #[path = "../src/language_packs/rust/test_fixtures.rs"]
 mod rust_test_fixtures;
 /**
@@ -74,15 +71,6 @@ special health combines parser and Go tool-backed package edges so selector call
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.GO.REFERENCE_EDGES
 special health combines parser and Go tool-backed reference edges so callback-style Go support can trace to the owned implementation item that is passed through an intermediary helper.
 
-@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.PYTHON
-special health surfaces built-in Python implementation traceability for analyzable Python source items when `pyright-langserver` is available.
-
-@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.PYTHON.TOOL_EDGES
-special health combines parser and Python local object-flow edges so imported constructors, local assignments, and `partial(...)`-produced instances can trace to the correct owned implementation items.
-
-@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.PYTHON.REFERENCE_EDGES
-special health combines parser and Python tool-backed reference edges so callback-style Python support can trace to the owned implementation item that is passed through an intermediary helper.
-
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.ALL_SUPPORTING_ROOTS
 special health includes every verifying test and verified spec claim that supports one traced implementation item when backward trace is available.
 
@@ -126,18 +114,14 @@ use go_test_fixtures::{
     write_go_reference_traceability_fixture, write_go_tool_traceability_fixture,
     write_go_traceability_fixture,
 };
-use python_test_fixtures::{
-    write_python_reference_traceability_fixture, write_python_syntax_error_traceability_fixture,
-    write_python_tool_traceability_fixture, write_python_traceability_fixture,
-};
 use rust_test_fixtures::{
     write_traceability_instance_method_fixture, write_traceability_module_analysis_fixture,
     write_traceability_module_context_fixture, write_traceability_multiple_supports_fixture,
     write_traceability_review_surface_fixture,
 };
 use support::{
-    pyright_langserver_available, run_special, rust_analyzer_available, spawn_special,
-    temp_repo_dir, top_level_help_commands, write_duplicate_item_signals_module_analysis_fixture,
+    run_special, rust_analyzer_available, spawn_special, temp_repo_dir, top_level_help_commands,
+    write_duplicate_item_signals_module_analysis_fixture,
     write_many_duplicate_item_signals_module_analysis_fixture,
     write_unreached_code_module_analysis_fixture,
 };
@@ -166,15 +150,6 @@ fn assert_go_traceability_unavailable(json: &Value) {
         json["analysis"]["traceability_unavailable_reason"]
             .as_str()
             .is_some_and(|reason| reason.contains("Go backward trace"))
-    );
-}
-
-fn assert_python_traceability_unavailable(json: &Value) {
-    assert_eq!(json["analysis"]["traceability"], Value::Null);
-    assert!(
-        json["analysis"]["traceability_unavailable_reason"]
-            .as_str()
-            .is_some_and(|reason| reason.contains("Python backward trace"))
     );
 }
 
@@ -729,121 +704,6 @@ fn repo_traceability_reports_unavailable_in_html_too() {
     assert!(stdout.contains("traceability"));
     assert!(stdout.contains("rust-analyzer"));
     assert!(stdout.contains("unavailable"));
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.PYTHON
-fn repo_surfaces_python_traceability() {
-    let root = temp_repo_dir("special-cli-repo-traceability-python");
-    write_python_traceability_fixture(&root);
-
-    let output = run_special(&root, &["health", "--json", "--verbose"]);
-    assert!(output.status.success());
-
-    let json: Value =
-        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-
-    if pyright_langserver_available() {
-        let current_items = json["analysis"]["traceability"]["current_spec_items"]
-            .as_array()
-            .expect("current spec items should be an array");
-        let current_names = current_items
-            .iter()
-            .filter_map(|item| item["name"].as_str())
-            .collect::<Vec<_>>();
-        assert!(current_names.contains(&"live_impl"));
-        assert!(current_names.contains(&"helper"));
-        assert!(current_names.contains(&"shared_value"));
-        assert!(
-            json["analysis"]["traceability"]["unexplained_items"]
-                .as_array()
-                .expect("unexplained items should be an array")
-                .iter()
-                .any(|item| item["name"] == "orphan_impl")
-        );
-        assert_eq!(
-            json["analysis"]["traceability_unavailable_reason"],
-            Value::Null
-        );
-    } else {
-        assert_python_traceability_unavailable(&json);
-    }
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.PYTHON.TOOL_EDGES
-fn repo_surfaces_python_tool_traceability() {
-    let root = temp_repo_dir("special-cli-repo-traceability-python-tool");
-    write_python_tool_traceability_fixture(&root);
-
-    let output = run_special(&root, &["health", "--json", "--verbose"]);
-    assert!(output.status.success());
-
-    let json: Value =
-        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-
-    if pyright_langserver_available() {
-        let current_items = json["analysis"]["traceability"]["current_spec_items"]
-            .as_array()
-            .expect("current spec items should be an array");
-        let current_names = current_items
-            .iter()
-            .filter_map(|item| item["name"].as_str())
-            .collect::<Vec<_>>();
-        assert!(current_names.contains(&"sign"));
-        assert!(current_names.contains(&"validate"));
-        assert!(current_names.contains(&"dumps"));
-        assert!(
-            json["analysis"]["traceability"]["unexplained_items"]
-                .as_array()
-                .expect("unexplained items should be an array")
-                .iter()
-                .any(|item| item["name"] == "orphan_impl")
-        );
-    } else {
-        assert_python_traceability_unavailable(&json);
-    }
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-// @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.PYTHON.REFERENCE_EDGES
-fn repo_surfaces_python_reference_backed_traceability() {
-    let root = temp_repo_dir("special-cli-repo-traceability-python-reference");
-    write_python_reference_traceability_fixture(&root);
-
-    let output = run_special(&root, &["health", "--json", "--verbose"]);
-    assert!(output.status.success());
-
-    let json: Value =
-        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-
-    if pyright_langserver_available() {
-        let current_items = json["analysis"]["traceability"]["current_spec_items"]
-            .as_array()
-            .expect("current spec items should be an array");
-        let current_names = current_items
-            .iter()
-            .filter_map(|item| item["name"].as_str())
-            .collect::<Vec<_>>();
-        assert!(current_names.contains(&"run_live"));
-        assert!(current_names.contains(&"invoke"));
-        assert!(current_names.contains(&"live_callback"));
-        assert!(
-            json["analysis"]["traceability"]["unexplained_items"]
-                .as_array()
-                .expect("unexplained items should be an array")
-                .iter()
-                .any(|item| item["name"] == "orphan_impl")
-        );
-    } else {
-        assert_python_traceability_unavailable(&json);
-    }
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -1720,31 +1580,6 @@ fn repo_surfaces_go_reference_backed_traceability() {
         );
     } else {
         assert_go_traceability_unavailable(&json);
-    }
-
-    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
-}
-
-#[test]
-fn repo_surfaces_python_syntax_bridge_failures_as_unavailable_traceability() {
-    let root = temp_repo_dir("special-cli-repo-traceability-python-syntax-error");
-    write_python_syntax_error_traceability_fixture(&root);
-
-    let output = run_special(&root, &["health", "--json", "--verbose"]);
-    assert!(output.status.success());
-
-    let json: Value =
-        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-
-    if pyright_langserver_available() {
-        panic!("python syntax fixture should not produce available traceability");
-    } else if json["analysis"]["traceability_unavailable_reason"]
-        .as_str()
-        .is_some_and(|reason| reason.contains("Python backward trace is unavailable"))
-    {
-        assert_eq!(json["analysis"]["traceability"], Value::Null);
-    } else {
-        assert_python_traceability_unavailable(&json);
     }
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

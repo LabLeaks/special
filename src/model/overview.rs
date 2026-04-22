@@ -65,6 +65,14 @@ pub struct ArchitectureMetricsSummary {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unreached_items_by_module: Vec<GroupedCount>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fan_in_by_module: Vec<GroupedCount>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fan_out_by_module: Vec<GroupedCount>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ambiguous_internal_targets_by_module: Vec<GroupedCount>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unresolved_internal_targets_by_module: Vec<GroupedCount>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub external_dependency_targets_by_module: Vec<GroupedCount>,
 }
 

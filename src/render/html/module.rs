@@ -311,6 +311,22 @@ fn format_arch_metrics_html(metrics: &ArchitectureMetricsSummary) -> String {
         &metrics.unreached_items_by_module,
     ));
     html.push_str(&render_grouped_metrics_section_html(
+        "fan in by module",
+        &metrics.fan_in_by_module,
+    ));
+    html.push_str(&render_grouped_metrics_section_html(
+        "fan out by module",
+        &metrics.fan_out_by_module,
+    ));
+    html.push_str(&render_grouped_metrics_section_html(
+        "ambiguous internal dependency targets by module",
+        &metrics.ambiguous_internal_targets_by_module,
+    ));
+    html.push_str(&render_grouped_metrics_section_html(
+        "unresolved internal dependency targets by module",
+        &metrics.unresolved_internal_targets_by_module,
+    ));
+    html.push_str(&render_grouped_metrics_section_html(
         "external dependency targets by module",
         &metrics.external_dependency_targets_by_module,
     ));

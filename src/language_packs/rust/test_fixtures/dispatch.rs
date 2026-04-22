@@ -6,16 +6,22 @@ Rust fixture scenarios for call routing, mediation, and method-dispatch traceabi
 use std::path::Path;
 
 use super::support::{
-    create_dirs, write_architecture, write_file, write_special_toml, write_specs,
+    create_dirs, write_architecture, write_file, write_rust_toolchain_contract, write_special_toml,
+    write_specs,
 };
 
 pub fn write_traceability_imported_call_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
-    write_special_toml(root);
+    write_rust_toolchain_contract(root);
     write_architecture(root, "# Architecture\n\n### `@module DEMO`\nDemo module.\n");
     write_specs(
         root,
         "### `@group APP`\nApp root.\n\n### `@spec APP.RENDER`\nImported function calls participate in traceability.\n",
+    );
+    write_file(
+        root,
+        "Cargo.toml",
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\nname = \"demo\"\n",
     );
     write_file(
         root,
@@ -29,14 +35,14 @@ pub fn write_traceability_imported_call_fixture(root: &Path) {
     );
     write_file(
         root,
-        "tests.rs",
-        "// @verifies APP.RENDER\n#[test]\nfn verifies_render_path() {\n    crate::run();\n}\n",
+        "tests/render.rs",
+        "use demo::run;\n\n// @verifies APP.RENDER\n#[test]\nfn verifies_render_path() {\n    run();\n}\n",
     );
 }
 
 pub fn write_traceability_mediated_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
-    write_special_toml(root);
+    write_rust_toolchain_contract(root);
     write_architecture(root, "# Architecture\n\n### `@module DEMO`\nDemo module.\n");
     write_specs(
         root,
@@ -111,7 +117,7 @@ pub fn write_traceability_self_method_fixture(root: &Path) {
 
 pub fn write_traceability_instance_method_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
-    write_special_toml(root);
+    write_rust_toolchain_contract(root);
     write_architecture(root, "# Architecture\n\n### `@module DEMO`\nDemo module.\n");
     write_specs(
         root,

@@ -6,78 +6,97 @@ Discovers local Go tooling and manages temporary Go analysis runtime state for t
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Deserialize;
 
+use crate::config::{
+    ProjectToolStatus, ProjectToolchain, probe_project_tool, standard_tool_unavailable_reason,
+};
+
 pub(super) fn go_list_packages(root: &Path) -> Option<Vec<GoListPackage>> {
-    let go_binary = discover_go_binary()?;
     let cache_dir = create_temp_dir("special-go-build-cache")?;
-    let output = Command::new(go_binary)
+    let toolchain = ProjectToolchain::discover(root).ok().flatten()?;
+    run_go_list_command(root, &toolchain, cache_dir.path())
+        .map(|output| {
+            let mut packages = Vec::new();
+            let stream =
+                serde_json::Deserializer::from_slice(&output.stdout).into_iter::<GoListPackage>();
+            for package in stream.flatten() {
+                packages.push(package);
+            }
+            packages
+        })
+        .filter(|packages| !packages.is_empty())
+}
+
+fn run_go_list_command(
+    _root: &Path,
+    toolchain: &ProjectToolchain,
+    cache_dir: &Path,
+) -> Option<std::process::Output> {
+    toolchain
+        .command("go")
         .args(["list", "-json", "./..."])
-        .current_dir(root)
-        .env("GOCACHE", cache_dir.path())
+        .env("GOCACHE", cache_dir)
         .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let mut packages = Vec::new();
-    let stream = serde_json::Deserializer::from_slice(&output.stdout).into_iter::<GoListPackage>();
-    for package in stream.flatten() {
-        packages.push(package);
-    }
-    (!packages.is_empty()).then_some(packages)
+        .ok()
+        .filter(|output| output.status.success())
 }
 
-pub(super) fn discover_go_binary() -> Option<PathBuf> {
-    let output = Command::new("mise")
-        .args(["ls", "--json", "go"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+pub(super) fn go_backward_trace_unavailable_reason(root: &Path) -> Option<String> {
+    match probe_project_tool(root, "go", &["version"]).ok()? {
+        ProjectToolStatus::Available => {}
+        status => {
+            return Some(standard_tool_unavailable_reason(
+                "Go backward trace",
+                "go",
+                &status,
+            ));
+        }
     }
-    let installs: Vec<MiseGoInstall> = serde_json::from_slice(&output.stdout).ok()?;
-    let install = installs
-        .into_iter()
-        .filter(|install| install.installed)
-        .max_by(|left, right| {
-            left.active
-                .cmp(&right.active)
-                .then_with(|| compare_semver(&left.version, &right.version))
-        })?;
-    let go_binary = install.install_path.join("bin/go");
-    go_binary.exists().then_some(go_binary)
+    match probe_project_tool(root, "gopls", &["version"]).ok()? {
+        ProjectToolStatus::Available => None,
+        status => Some(standard_tool_unavailable_reason(
+            "Go backward trace",
+            "gopls",
+            &status,
+        )),
+    }
 }
 
-pub(super) fn analysis_environment_fingerprint() -> String {
-    let Some(go_binary) = discover_go_binary() else {
-        return "go=unavailable".to_string();
+pub(super) fn analysis_environment_fingerprint(root: &Path) -> String {
+    let Some(toolchain) = ProjectToolchain::discover(root).ok().flatten() else {
+        return "project_toolchain=unavailable".to_string();
     };
-    let gopls = go_binary
-        .parent()
-        .map(|dir| dir.join("gopls"))
-        .filter(|path| path.exists());
-    format!(
-        "go={};gopls={}",
-        go_binary.display(),
-        gopls
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "unavailable".to_string())
-    )
+    let go = tool_version_fingerprint(&toolchain, "go", &["version"]);
+    let gopls = tool_version_fingerprint(&toolchain, "gopls", &["version"]);
+    format!("project_toolchain_go={go};project_toolchain_gopls={gopls}")
 }
 
-fn compare_semver(left: &str, right: &str) -> std::cmp::Ordering {
-    let parse = |value: &str| {
-        value
-            .split('.')
-            .map(|part| part.parse::<u64>().unwrap_or(0))
-            .collect::<Vec<_>>()
-    };
-    parse(left).cmp(&parse(right))
+fn tool_version_fingerprint(
+    toolchain: &ProjectToolchain,
+    tool: &str,
+    version_args: &[&str],
+) -> String {
+    let available = toolchain.tool_available(tool, version_args);
+    let output = toolchain.command(tool).args(version_args).output();
+    let version = output
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if !stdout.is_empty() {
+                stdout
+            } else if !stderr.is_empty() {
+                stderr
+            } else {
+                "available".to_string()
+            }
+        })
+        .unwrap_or_else(|| available.to_string());
+    version.replace(['\n', '\r'], " ")
 }
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -111,15 +130,6 @@ pub(super) fn create_temp_dir(prefix: &str) -> Option<TempDirGuard> {
 }
 
 #[derive(Deserialize)]
-struct MiseGoInstall {
-    version: String,
-    install_path: PathBuf,
-    installed: bool,
-    #[serde(default)]
-    active: bool,
-}
-
-#[derive(Deserialize)]
 pub(super) struct GoListPackage {
     #[serde(rename = "ImportPath")]
     pub(super) import_path: String,
@@ -128,7 +138,6 @@ pub(super) struct GoListPackage {
     #[serde(rename = "GoFiles", default)]
     pub(super) go_files: Vec<String>,
 }
-
 #[cfg(test)]
 mod tests {
     use super::create_temp_dir;

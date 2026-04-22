@@ -5,9 +5,10 @@ Discovers local Rust toolchain project context needed by richer Rust language-pa
 // @fileimplements SPECIAL.LANGUAGE_PACKS.RUST.ANALYZE.TOOLCHAIN
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
+
+use crate::config::ProjectToolchain;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct RustToolchainProject {
@@ -79,21 +80,10 @@ impl RustToolchainProject {
 }
 
 pub(super) fn probe_local_toolchain_project(root: &Path) -> Option<RustToolchainProject> {
-    if !root.join("Cargo.toml").exists() {
-        return None;
-    }
-
-    let output = Command::new("mise")
-        .args([
-            "exec",
-            "--",
-            "cargo",
-            "metadata",
-            "--no-deps",
-            "--format-version",
-            "1",
-        ])
-        .current_dir(root)
+    let output = ProjectToolchain::discover(root)
+        .ok()??
+        .command("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -118,11 +108,19 @@ pub(super) fn analysis_environment_fingerprint(root: &Path) -> String {
 
 fn probe_local_toolchain_capabilities(root: &Path) -> RustToolchainCapabilities {
     let rust_analyzer_available = probe_rust_analyzer_available(root);
-    let output = Command::new("mise")
-        .args(["exec", "--", "rustc", "--version", "--verbose"])
-        .current_dir(root)
-        .output();
-    let Ok(output) = output else {
+    let output = ProjectToolchain::discover(root)
+        .ok()
+        .flatten()
+        .map(|toolchain| {
+            toolchain
+                .command("rustc")
+                .args(["--version", "--verbose"])
+                .output()
+        })
+        .transpose()
+        .ok()
+        .flatten();
+    let Some(output) = output else {
         return RustToolchainCapabilities {
             rust_analyzer_available,
             ..RustToolchainCapabilities::default()
@@ -146,10 +144,13 @@ fn probe_local_toolchain_capabilities(root: &Path) -> RustToolchainCapabilities 
 }
 
 fn probe_rust_analyzer_available(root: &Path) -> bool {
-    Command::new("mise")
-        .args(["exec", "--", "rust-analyzer", "--version"])
-        .current_dir(root)
-        .output()
+    ProjectToolchain::discover(root)
+        .ok()
+        .flatten()
+        .map(|toolchain| toolchain.command("rust-analyzer").arg("--version").output())
+        .transpose()
+        .ok()
+        .flatten()
         .map(|output| output.status.success())
         .unwrap_or(false)
 }

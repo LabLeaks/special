@@ -5,9 +5,6 @@ mod go_test_fixtures;
 mod metrics;
 #[path = "cli_modules/parse.rs"]
 mod parse;
-#[allow(dead_code)]
-#[path = "../src/language_packs/python/test_fixtures.rs"]
-mod python_test_fixtures;
 /**
 @module SPECIAL.TESTS.CLI_MODULES
 `special arch` command tests in `tests/cli_modules.rs`.
@@ -134,12 +131,6 @@ special arch can surface Go-specific implementation evidence for owned Go code t
 @spec SPECIAL.MODULE_COMMAND.METRICS.GO
 special arch --metrics --verbose surfaces built-in Go implementation evidence for owned Go code, including public and internal item counts, import-path dependency evidence, coupling derived from owned local imports, and per-item connected, outbound-heavy, isolated, and unreached signals when the built-in analyzer can identify them honestly.
 
-@group SPECIAL.MODULE_COMMAND.METRICS.PYTHON_GROUP
-special arch can surface Python-specific implementation evidence for owned Python code through the built-in Python pack.
-
-@spec SPECIAL.MODULE_COMMAND.METRICS.PYTHON
-special arch --metrics --verbose surfaces built-in Python implementation evidence for owned Python code, including public and internal item counts plus per-item connected, isolated, and unreached signals when the built-in analyzer can identify them honestly.
-
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON
 special arch --json --metrics includes structured architecture analysis summaries.
 
@@ -187,12 +178,6 @@ special arch --json --metrics can include Go-specific structured analysis eviden
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.JSON.GO
 special arch --json --metrics --verbose includes structured Go implementation evidence for owned Go code, including public and internal item counts, dependency targets, and per-item signals.
-
-@group SPECIAL.MODULE_COMMAND.METRICS.JSON.PYTHON_GROUP
-special arch --json --metrics can include Python-specific structured analysis evidence.
-
-@spec SPECIAL.MODULE_COMMAND.METRICS.JSON.PYTHON
-special arch --json --metrics --verbose includes structured Python implementation evidence for owned Python code, including public and internal item signals.
 
 @group SPECIAL.MODULE_PARSE
 special parses architecture module declarations and implementation attachments.

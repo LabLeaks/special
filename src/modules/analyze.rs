@@ -110,8 +110,12 @@ pub(crate) fn build_repo_analysis_summary(
         ignore_patterns,
     })?
     .source_files;
-    let scoped_files = repo_scope::scope_source_files(root, &all_files, scoped_paths)?;
-    if scoped_files.len() == all_files.len() {
+    let scope_boundary = repo_scope::build_scope_boundary(root, &all_files, scoped_paths)?;
+    let scoped_files = scope_boundary
+        .as_ref()
+        .map(|boundary| boundary.matched_files())
+        .unwrap_or(&all_files);
+    if scope_boundary.is_none() {
         status::emit_analysis_status(&format!(
             "repo health analysis considers {} analyzable source files",
             all_files.len()
@@ -132,40 +136,49 @@ pub(crate) fn build_repo_analysis_summary(
     ));
     unreached_code::apply_unowned_item_summary(
         root,
-        &scoped_files,
+        scoped_files,
         &file_ownership,
         &mut repo_signals,
     )?;
     status::emit_analysis_status("computing duplicate-logic signals across owned implementation");
     duplication::apply_duplicate_item_summary(root, parsed, &file_ownership, &mut repo_signals)?;
-    if scoped_files.len() != all_files.len() {
-        repo_scope::filter_repo_signals_to_scope(root, &scoped_files, &mut repo_signals);
+    if let Some(boundary) = scope_boundary.as_ref() {
+        repo_scope::filter_repo_signals_to_scope(boundary, &mut repo_signals);
     }
 
-    let traceability_files = repo_scope::traceability_source_files(&all_files, &scoped_files);
+    let traceability_context_files = scope_boundary
+        .as_ref()
+        .map(|boundary| boundary.traceability_candidate_files(&all_files))
+        .unwrap_or_else(|| all_files.clone());
     status::emit_analysis_status(&format!(
         "building language analysis contexts from {} source files",
-        traceability_files.len()
+        traceability_context_files.len()
     ));
     let repo_contexts = registry::build_repo_analysis_contexts(
         root,
-        &traceability_files,
-        Some(&scoped_files),
+        &traceability_context_files,
+        scope_boundary
+            .as_ref()
+            .map(|boundary| boundary.matched_files()),
         parsed_repo,
         parsed,
         &file_ownership,
         true,
     );
-    let traceability = build_repo_traceability_summary(root, &traceability_files, &repo_contexts)
-        .map(|mut summary| {
-            if scoped_files.len() != all_files.len() {
-                status::emit_analysis_status("filtering repo traceability to the requested scope");
-                repo_scope::filter_traceability_to_scope(root, &scoped_files, &mut summary);
-            }
-            summary
-        });
+    let traceability = build_repo_traceability_summary(
+        root,
+        &traceability_context_files,
+        &repo_contexts,
+    )
+    .map(|mut summary| {
+        if let Some(boundary) = scope_boundary.as_ref() {
+            status::emit_analysis_status("filtering repo traceability to the requested scope");
+            repo_scope::filter_traceability_to_scope(boundary, &mut summary);
+        }
+        summary
+    });
     let traceability_unavailable_reason =
-        build_repo_traceability_unavailable_reason(&traceability_files, &repo_contexts);
+        build_repo_traceability_unavailable_reason(&traceability_context_files, &repo_contexts);
 
     Ok(ArchitectureAnalysisSummary {
         repo_signals: Some(repo_signals),

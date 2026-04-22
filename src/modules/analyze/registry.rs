@@ -21,6 +21,43 @@ use super::{FileOwnership, ProviderModuleAnalysis, status};
 pub(super) type RepoAnalysisContexts =
     BTreeMap<SourceLanguage, Box<dyn LanguagePackAnalysisContext>>;
 
+enum TraceabilityPreparation {
+    Ready {
+        source_files: Vec<PathBuf>,
+        graph_facts: Option<Vec<u8>>,
+        include_traceability: bool,
+    },
+    ExplicitlyUnavailable {
+        reason: String,
+    },
+}
+
+fn language_label(language: SourceLanguage) -> &'static str {
+    match language.id() {
+        "typescript" => "TypeScript",
+        "rust" => "Rust",
+        "python" => "Python",
+        "go" => "Go",
+        _ => language.id(),
+    }
+}
+
+fn declared_project_tools(descriptor: &language_packs::LanguagePackDescriptor) -> Option<String> {
+    let tooling = descriptor.project_tooling?;
+    let tools = tooling
+        .requirements
+        .iter()
+        .map(|requirement| {
+            if requirement.probe_args.is_empty() {
+                requirement.tool.to_string()
+            } else {
+                format!("{} {}", requirement.tool, requirement.probe_args.join(" "))
+            }
+        })
+        .collect::<Vec<_>>();
+    (!tools.is_empty()).then(|| tools.join(", "))
+}
+
 pub(super) fn build_repo_analysis_contexts(
     root: &Path,
     source_files: &[PathBuf],
@@ -48,47 +85,137 @@ pub(super) fn build_repo_analysis_contexts(
                 .cloned()
                 .collect::<Vec<_>>()
         });
-        let traceability_source_files = resolve_traceability_source_files(
+        let preparation = prepare_traceability_inputs(
             root,
             descriptor,
             &language_source_files,
             language_scoped_files.as_deref(),
+            parsed_repo,
             file_ownership,
             include_traceability,
-        )
-        .unwrap_or_else(|_| language_source_files.clone());
-        let traceability_graph_facts = resolve_traceability_graph_facts(
-            root,
-            descriptor,
-            &traceability_source_files,
-            include_traceability,
-        )
-        .unwrap_or(None);
-        status::emit_analysis_status(&format!(
-            "building {} analysis context for {} file(s){}",
-            descriptor.language.id(),
-            traceability_source_files.len(),
-            if include_traceability {
-                " with traceability"
-            } else {
-                ""
-            }
-        ));
-        contexts.insert(
-            descriptor.language,
-            (descriptor.build_repo_analysis_context)(
-                root,
-                &traceability_source_files,
-                language_scoped_files.as_deref(),
-                traceability_graph_facts.as_deref(),
-                parsed_repo,
-                parsed_architecture,
-                file_ownership,
-                include_traceability,
-            ),
         );
+        match preparation {
+            TraceabilityPreparation::Ready {
+                source_files,
+                graph_facts,
+                include_traceability,
+            } => {
+                status::emit_analysis_status(&format!(
+                    "building {} analysis context for {} file(s){}{}",
+                    descriptor.language.id(),
+                    source_files.len(),
+                    if include_traceability {
+                        " with traceability"
+                    } else {
+                        ""
+                    },
+                    declared_project_tools(descriptor)
+                        .map(|tools| format!(" using project tools [{tools}]"))
+                        .unwrap_or_default()
+                ));
+                contexts.insert(
+                    descriptor.language,
+                    (descriptor.build_repo_analysis_context)(
+                        root,
+                        &source_files,
+                        language_scoped_files.as_deref(),
+                        graph_facts.as_deref(),
+                        parsed_repo,
+                        parsed_architecture,
+                        file_ownership,
+                        include_traceability,
+                    ),
+                );
+            }
+            TraceabilityPreparation::ExplicitlyUnavailable { reason } => {
+                status::emit_analysis_status(&format!(
+                    "building {} analysis context for {} file(s){}",
+                    descriptor.language.id(),
+                    language_source_files.len(),
+                    declared_project_tools(descriptor)
+                        .map(|tools| format!(" using project tools [{tools}]"))
+                        .unwrap_or_default()
+                ));
+                status::emit_analysis_status(&format!(
+                    "{} traceability preparation is unavailable: {reason}",
+                    descriptor.language.id()
+                ));
+                let inner = (descriptor.build_repo_analysis_context)(
+                    root,
+                    &language_source_files,
+                    language_scoped_files.as_deref(),
+                    None,
+                    parsed_repo,
+                    parsed_architecture,
+                    file_ownership,
+                    false,
+                );
+                contexts.insert(
+                    descriptor.language,
+                    Box::new(ExplicitTraceabilityUnavailableContext { inner, reason }),
+                );
+            }
+        }
     }
     contexts
+}
+
+fn prepare_traceability_inputs(
+    root: &Path,
+    descriptor: &language_packs::LanguagePackDescriptor,
+    source_files: &[PathBuf],
+    scoped_source_files: Option<&[PathBuf]>,
+    parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    include_traceability: bool,
+) -> TraceabilityPreparation {
+    if !include_traceability {
+        return TraceabilityPreparation::Ready {
+            source_files: source_files.to_vec(),
+            graph_facts: None,
+            include_traceability: false,
+        };
+    }
+    let resolved_source_files = match resolve_traceability_source_files(
+        root,
+        descriptor,
+        source_files,
+        scoped_source_files,
+        parsed_repo,
+        file_ownership,
+    ) {
+        Ok(files) => files,
+        Err(error) => {
+            return TraceabilityPreparation::ExplicitlyUnavailable {
+                reason: format!(
+                    "{} backward trace is unavailable because scoped traceability preparation failed: {error}",
+                    language_label(descriptor.language)
+                ),
+            };
+        }
+    };
+    let graph_facts = match resolve_traceability_graph_facts(
+        root,
+        descriptor,
+        &resolved_source_files,
+        true,
+    ) {
+        Ok(facts) => facts,
+        Err(error) => {
+            return TraceabilityPreparation::ExplicitlyUnavailable {
+                reason: format!(
+                    "{} backward trace is unavailable because traceability graph fact preparation failed: {error}",
+                    language_label(descriptor.language)
+                ),
+            };
+        }
+    };
+
+    TraceabilityPreparation::Ready {
+        source_files: resolved_source_files,
+        graph_facts,
+        include_traceability: true,
+    }
 }
 
 fn resolve_traceability_source_files(
@@ -96,12 +223,9 @@ fn resolve_traceability_source_files(
     descriptor: &language_packs::LanguagePackDescriptor,
     source_files: &[PathBuf],
     scoped_source_files: Option<&[PathBuf]>,
+    parsed_repo: &ParsedRepo,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
-    include_traceability: bool,
 ) -> Result<Vec<PathBuf>> {
-    if !include_traceability {
-        return Ok(source_files.to_vec());
-    }
     let Some(scoped_source_files) = scoped_source_files else {
         return Ok(source_files.to_vec());
     };
@@ -112,14 +236,18 @@ fn resolve_traceability_source_files(
         return Ok(source_files.to_vec());
     };
 
-    let environment_fingerprint = (descriptor.analysis_environment_fingerprint)(root);
+    let environment_fingerprint = format!(
+        "{}|repo={:016x}",
+        (descriptor.analysis_environment_fingerprint)(root),
+        crate::cache::parsed_repo_contract_fingerprint(parsed_repo)
+    );
     let facts = load_or_build_language_pack_blob(
         root,
         "scope-facts",
         descriptor.language.id(),
         source_files,
         &environment_fingerprint,
-        || (scope_facts.build_facts)(root, source_files),
+        || (scope_facts.build_facts)(root, source_files, parsed_repo),
     )?;
     (scope_facts.expand_closure)(source_files, scoped_source_files, file_ownership, &facts)
 }
@@ -203,4 +331,36 @@ pub(super) fn analyze_module_language(
         )
     })?;
     context.analyze_module(root, implementations, file_ownership, options)
+}
+
+struct ExplicitTraceabilityUnavailableContext {
+    inner: Box<dyn LanguagePackAnalysisContext>,
+    reason: String,
+}
+
+impl LanguagePackAnalysisContext for ExplicitTraceabilityUnavailableContext {
+    fn summarize_repo_traceability(&self, _root: &Path) -> Option<ArchitectureTraceabilitySummary> {
+        None
+    }
+
+    fn traceability_unavailable_reason(&self) -> Option<String> {
+        Some(self.reason.clone())
+    }
+
+    fn analyze_module(
+        &self,
+        root: &Path,
+        implementations: &[&ImplementRef],
+        file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+        options: ModuleAnalysisOptions,
+    ) -> Result<ProviderModuleAnalysis> {
+        let mut analysis =
+            self.inner
+                .analyze_module(root, implementations, file_ownership, options)?;
+        if options.traceability {
+            analysis.traceability = None;
+            analysis.traceability_unavailable_reason = Some(self.reason.clone());
+        }
+        Ok(analysis)
+    }
 }

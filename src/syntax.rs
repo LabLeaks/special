@@ -461,49 +461,4 @@ export const render = () => {
         let render = item_named(&graph, "render");
         assert!(render.public);
     }
-
-    #[test]
-    fn python_provider_collects_items_and_calls() {
-        let graph = parse_source_graph_for_language_at_path(
-            SourceLanguage::new("python"),
-            Path::new("src/app/example.py"),
-            r#"
-from pkg.client import create_client
-
-def helper():
-    return create_client()
-
-def entry():
-    client = helper()
-    client.run()
-"#,
-        )
-        .expect("python graph should parse");
-
-        assert_eq!(graph.items.len(), 2);
-
-        let helper = item_named(&graph, "helper");
-        assert_eq!(helper.qualified_name, "app::example::helper");
-        assert!(helper.calls.iter().any(|call| {
-            call.name == "create_client"
-                && call
-                    .qualifier
-                    .as_deref()
-                    .is_some_and(|qualifier| qualifier.ends_with("pkg.client"))
-                && call.syntax == CallSyntaxKind::ScopedIdentifier
-        }));
-
-        let entry = item_named(&graph, "entry");
-        assert_eq!(entry.qualified_name, "app::example::entry");
-        assert!(entry.calls.iter().any(|call| {
-            call.name == "helper"
-                && call.qualifier.is_none()
-                && call.syntax == CallSyntaxKind::Identifier
-        }));
-        assert!(entry.calls.iter().any(|call| {
-            call.name == "run"
-                && call.qualifier.as_deref() == Some("client")
-                && call.syntax == CallSyntaxKind::Field
-        }));
-    }
 }

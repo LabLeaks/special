@@ -1,0 +1,7 @@
+name = "special_scoped_health"
+version = "0.1.0"
+defaultTargets = ["ScopedHealth"]
+
+[[lean_lib]]
+name = "ScopedHealth"
+roots = ["ScopedHealth"]

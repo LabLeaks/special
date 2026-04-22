@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::{
-    LanguagePackAnalysisContext, LanguagePackDescriptor, TraceabilityGraphFactsDescriptor,
+    LanguagePackAnalysisContext, LanguagePackDescriptor, ProjectToolRequirement,
+    ProjectToolingDescriptor, TraceabilityGraphFactsDescriptor,
     TraceabilityScopeFactsDescriptor,
 };
 use crate::model::{
@@ -28,8 +29,18 @@ pub(crate) const DESCRIPTOR: LanguagePackDescriptor = LanguagePackDescriptor {
     parse_source_graph,
     build_repo_analysis_context,
     analysis_environment_fingerprint,
+    project_tooling: Some(&PROJECT_TOOLING),
     traceability_scope_facts: Some(&TRACEABILITY_SCOPE_FACTS),
     traceability_graph_facts: Some(&TRACEABILITY_GRAPH_FACTS),
+};
+
+const PROJECT_TOOLING: ProjectToolingDescriptor = ProjectToolingDescriptor {
+    requirements: &[
+        ProjectToolRequirement {
+            tool: "node",
+            probe_args: &["--version"],
+        },
+    ],
 };
 
 const TRACEABILITY_SCOPE_FACTS: TraceabilityScopeFactsDescriptor = TraceabilityScopeFactsDescriptor {
@@ -84,21 +95,30 @@ fn build_repo_analysis_context(
     ))
 }
 
-fn analysis_environment_fingerprint(_root: &Path) -> String {
-    analyze::analysis_environment_fingerprint()
+fn analysis_environment_fingerprint(root: &Path) -> String {
+    analyze::analysis_environment_fingerprint(root)
 }
 
-fn build_traceability_scope_facts(root: &Path, source_files: &[PathBuf]) -> Result<Vec<u8>> {
-    analyze::build_traceability_scope_facts(root, source_files)
+fn build_traceability_scope_facts(
+    root: &Path,
+    source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
+) -> Result<Vec<u8>> {
+    analyze::build_traceability_scope_facts(root, source_files, parsed_repo)
 }
 
 fn expand_traceability_closure_from_facts(
     source_files: &[PathBuf],
     scoped_source_files: &[PathBuf],
-    _file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
     facts: &[u8],
 ) -> Result<Vec<PathBuf>> {
-    analyze::expand_traceability_closure_from_facts(source_files, scoped_source_files, facts)
+    analyze::expand_traceability_closure_from_facts(
+        source_files,
+        scoped_source_files,
+        file_ownership,
+        facts,
+    )
 }
 
 fn build_traceability_graph_facts(root: &Path, source_files: &[PathBuf]) -> Result<Vec<u8>> {

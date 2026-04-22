@@ -15,6 +15,12 @@ use crate::model::{
 };
 use crate::syntax::SourceLanguage;
 
+pub(crate) struct RepoScopeBoundary {
+    root: PathBuf,
+    request_roots: Vec<PathBuf>,
+    matched_files: Vec<PathBuf>,
+}
+
 pub(crate) fn filter_repo_analysis_summary_to_symbol(
     symbol: &str,
     summary: &mut ArchitectureAnalysisSummary,
@@ -48,89 +54,52 @@ pub(crate) fn filter_repo_analysis_summary_to_symbol(
     }
 }
 
-pub(super) fn scope_source_files(
+pub(super) fn build_scope_boundary(
     root: &Path,
     all_files: &[PathBuf],
     scoped_paths: Option<&[PathBuf]>,
-) -> Result<Vec<PathBuf>> {
+) -> Result<Option<RepoScopeBoundary>> {
     let Some(scoped_paths) = scoped_paths else {
-        return Ok(all_files.to_vec());
+        return Ok(None);
     };
     if scoped_paths.is_empty() {
-        return Ok(all_files.to_vec());
+        return Ok(None);
     }
 
-    let scope_roots = normalized_scope_paths(root, scoped_paths);
+    let boundary = RepoScopeBoundary::new(root, scoped_paths, all_files);
 
-    let scoped_files = all_files
-        .iter()
-        .filter(|path| {
-            let candidate = normalize_scope_path(root, path);
-            scope_roots
-                .iter()
-                .any(|scope| candidate == *scope || candidate.starts_with(scope))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if scoped_files.is_empty() {
+    if boundary.matched_files.is_empty() {
         anyhow::bail!("repo scope did not match any analyzable source files");
     }
 
-    Ok(scoped_files)
-}
-
-pub(super) fn traceability_source_files(
-    all_files: &[PathBuf],
-    scoped_files: &[PathBuf],
-) -> Vec<PathBuf> {
-    let scoped_languages: BTreeSet<SourceLanguage> = scoped_files
-        .iter()
-        .filter_map(|path| SourceLanguage::from_path(path))
-        .collect();
-    if scoped_languages.is_empty() {
-        return all_files.to_vec();
-    }
-
-    all_files
-        .iter()
-        .filter(|path| {
-            SourceLanguage::from_path(path)
-                .is_some_and(|language| scoped_languages.contains(&language))
-        })
-        .cloned()
-        .collect()
+    Ok(Some(boundary))
 }
 
 pub(super) fn filter_repo_signals_to_scope(
-    root: &Path,
-    scoped_files: &[PathBuf],
+    boundary: &RepoScopeBoundary,
     summary: &mut ArchitectureRepoSignalsSummary,
 ) {
-    let matcher = RepoScopeMatcher::new(root, scoped_files);
     summary
         .unowned_item_details
-        .retain(|item| matcher.matches_display_path(&item.path));
+        .retain(|item| boundary.matches_display_path(&item.path));
     summary.unowned_items = summary.unowned_item_details.len();
     summary
         .duplicate_item_details
-        .retain(|item| matcher.matches_display_path(&item.path));
+        .retain(|item| boundary.matches_display_path(&item.path));
     summary.duplicate_items = summary.duplicate_item_details.len();
 }
 
 pub(super) fn filter_traceability_to_scope(
-    root: &Path,
-    scoped_files: &[PathBuf],
+    boundary: &RepoScopeBoundary,
     summary: &mut ArchitectureTraceabilitySummary,
 ) {
-    let matcher = RepoScopeMatcher::new(root, scoped_files);
-    retain_traceability_items(&matcher, &mut summary.current_spec_items);
-    retain_traceability_items(&matcher, &mut summary.planned_only_items);
-    retain_traceability_items(&matcher, &mut summary.deprecated_only_items);
-    retain_traceability_items(&matcher, &mut summary.file_scoped_only_items);
-    retain_traceability_items(&matcher, &mut summary.unverified_test_items);
-    retain_traceability_items(&matcher, &mut summary.statically_mediated_items);
-    retain_traceability_items(&matcher, &mut summary.unexplained_items);
+    retain_traceability_items(boundary, &mut summary.current_spec_items);
+    retain_traceability_items(boundary, &mut summary.planned_only_items);
+    retain_traceability_items(boundary, &mut summary.deprecated_only_items);
+    retain_traceability_items(boundary, &mut summary.file_scoped_only_items);
+    retain_traceability_items(boundary, &mut summary.unverified_test_items);
+    retain_traceability_items(boundary, &mut summary.statically_mediated_items);
+    retain_traceability_items(boundary, &mut summary.unexplained_items);
     summary.analyzed_items = summary.current_spec_items.len()
         + summary.planned_only_items.len()
         + summary.deprecated_only_items.len()
@@ -161,10 +130,10 @@ pub(crate) fn normalized_scope_paths(root: &Path, scoped_paths: &[PathBuf]) -> V
 }
 
 fn retain_traceability_items(
-    matcher: &RepoScopeMatcher,
+    boundary: &RepoScopeBoundary,
     items: &mut Vec<ArchitectureTraceabilityItem>,
 ) {
-    items.retain(|item| matcher.matches_display_path(&item.path));
+    items.retain(|item| boundary.matches_display_path(&item.path));
 }
 
 fn retain_traceability_items_by_symbol(
@@ -174,24 +143,55 @@ fn retain_traceability_items_by_symbol(
     items.retain(|item| item.name == symbol);
 }
 
-struct RepoScopeMatcher {
-    root: PathBuf,
-    scoped_files: BTreeSet<PathBuf>,
-}
+impl RepoScopeBoundary {
+    fn new(root: &Path, scoped_paths: &[PathBuf], all_files: &[PathBuf]) -> Self {
+        let request_roots = normalized_scope_paths(root, scoped_paths);
+        let matched_files = all_files
+            .iter()
+            .filter(|path| {
+                let candidate = normalize_scope_path(root, path);
+                request_roots
+                    .iter()
+                    .any(|scope| candidate == *scope || candidate.starts_with(scope))
+            })
+            .cloned()
+            .collect();
 
-impl RepoScopeMatcher {
-    fn new(root: &Path, scoped_files: &[PathBuf]) -> Self {
         Self {
             root: root.to_path_buf(),
-            scoped_files: scoped_files
-                .iter()
-                .map(|path| normalize_scope_path(root, path))
-                .collect(),
+            request_roots,
+            matched_files,
         }
+    }
+
+    pub(super) fn matched_files(&self) -> &[PathBuf] {
+        &self.matched_files
+    }
+
+    pub(super) fn traceability_candidate_files(&self, all_files: &[PathBuf]) -> Vec<PathBuf> {
+        let scoped_languages = self
+            .matched_files
+            .iter()
+            .filter_map(|path| SourceLanguage::from_path(path))
+            .collect::<BTreeSet<_>>();
+        if scoped_languages.is_empty() {
+            return all_files.to_vec();
+        }
+
+        all_files
+            .iter()
+            .filter(|path| {
+                SourceLanguage::from_path(path)
+                    .is_some_and(|language| scoped_languages.contains(&language))
+            })
+            .cloned()
+            .collect()
     }
 
     fn matches_display_path(&self, display_path: &Path) -> bool {
         let candidate = normalize_scope_path(&self.root, display_path);
-        self.scoped_files.contains(&candidate)
+        self.request_roots
+            .iter()
+            .any(|scope| candidate == *scope || candidate.starts_with(scope))
     }
 }

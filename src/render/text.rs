@@ -167,6 +167,18 @@ pub(super) fn render_arch_metrics_text(metrics: &ArchitectureMetricsSummary) -> 
         "unreached items by module",
         &metrics.unreached_items_by_module,
     );
+    append_grouped_counts_text(&mut output, "fan in by module", &metrics.fan_in_by_module);
+    append_grouped_counts_text(&mut output, "fan out by module", &metrics.fan_out_by_module);
+    append_grouped_counts_text(
+        &mut output,
+        "ambiguous internal dependency targets by module",
+        &metrics.ambiguous_internal_targets_by_module,
+    );
+    append_grouped_counts_text(
+        &mut output,
+        "unresolved internal dependency targets by module",
+        &metrics.unresolved_internal_targets_by_module,
+    );
     append_grouped_counts_text(
         &mut output,
         "external dependency targets by module",

@@ -6,7 +6,7 @@ Queries `rust-analyzer` for Rust call-hierarchy edges and maps them back onto sp
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use url::Url;
 
+use crate::config::ProjectToolchain;
 use crate::syntax::{SourceCall, SourceSpan};
 
 #[derive(Debug, Clone)]
@@ -264,9 +265,10 @@ struct RustAnalyzerClient {
 
 impl RustAnalyzerClient {
     fn start(root: &Path) -> Result<Self> {
-        let mut child = Command::new("mise")
-            .args(["exec", "--", "rust-analyzer"])
-            .current_dir(root)
+        let toolchain = ProjectToolchain::discover(root)?
+            .ok_or_else(|| anyhow!("project does not declare a supported toolchain contract"))?;
+        let mut child = toolchain
+            .command("rust-analyzer")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

@@ -208,7 +208,66 @@ fn build_repo_metrics(summary: &crate::model::ArchitectureAnalysisSummary) -> Re
 }
 
 fn build_architecture_metrics(nodes: &[ModuleNode]) -> ArchitectureMetricsSummary {
-    let mut summary = ArchitectureMetricsSummary {
+    let mut summary = empty_architecture_metrics_summary();
+    let mut groups = ArchitectureMetricGroups::default();
+
+    append_architecture_metrics(nodes, &mut summary, &mut groups);
+    groups.finish(&mut summary);
+
+    summary
+}
+
+fn append_architecture_metrics(
+    nodes: &[ModuleNode],
+    summary: &mut ArchitectureMetricsSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    for node in nodes {
+        record_node_kind_metrics(node, summary, groups);
+        if let Some(analysis) = &node.analysis {
+            record_node_analysis_metrics(node, analysis, summary, groups);
+        }
+
+        append_architecture_metrics(&node.children, summary, groups);
+    }
+}
+
+#[derive(Default)]
+struct ArchitectureMetricGroups {
+    modules_by_area: BTreeMap<String, usize>,
+    owned_lines_by_module: BTreeMap<String, usize>,
+    max_cyclomatic_by_module: BTreeMap<String, usize>,
+    max_cognitive_by_module: BTreeMap<String, usize>,
+    panic_sites_by_module: BTreeMap<String, usize>,
+    unreached_items_by_module: BTreeMap<String, usize>,
+    fan_in_by_module: BTreeMap<String, usize>,
+    fan_out_by_module: BTreeMap<String, usize>,
+    ambiguous_internal_targets_by_module: BTreeMap<String, usize>,
+    unresolved_internal_targets_by_module: BTreeMap<String, usize>,
+    external_dependency_targets_by_module: BTreeMap<String, usize>,
+}
+
+impl ArchitectureMetricGroups {
+    fn finish(self, summary: &mut ArchitectureMetricsSummary) {
+        summary.modules_by_area = grouped_count_map(self.modules_by_area);
+        summary.owned_lines_by_module = grouped_count_map(self.owned_lines_by_module);
+        summary.max_cyclomatic_by_module = grouped_count_map(self.max_cyclomatic_by_module);
+        summary.max_cognitive_by_module = grouped_count_map(self.max_cognitive_by_module);
+        summary.panic_sites_by_module = grouped_count_map(self.panic_sites_by_module);
+        summary.unreached_items_by_module = grouped_count_map(self.unreached_items_by_module);
+        summary.fan_in_by_module = grouped_count_map(self.fan_in_by_module);
+        summary.fan_out_by_module = grouped_count_map(self.fan_out_by_module);
+        summary.ambiguous_internal_targets_by_module =
+            grouped_count_map(self.ambiguous_internal_targets_by_module);
+        summary.unresolved_internal_targets_by_module =
+            grouped_count_map(self.unresolved_internal_targets_by_module);
+        summary.external_dependency_targets_by_module =
+            grouped_count_map(self.external_dependency_targets_by_module);
+    }
+}
+
+fn empty_architecture_metrics_summary() -> ArchitectureMetricsSummary {
+    ArchitectureMetricsSummary {
         total_modules: 0,
         total_areas: 0,
         unimplemented_modules: 0,
@@ -234,135 +293,182 @@ fn build_architecture_metrics(nodes: &[ModuleNode]) -> ArchitectureMetricsSummar
         max_cognitive_by_module: Vec::new(),
         panic_sites_by_module: Vec::new(),
         unreached_items_by_module: Vec::new(),
+        fan_in_by_module: Vec::new(),
+        fan_out_by_module: Vec::new(),
+        ambiguous_internal_targets_by_module: Vec::new(),
+        unresolved_internal_targets_by_module: Vec::new(),
         external_dependency_targets_by_module: Vec::new(),
-    };
-    let mut modules_by_area: BTreeMap<String, usize> = BTreeMap::new();
-    let mut owned_lines_by_module: BTreeMap<String, usize> = BTreeMap::new();
-    let mut max_cyclomatic_by_module: BTreeMap<String, usize> = BTreeMap::new();
-    let mut max_cognitive_by_module: BTreeMap<String, usize> = BTreeMap::new();
-    let mut panic_sites_by_module: BTreeMap<String, usize> = BTreeMap::new();
-    let mut unreached_items_by_module: BTreeMap<String, usize> = BTreeMap::new();
-    let mut external_dependency_targets_by_module: BTreeMap<String, usize> = BTreeMap::new();
-
-    append_architecture_metrics(
-        nodes,
-        &mut summary,
-        &mut modules_by_area,
-        &mut owned_lines_by_module,
-        &mut max_cyclomatic_by_module,
-        &mut max_cognitive_by_module,
-        &mut panic_sites_by_module,
-        &mut unreached_items_by_module,
-        &mut external_dependency_targets_by_module,
-    );
-
-    summary.modules_by_area = grouped_count_map(modules_by_area);
-    summary.owned_lines_by_module = grouped_count_map(owned_lines_by_module);
-    summary.max_cyclomatic_by_module = grouped_count_map(max_cyclomatic_by_module);
-    summary.max_cognitive_by_module = grouped_count_map(max_cognitive_by_module);
-    summary.panic_sites_by_module = grouped_count_map(panic_sites_by_module);
-    summary.unreached_items_by_module = grouped_count_map(unreached_items_by_module);
-    summary.external_dependency_targets_by_module =
-        grouped_count_map(external_dependency_targets_by_module);
-
-    summary
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn append_architecture_metrics(
-    nodes: &[ModuleNode],
+fn record_node_kind_metrics(
+    node: &ModuleNode,
     summary: &mut ArchitectureMetricsSummary,
-    modules_by_area: &mut BTreeMap<String, usize>,
-    owned_lines_by_module: &mut BTreeMap<String, usize>,
-    max_cyclomatic_by_module: &mut BTreeMap<String, usize>,
-    max_cognitive_by_module: &mut BTreeMap<String, usize>,
-    panic_sites_by_module: &mut BTreeMap<String, usize>,
-    unreached_items_by_module: &mut BTreeMap<String, usize>,
-    external_dependency_targets_by_module: &mut BTreeMap<String, usize>,
+    groups: &mut ArchitectureMetricGroups,
 ) {
-    for node in nodes {
-        match node.kind() {
-            ArchitectureKind::Area => {
-                summary.total_areas += 1;
-                let descendant_modules = count_descendant_modules(&node.children);
-                if descendant_modules > 0 {
-                    modules_by_area.insert(node.id.clone(), descendant_modules);
-                }
-            }
-            ArchitectureKind::Module => {
-                summary.total_modules += 1;
-                if node.is_unimplemented() {
-                    summary.unimplemented_modules += 1;
-                }
+    match node.kind() {
+        ArchitectureKind::Area => {
+            summary.total_areas += 1;
+            let descendant_modules = count_descendant_modules(&node.children);
+            if descendant_modules > 0 {
+                groups
+                    .modules_by_area
+                    .insert(node.id.clone(), descendant_modules);
             }
         }
-
-        if let Some(analysis) = &node.analysis {
-            if let Some(coverage) = &analysis.coverage {
-                summary.file_scoped_implements += coverage.file_scoped_implements;
-                summary.item_scoped_implements += coverage.item_scoped_implements;
-            }
-            if let Some(metrics) = &analysis.metrics {
-                summary.owned_lines += metrics.owned_lines;
-                summary.public_items += metrics.public_items;
-                summary.internal_items += metrics.internal_items;
-                if node.kind() == ArchitectureKind::Module && metrics.owned_lines > 0 {
-                    owned_lines_by_module.insert(node.id.clone(), metrics.owned_lines);
-                }
-            }
-            if let Some(complexity) = &analysis.complexity {
-                summary.complexity_functions += complexity.function_count;
-                summary.total_cyclomatic += complexity.total_cyclomatic;
-                summary.max_cyclomatic = summary.max_cyclomatic.max(complexity.max_cyclomatic);
-                summary.total_cognitive += complexity.total_cognitive;
-                summary.max_cognitive = summary.max_cognitive.max(complexity.max_cognitive);
-                if node.kind() == ArchitectureKind::Module {
-                    if complexity.max_cyclomatic > 0 {
-                        max_cyclomatic_by_module.insert(node.id.clone(), complexity.max_cyclomatic);
-                    }
-                    if complexity.max_cognitive > 0 {
-                        max_cognitive_by_module.insert(node.id.clone(), complexity.max_cognitive);
-                    }
-                }
-            }
-            if let Some(quality) = &analysis.quality {
-                summary.quality_public_functions += quality.public_function_count;
-                summary.quality_parameters += quality.parameter_count;
-                summary.quality_bool_params += quality.bool_parameter_count;
-                summary.quality_raw_string_params += quality.raw_string_parameter_count;
-                summary.quality_panic_sites += quality.panic_site_count;
-                if node.kind() == ArchitectureKind::Module && quality.panic_site_count > 0 {
-                    panic_sites_by_module.insert(node.id.clone(), quality.panic_site_count);
-                }
-            }
-            if let Some(item_signals) = &analysis.item_signals {
-                summary.unreached_items += item_signals.unreached_item_count;
-                if node.kind() == ArchitectureKind::Module && item_signals.unreached_item_count > 0
-                {
-                    unreached_items_by_module
-                        .insert(node.id.clone(), item_signals.unreached_item_count);
-                }
-            }
-            if let Some(coupling) = &analysis.coupling
-                && node.kind() == ArchitectureKind::Module
-                && coupling.external_target_count > 0
-            {
-                external_dependency_targets_by_module
-                    .insert(node.id.clone(), coupling.external_target_count);
+        ArchitectureKind::Module => {
+            summary.total_modules += 1;
+            if node.is_unimplemented() {
+                summary.unimplemented_modules += 1;
             }
         }
+    }
+}
 
-        append_architecture_metrics(
-            &node.children,
-            summary,
-            modules_by_area,
-            owned_lines_by_module,
-            max_cyclomatic_by_module,
-            max_cognitive_by_module,
-            panic_sites_by_module,
-            unreached_items_by_module,
-            external_dependency_targets_by_module,
-        );
+fn record_node_analysis_metrics(
+    node: &ModuleNode,
+    analysis: &crate::model::ModuleAnalysisSummary,
+    summary: &mut ArchitectureMetricsSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    record_coverage_metrics(analysis, summary);
+    record_owned_item_metrics(node, analysis, summary, groups);
+    record_complexity_metrics(node, analysis, summary, groups);
+    record_quality_metrics(node, analysis, summary, groups);
+    record_item_signal_metrics(node, analysis, summary, groups);
+    record_coupling_metrics(node, analysis, groups);
+}
+
+fn record_coverage_metrics(
+    analysis: &crate::model::ModuleAnalysisSummary,
+    summary: &mut ArchitectureMetricsSummary,
+) {
+    if let Some(coverage) = &analysis.coverage {
+        summary.file_scoped_implements += coverage.file_scoped_implements;
+        summary.item_scoped_implements += coverage.item_scoped_implements;
+    }
+}
+
+fn record_owned_item_metrics(
+    node: &ModuleNode,
+    analysis: &crate::model::ModuleAnalysisSummary,
+    summary: &mut ArchitectureMetricsSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    let Some(metrics) = &analysis.metrics else {
+        return;
+    };
+    summary.owned_lines += metrics.owned_lines;
+    summary.public_items += metrics.public_items;
+    summary.internal_items += metrics.internal_items;
+    if node.kind() == ArchitectureKind::Module && metrics.owned_lines > 0 {
+        groups
+            .owned_lines_by_module
+            .insert(node.id.clone(), metrics.owned_lines);
+    }
+}
+
+fn record_complexity_metrics(
+    node: &ModuleNode,
+    analysis: &crate::model::ModuleAnalysisSummary,
+    summary: &mut ArchitectureMetricsSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    let Some(complexity) = &analysis.complexity else {
+        return;
+    };
+    summary.complexity_functions += complexity.function_count;
+    summary.total_cyclomatic += complexity.total_cyclomatic;
+    summary.max_cyclomatic = summary.max_cyclomatic.max(complexity.max_cyclomatic);
+    summary.total_cognitive += complexity.total_cognitive;
+    summary.max_cognitive = summary.max_cognitive.max(complexity.max_cognitive);
+    if node.kind() == ArchitectureKind::Module {
+        if complexity.max_cyclomatic > 0 {
+            groups
+                .max_cyclomatic_by_module
+                .insert(node.id.clone(), complexity.max_cyclomatic);
+        }
+        if complexity.max_cognitive > 0 {
+            groups
+                .max_cognitive_by_module
+                .insert(node.id.clone(), complexity.max_cognitive);
+        }
+    }
+}
+
+fn record_quality_metrics(
+    node: &ModuleNode,
+    analysis: &crate::model::ModuleAnalysisSummary,
+    summary: &mut ArchitectureMetricsSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    let Some(quality) = &analysis.quality else {
+        return;
+    };
+    summary.quality_public_functions += quality.public_function_count;
+    summary.quality_parameters += quality.parameter_count;
+    summary.quality_bool_params += quality.bool_parameter_count;
+    summary.quality_raw_string_params += quality.raw_string_parameter_count;
+    summary.quality_panic_sites += quality.panic_site_count;
+    if node.kind() == ArchitectureKind::Module && quality.panic_site_count > 0 {
+        groups
+            .panic_sites_by_module
+            .insert(node.id.clone(), quality.panic_site_count);
+    }
+}
+
+fn record_item_signal_metrics(
+    node: &ModuleNode,
+    analysis: &crate::model::ModuleAnalysisSummary,
+    summary: &mut ArchitectureMetricsSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    let Some(item_signals) = &analysis.item_signals else {
+        return;
+    };
+    summary.unreached_items += item_signals.unreached_item_count;
+    if node.kind() == ArchitectureKind::Module && item_signals.unreached_item_count > 0 {
+        groups
+            .unreached_items_by_module
+            .insert(node.id.clone(), item_signals.unreached_item_count);
+    }
+}
+
+fn record_coupling_metrics(
+    node: &ModuleNode,
+    analysis: &crate::model::ModuleAnalysisSummary,
+    groups: &mut ArchitectureMetricGroups,
+) {
+    let Some(coupling) = &analysis.coupling else {
+        return;
+    };
+    if node.kind() != ArchitectureKind::Module {
+        return;
+    }
+    if coupling.fan_in > 0 {
+        groups
+            .fan_in_by_module
+            .insert(node.id.clone(), coupling.fan_in);
+    }
+    if coupling.fan_out > 0 {
+        groups
+            .fan_out_by_module
+            .insert(node.id.clone(), coupling.fan_out);
+    }
+    if coupling.ambiguous_internal_target_count > 0 {
+        groups
+            .ambiguous_internal_targets_by_module
+            .insert(node.id.clone(), coupling.ambiguous_internal_target_count);
+    }
+    if coupling.unresolved_internal_target_count > 0 {
+        groups
+            .unresolved_internal_targets_by_module
+            .insert(node.id.clone(), coupling.unresolved_internal_target_count);
+    }
+    if coupling.external_target_count > 0 {
+        groups
+            .external_dependency_targets_by_module
+            .insert(node.id.clone(), coupling.external_target_count);
     }
 }
 

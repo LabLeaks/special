@@ -39,7 +39,7 @@ fn init_creates_special_toml_in_current_directory() {
     assert!(stdout.contains("special.toml"));
     assert_eq!(
         fs::read_to_string(root.join("special.toml")).expect("special.toml should be created"),
-        "version = \"1\"\nroot = \".\"\n"
+        "version = \"1\"\nroot = \".\"\n\n# Optional: tell tool-backed traceability to use the project's declared toolchain.\n# Out of the box, special understands these project contracts:\n#   - `mise.toml`\n#   - `.tool-versions` (asdf-compatible)\n#\n# If your project root is not where the toolchain file lives, or you want to pin the\n# contract explicitly, uncomment this block:\n#\n# [toolchain]\n# manager = \"mise\" # or \"asdf\"\n"
     );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

@@ -17,6 +17,20 @@ pub(super) fn write_special_toml(root: &Path) {
         .expect("special.toml should be written");
 }
 
+pub(super) fn write_mise_toolchain_override(root: &Path) {
+    fs::write(
+        root.join("special.toml"),
+        "version = \"1\"\nroot = \".\"\n\n[toolchain]\nmanager = \"mise\"\n",
+    )
+    .expect("special.toml should be written");
+}
+
+pub(super) fn write_rust_toolchain_contract(root: &Path) {
+    fs::write(root.join(".tool-versions"), "rust stable\n")
+        .expect(".tool-versions should be written");
+    write_mise_toolchain_override(root);
+}
+
 pub(super) fn write_architecture(root: &Path, body: &str) {
     fs::write(root.join("_project/ARCHITECTURE.md"), body)
         .expect("architecture fixture should be written");
