@@ -45,10 +45,13 @@ def discover_latest_semver_tag(root: Path, backend: str, head: str) -> str:
         output = run_checked(root, ["git", "tag", "--merged", head, "--list"])
         candidates = [line.strip() for line in output.splitlines() if line.strip()]
 
+    head_commit = resolve_commit(root, backend, head)
     versions: list[tuple[tuple[int, int, int, int, tuple[tuple[int, object], ...]], str]] = []
     for candidate in candidates:
         sort_key = semver_sort_key(candidate)
         if sort_key is not None:
+            if resolve_commit(root, backend, candidate) == head_commit:
+                continue
             versions.append((sort_key, candidate))
 
     if not versions:
@@ -60,6 +63,12 @@ def discover_latest_semver_tag(root: Path, backend: str, head: str) -> str:
 
     versions.sort()
     return versions[-1][1]
+
+
+def resolve_commit(root: Path, backend: str, rev: str) -> str:
+    if backend == "jj":
+        return run_checked(root, ["jj", "log", "-r", rev, "--no-graph", "-T", "commit_id"]).strip()
+    return run_checked(root, ["git", "rev-parse", rev]).strip()
 
 
 def changed_files_from_diff(root: Path, backend: str, base: str, head: str) -> list[str]:

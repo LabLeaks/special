@@ -10,6 +10,9 @@
   TypeScript/Go code is less likely to collapse distinct items into one signal.
 - The module metrics contract is now explicit for Rust, TypeScript, and Go, so
   future analyzer work has a clearer parity target.
+- Hardened release tooling so repeat publication attempts choose the intended
+  Jujutsu release revision and release review keeps a useful baseline when the
+  current release tag already exists locally.
 - Added a 0.7.2 backlog for moving shared traceability reasoning into a
   production Lean kernel and upgrading language packs into canonical fact
   adapters.

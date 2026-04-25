@@ -82,19 +82,38 @@ def existing_tags(root: Path) -> set[str]:
     return {line.split(":", 1)[0].strip() for line in output.splitlines() if ":" in line}
 
 
-def current_revision(root: Path) -> str:
-    return run_checked(root, ["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"]).strip()
+def revision_id(root: Path, revset: str) -> str:
+    return run_checked(root, ["jj", "log", "-r", revset, "--no-graph", "-T", "commit_id"]).strip()
 
 
-def require_clean_working_copy(root: Path) -> None:
-    status = run_checked(root, ["jj", "status", "--no-pager"])
-    if (
-        "The working copy is clean" not in status
-        and "The working copy has no changes." not in status
-    ):
-        raise SystemExit(
-            "release publishing requires a clean working copy; commit or revert changes in `@` first"
-        )
+def is_empty_revision(root: Path, revset: str) -> bool:
+    return run_checked(root, ["jj", "log", "-r", revset, "--no-graph", "-T", "empty"]).strip() == "true"
+
+
+def is_conflicted_revision(root: Path, revset: str) -> bool:
+    return (
+        run_checked(root, ["jj", "log", "-r", revset, "--no-graph", "-T", "conflict"]).strip()
+        == "true"
+    )
+
+
+def revision_description(root: Path, revset: str) -> str:
+    return run_checked(root, ["jj", "log", "-r", revset, "--no-graph", "-T", "description"])
+
+
+def release_revset(root: Path) -> str:
+    return "@-" if is_empty_revision(root, "@") else "@"
+
+
+def release_revision(root: Path) -> str:
+    return revision_id(root, release_revset(root))
+
+
+def require_releasable_revision(root: Path, revset: str) -> None:
+    if is_conflicted_revision(root, revset):
+        raise SystemExit(f"release revision `{revset}` has conflicts")
+    if not revision_description(root, revset).strip():
+        raise SystemExit(f"release revision `{revset}` must have a description")
 
 
 def tag_revision(root: Path, tag: str) -> str:
@@ -163,9 +182,10 @@ def main() -> int:
 
     if not root.joinpath(".jj").exists():
         raise SystemExit("release publishing requires a jj repository root")
+    target = release_revset(root)
     if not args.dry_run and not args.allow_mock_publish:
-        require_clean_working_copy(root)
-    revision = current_revision(root)
+        require_releasable_revision(root, target)
+    revision = release_revision(root)
     tag_exists = tag in existing_tags(root)
     if tag_exists and not args.allow_existing_tag:
         raise SystemExit(f"release tag `{tag}` already exists")
@@ -201,6 +221,7 @@ def main() -> int:
             json.dumps(
                 {
                     "tag": tag,
+                    "release_revset": target,
                     "revision": revision,
                     "checklist": CHECKLIST,
                     "bookmark_command": bookmark_command,

@@ -36,7 +36,7 @@ release review grants read access only to the project root.
 without `--full`, release review is diff-scoped against the baseline tag.
 
 @spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.JJ_LATEST_TAG_BASELINE
-release review uses the latest reachable semver tag as the default baseline.
+release review uses the latest reachable semver tag before the reviewed head as the default baseline.
 
 @spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SYNTAX_AWARE_CHANGED_CONTEXT
 release review extracts syntax-aware changed context for supported languages.
@@ -325,7 +325,7 @@ fn release_review_defaults_to_diff_scope() {
 
 #[test]
 fn release_review_prompt_stays_on_implementation_quality() {
-    let payload = release_review_dry_run(&[]);
+    let payload = release_review_dry_run(&["--full"]);
     let first_prompt = payload["review_passes"]
         .as_array()
         .expect("review_passes should be an array")
@@ -429,6 +429,10 @@ fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_jj_repo() {
         latest_reachable_semver_tag_for_repo(&root, "jj", "@"),
         "v0.4.1".to_string()
     );
+    assert_eq!(
+        latest_reachable_semver_tag_for_repo(&root, "jj", "v0.4.1"),
+        "v0.1.0".to_string()
+    );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -476,10 +480,17 @@ fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_git_repo() 
     run_git(&["commit", "-m", "unrelated"]);
     run_git(&["tag", "v9.0.0"]);
     run_git(&["checkout", "-"]);
+    fs::write(root.join("d.txt"), "four\n").expect("fourth fixture should be written");
+    run_git(&["add", "d.txt"]);
+    run_git(&["commit", "-m", "third"]);
 
     assert_eq!(
         latest_reachable_semver_tag_for_repo(&root, "git", "HEAD"),
         "v0.4.1".to_string()
+    );
+    assert_eq!(
+        latest_reachable_semver_tag_for_repo(&root, "git", "v0.4.1"),
+        "v0.1.0".to_string()
     );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");

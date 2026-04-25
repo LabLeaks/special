@@ -14,6 +14,9 @@ the release script dry-run prints the planned checklist and publication commands
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.MATCHES_MANIFEST_VERSION
 the release script requires the requested tag version to exactly match the current `Cargo.toml` package version.
 
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.RELEASE_REVISION
+the release script publishes the current Jujutsu working-copy revision when it contains changes, or its parent when the working-copy revision is an empty child.
+
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.PUSHES_MAIN_AND_TAG
 the release script publishes the release revision by pushing the `main` bookmark with Jujutsu and the release Git tag to origin.
 
@@ -33,9 +36,10 @@ mod support;
 use serde_json::Value;
 
 use support::{
-    current_package_version, current_python_executable, release_tag_command_output,
-    release_tag_dry_run, release_tag_live_output, release_tag_live_output_with_input, tag_exists,
-    tag_points_at_current_revision,
+    current_package_version, current_python_executable, default_release_revision,
+    default_release_revset, release_tag_command_output, release_tag_dry_run,
+    release_tag_live_output, release_tag_live_output_with_input, tag_exists,
+    tag_points_at_default_release_revision,
 };
 
 #[test]
@@ -46,6 +50,10 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
     let revision = payload["revision"].clone();
 
     assert_eq!(payload["tag"], Value::String(format!("v{version}")));
+    assert_eq!(
+        payload["release_revset"],
+        Value::String(default_release_revset())
+    );
     assert!(
         payload["revision"]
             .as_str()
@@ -155,6 +163,18 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
 }
 
 #[test]
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.RELEASE_REVISION
+fn release_tag_dry_run_targets_default_release_revision() {
+    let version = current_package_version();
+    let payload = release_tag_dry_run(&version, &[]);
+
+    assert_eq!(
+        payload["revision"],
+        Value::String(default_release_revision())
+    );
+}
+
+#[test]
 // @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.CHECKLIST
 fn release_tag_script_aborts_when_checklist_answer_is_no() {
     let version = current_package_version();
@@ -215,7 +235,7 @@ fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_ste
     assert!(labels.contains(&"verify_github_release"));
     assert!(labels.contains(&"update_homebrew_formula"));
     let tag = format!("v{version}");
-    let expected = if tag_points_at_current_revision(&tag) {
+    let expected = if tag_points_at_default_release_revision(&tag) {
         vec![
             "bookmark_main",
             "push_main",

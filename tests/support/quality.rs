@@ -371,30 +371,7 @@ print(json.dumps({"dont_write_bytecode": sys.dont_write_bytecode}))
 }
 
 pub fn latest_reachable_semver_tag() -> String {
-    let jj_output = Command::new("jj")
-        .args(["tag", "list", "-r", "::@"])
-        .current_dir(repo_root())
-        .output()
-        .expect("jj tag list should run");
-    assert!(jj_output.status.success());
-
-    let mut versions = Vec::new();
-    for line in String::from_utf8_lossy(&jj_output.stdout).lines() {
-        let Some((tag, _)) = line.split_once(':') else {
-            continue;
-        };
-        let tag = tag.trim();
-        let Some(version) = parse_semver_sort_key(tag) else {
-            continue;
-        };
-        versions.push((version, tag.to_string()));
-    }
-
-    versions.sort();
-    versions
-        .last()
-        .map(|(_, tag)| tag.clone())
-        .expect("repo should have at least one semver tag")
+    latest_reachable_semver_tag_for_repo(&repo_root(), "jj", "@")
 }
 
 pub fn latest_reachable_semver_tag_for_repo(
@@ -440,50 +417,6 @@ print(module.discover_latest_semver_tag(target_root, backend, head))
         .to_string()
 }
 
-type SemverSortKey = (u64, u64, u64, u8, Vec<(u8, String)>);
-
-fn parse_semver_sort_key(tag: &str) -> Option<SemverSortKey> {
-    let stripped = tag.strip_prefix('v').unwrap_or(tag);
-    let (core, prerelease) = match stripped.split_once('-') {
-        Some((core, prerelease)) => (core, Some(prerelease)),
-        None => (stripped, None),
-    };
-    let mut parts = core.split('.');
-    let (Some(major), Some(minor), Some(patch), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return None;
-    };
-    let (Ok(major), Ok(minor), Ok(patch)) = (
-        major.parse::<u64>(),
-        minor.parse::<u64>(),
-        patch.parse::<u64>(),
-    ) else {
-        return None;
-    };
-    let prerelease_key = prerelease
-        .map(|value| {
-            value
-                .split('.')
-                .map(|part| {
-                    if part.chars().all(|ch| ch.is_ascii_digit()) {
-                        (0, format!("{:020}:{}", part.len(), part))
-                    } else {
-                        (1, part.to_string())
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Some((
-        major,
-        minor,
-        patch,
-        if prerelease.is_none() { 1 } else { 0 },
-        prerelease_key,
-    ))
-}
-
 pub fn current_revision() -> String {
     let output = Command::new("jj")
         .args(["log", "-r", "@", "--no-graph", "-T", "commit_id"])
@@ -500,6 +433,49 @@ pub fn current_revision() -> String {
         .expect("revision should be utf-8")
         .trim()
         .to_string()
+}
+
+pub fn default_release_revision() -> String {
+    let revset = default_release_revset();
+    let output = Command::new("jj")
+        .args(["log", "-r", &revset, "--no-graph", "-T", "commit_id"])
+        .current_dir(repo_root())
+        .output()
+        .expect("jj log should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("revision should be utf-8")
+        .trim()
+        .to_string()
+}
+
+pub fn default_release_revset() -> String {
+    let empty_output = Command::new("jj")
+        .args(["log", "-r", "@", "--no-graph", "-T", "empty"])
+        .current_dir(repo_root())
+        .output()
+        .expect("jj log should run");
+    assert!(
+        empty_output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&empty_output.stdout),
+        String::from_utf8_lossy(&empty_output.stderr)
+    );
+    if String::from_utf8(empty_output.stdout)
+        .expect("empty output should be utf-8")
+        .trim()
+        == "true"
+    {
+        "@-"
+    } else {
+        "@"
+    }
+    .to_string()
 }
 
 pub fn tag_exists(tag: &str) -> bool {
@@ -524,9 +500,10 @@ pub fn tag_exists(tag: &str) -> bool {
         .any(|name| name == tag)
 }
 
-pub fn tag_points_at_current_revision(tag: &str) -> bool {
+pub fn tag_points_at_default_release_revision(tag: &str) -> bool {
+    let release_revision = default_release_revision();
     let output = Command::new("jj")
-        .args(["tag", "list", "-r", "@-"])
+        .args(["tag", "list", "-r", &release_revision])
         .current_dir(repo_root())
         .output()
         .expect("jj log should run");
