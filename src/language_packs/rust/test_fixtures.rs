@@ -12,6 +12,9 @@ mod context;
 mod dispatch;
 #[path = "test_fixtures/matching.rs"]
 mod matching;
+#[allow(clippy::duplicate_mod)]
+#[path = "../shared/test_fixture_support.rs"]
+mod shared_support;
 #[path = "test_fixtures/support.rs"]
 mod support;
 

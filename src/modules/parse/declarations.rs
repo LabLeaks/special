@@ -5,14 +5,19 @@ Shared architecture declaration helpers for markdown and source-local module par
 // @fileimplements SPECIAL.MODULES.PARSE.DECLARATIONS
 use std::path::Path;
 
-use crate::annotation_syntax::is_any_tag_boundary;
+use crate::annotation_syntax::{
+    ReservedSpecialAnnotation, is_any_tag_boundary, normalize_markdown_annotation_line,
+    reserved_special_annotation_rest,
+};
 use crate::model::{
-    ArchitectureKind, Diagnostic, DiagnosticSeverity, ParsedArchitecture, PlannedRelease,
+    ArchitectureKind, Diagnostic, DiagnosticSeverity, ParsedArchitecture, PatternStrictness,
+    PlannedRelease,
 };
 use crate::planned_syntax::{
     DeclHeaderError, PlannedAnnotationContext, PlannedAnnotationError, PlannedSyntax,
     parse_decl_header, parse_planned_annotation,
 };
+pub(crate) use crate::text_lines::skip_blank_lines as skip_blank_doc_lines;
 
 pub(crate) fn normalized_architecture_heading(line: &str) -> Option<(ArchitectureKind, &str)> {
     if !line.trim_start().starts_with('#') {
@@ -31,15 +36,19 @@ pub(crate) fn normalized_architecture_heading(line: &str) -> Option<(Architectur
     }
 }
 
-pub(crate) fn normalized_annotation_line(line: Option<&str>) -> Option<&str> {
-    line.and_then(normalize_markdown_annotation_line)
+pub(crate) fn normalized_pattern_heading(line: &str) -> Option<&str> {
+    if !line.trim_start().starts_with('#') {
+        return None;
+    }
+    let trimmed = normalize_markdown_annotation_line(line)?;
+    let trimmed = trimmed.trim_start_matches('#').trim();
+    let trimmed = trimmed.strip_prefix('`').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_suffix('`').unwrap_or(trimmed);
+    trimmed.strip_prefix("@pattern ")
 }
 
-pub(crate) fn skip_blank_doc_lines(lines: &[&str], mut index: usize) -> usize {
-    while index < lines.len() && lines[index].trim().is_empty() {
-        index += 1;
-    }
-    index
+pub(crate) fn normalized_annotation_line(line: Option<&str>) -> Option<&str> {
+    line.and_then(normalize_markdown_annotation_line)
 }
 
 pub(crate) fn maybe_consume_doc_planned(
@@ -68,6 +77,48 @@ pub(crate) fn maybe_consume_doc_planned(
         }
     }
     (planned, planned_release, cursor)
+}
+
+pub(crate) fn maybe_consume_pattern_strictness(
+    annotation: Option<&str>,
+    parsed: &mut ParsedArchitecture,
+    path: &Path,
+    line: usize,
+) -> Option<PatternStrictness> {
+    let annotation = annotation?;
+    let rest = reserved_special_annotation_rest(annotation, ReservedSpecialAnnotation::Strictness)?;
+
+    let mut parts = rest.split_whitespace();
+    let Some(value) = parts.next() else {
+        parsed.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            path: path.to_path_buf(),
+            line,
+            message: "@strictness must be one of high, medium, or low".to_string(),
+        });
+        return Some(PatternStrictness::Medium);
+    };
+    if parts.next().is_some() {
+        parsed.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            path: path.to_path_buf(),
+            line,
+            message: "@strictness must be one of high, medium, or low".to_string(),
+        });
+        return Some(PatternStrictness::Medium);
+    }
+    match PatternStrictness::parse(value) {
+        Some(strictness) => Some(strictness),
+        None => {
+            parsed.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                path: path.to_path_buf(),
+                line,
+                message: "@strictness must be one of high, medium, or low".to_string(),
+            });
+            Some(PatternStrictness::Medium)
+        }
+    }
 }
 
 pub(crate) fn collect_doc_description_lines(
@@ -238,32 +289,41 @@ pub(crate) fn maybe_consume_standalone_planned(
     }
 }
 
+pub(crate) fn parse_pattern_id(
+    rest: &str,
+    annotation: &str,
+    parsed: &mut ParsedArchitecture,
+    path: &Path,
+    line: usize,
+) -> Option<String> {
+    let mut parts = rest.split_whitespace();
+    let Some(id) = parts.next() else {
+        parsed.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            path: path.to_path_buf(),
+            line,
+            message: format!("missing pattern id after {annotation}"),
+        });
+        return None;
+    };
+
+    if parts.next().is_some() {
+        parsed.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            path: path.to_path_buf(),
+            line,
+            message: format!("unexpected trailing content after {annotation} pattern id"),
+        });
+        return None;
+    }
+
+    Some(id.to_string())
+}
+
 fn strip_markdown_prefix(text: &str) -> &str {
     text.strip_prefix("- ")
         .or_else(|| text.strip_prefix("* "))
         .unwrap_or(text)
-}
-
-fn normalize_markdown_annotation_line(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let trimmed = trimmed
-        .strip_prefix('>')
-        .map(str::trim_start)
-        .unwrap_or(trimmed);
-    let trimmed = trimmed.trim_start_matches('#').trim_start();
-    let trimmed = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .unwrap_or(trimmed);
-    let trimmed = trimmed
-        .strip_prefix('`')
-        .and_then(|inner| inner.strip_suffix('`'))
-        .unwrap_or(trimmed);
-    let trimmed = trimmed.trim();
-    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 #[cfg(test)]

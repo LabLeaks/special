@@ -4,3 +4,11 @@ ignore = [
   "CHANGELOG.md",
   "README.md",
 ]
+
+[health]
+ignore-unexplained = [
+  "src/language_packs/*/test_fixtures.rs",
+  "src/language_packs/*/test_fixtures/**",
+  "src/render/html/*_templates.rs",
+  "src/render/text/*_templates.rs",
+]

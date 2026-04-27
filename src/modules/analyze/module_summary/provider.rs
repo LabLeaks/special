@@ -1,3 +1,4 @@
+// @fileimplements SPECIAL.MODULES.ANALYZE.MODULE_SUMMARY
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 

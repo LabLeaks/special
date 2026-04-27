@@ -34,6 +34,7 @@ Release publication flow tests in `tests/quality_tag_release.rs`.
 mod support;
 
 use serde_json::Value;
+use std::{fs, path::Path, process::Command};
 
 use support::{
     current_package_version, current_python_executable, default_release_revision,
@@ -41,6 +42,51 @@ use support::{
     release_tag_live_output, release_tag_live_output_with_input, tag_exists,
     tag_points_at_default_release_revision,
 };
+
+fn run_jj(temp_root: &Path, args: &[&str]) {
+    let output = Command::new("jj")
+        .args(args)
+        .current_dir(temp_root)
+        .output()
+        .expect("jj command should run");
+    assert!(
+        output.status.success(),
+        "jj {:?} failed\nstdout:\n{}\n\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn jj_commit_id(temp_root: &Path, revset: &str) -> String {
+    let output = Command::new("jj")
+        .args(["log", "-r", revset, "--no-graph", "-T", "commit_id"])
+        .current_dir(temp_root)
+        .output()
+        .expect("jj log should run");
+    assert!(
+        output.status.success(),
+        "jj log failed\nstdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("commit id should be utf-8")
+        .trim()
+        .to_string()
+}
+
+fn copy_release_script_fixture(temp_root: &Path) {
+    let scripts = temp_root.join("scripts");
+    fs::create_dir_all(&scripts).expect("scripts directory should be created");
+    for file in ["tag-release.py", "release_tooling.py"] {
+        fs::copy(
+            support::repo_root().join("scripts").join(file),
+            scripts.join(file),
+        )
+        .unwrap_or_else(|error| panic!("copy {file} into fixture: {error}"));
+    }
+}
 
 #[test]
 // @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.DRY_RUN
@@ -172,6 +218,61 @@ fn release_tag_dry_run_targets_default_release_revision() {
         payload["revision"],
         Value::String(default_release_revision())
     );
+}
+
+#[test]
+fn release_tag_dry_run_uses_current_non_empty_jj_revision() {
+    let root = std::env::temp_dir().join(format!(
+        "special-tag-release-current-revision-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(&root).expect("temp repo should be created");
+    copy_release_script_fixture(&root);
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"tag-fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo.toml fixture should be written");
+
+    run_jj(&root, &["git", "init", "."]);
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "release revision",
+        ],
+    );
+    run_jj(&root, &["edit", "@-"]);
+
+    let current = jj_commit_id(&root, "@");
+    let parent = jj_commit_id(&root, "@-");
+    let mut command = support::python3_command();
+    let output = command
+        .arg("scripts/tag-release.py")
+        .arg("1.2.3")
+        .arg("--dry-run")
+        .current_dir(&root)
+        .output()
+        .expect("tag release dry-run should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value =
+        serde_json::from_slice(&output.stdout).expect("dry-run output should be valid json");
+
+    assert_ne!(current, parent);
+    assert_eq!(payload["revision"], current);
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]

@@ -125,6 +125,12 @@ special arch can surface TypeScript-specific implementation evidence for owned T
 @spec SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT
 special arch --metrics --verbose surfaces built-in TypeScript implementation evidence for owned TypeScript code, including public and internal item counts, complexity summaries, quality evidence, import-path dependency evidence, coupling derived from owned relative imports, and per-item connected, outbound-heavy, isolated, and unreached signals when the built-in analyzer can identify them honestly.
 
+@spec SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT.COUPLING
+special arch --metrics uses TypeScript compiler module resolution when available so path aliases can contribute owned dependency targets to module coupling.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT.TOOLCHAIN_DEGRADED
+special arch --metrics reports when TypeScript compiler-backed analyzer enrichment is unavailable and metrics fall back to weaker parser-derived evidence.
+
 @spec SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT.COMPLEXITY
 special arch --metrics surfaces TypeScript function complexity summaries for owned implementation, including analyzed function count plus total and maximum cyclomatic and cognitive complexity.
 
@@ -145,6 +151,12 @@ special arch can surface Go-specific implementation evidence for owned Go code t
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.GO
 special arch --metrics --verbose surfaces built-in Go implementation evidence for owned Go code, including public and internal item counts, complexity summaries, quality evidence, import-path dependency evidence, coupling derived from owned local imports, and per-item connected, outbound-heavy, isolated, and unreached signals when the built-in analyzer can identify them honestly.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.GO.COUPLING
+special arch --metrics uses go list package resolution when available so module import paths can contribute owned dependency targets to module coupling.
+
+@spec SPECIAL.MODULE_COMMAND.METRICS.GO.TOOLCHAIN_DEGRADED
+special arch --metrics reports when go-list-backed analyzer enrichment is unavailable and metrics fall back to weaker parser-derived evidence.
 
 @spec SPECIAL.MODULE_COMMAND.METRICS.GO.COMPLEXITY
 special arch --metrics surfaces Go function complexity summaries for owned implementation, including analyzed function count plus total and maximum cyclomatic and cognitive complexity.

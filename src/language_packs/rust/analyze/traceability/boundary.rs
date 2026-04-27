@@ -11,10 +11,12 @@ use crate::modules::analyze::{
     FileOwnership,
     traceability_core::{
         ProjectedTraceabilityContract, ProjectedTraceabilityReference, TraceGraph,
-        TraceabilityOwnedItem, build_projected_traceability_reference,
-        collect_support_root_ids, owned_module_ids_for_path,
+        TraceabilityOwnedItem, build_projected_traceability_contract,
+        build_projected_traceability_reference_from_projected_items, owned_module_ids_for_path,
     },
 };
+#[cfg(test)]
+use crate::modules::analyze::traceability_core::use_rust_reference_traceability_kernel_for_tests;
 use crate::syntax::ParsedSourceGraph;
 
 use super::RustMediatedReason;
@@ -84,22 +86,26 @@ impl ScopedTraceabilityBoundary {
     /// reverse-reachable semantic dependency needed by those support-backed
     /// projected items. The target set itself is therefore allowed to be
     /// smaller than the retained context item set.
-    pub(super) fn exact_contract(&self, graph: &TraceGraph) -> ScopedTraceabilityContract {
-        let preserved_reverse_closure_target_ids =
-            collect_support_root_ids(self.projected_item_ids.iter().cloned(), graph)
-            .into_iter()
-            .filter_map(|(item_id, supports)| (!supports.is_empty()).then_some(item_id))
-            .collect::<BTreeSet<_>>();
+    // @applies TRACEABILITY.SCOPED_PROJECTED_KERNEL
+    pub(super) fn exact_contract(
+        &self,
+        graph: &TraceGraph,
+    ) -> Result<ScopedTraceabilityContract, String> {
+        #[cfg(test)]
+        use_rust_reference_traceability_kernel_for_tests();
 
-        ScopedTraceabilityContract {
-            projected_item_ids: self.projected_item_ids.clone(),
-            preserved_reverse_closure_target_ids,
-        }
+        build_projected_traceability_contract(self.projected_item_ids.clone(), graph)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn reference(&self, graph: &TraceGraph) -> ScopedTraceabilityReference {
-        build_projected_traceability_reference(self.exact_contract(graph), graph)
+    pub(super) fn reference(&self, graph: &TraceGraph) -> Result<ScopedTraceabilityReference, String> {
+        #[cfg(test)]
+        use_rust_reference_traceability_kernel_for_tests();
+
+        build_projected_traceability_reference_from_projected_items(
+            self.projected_item_ids.clone(),
+            graph,
+        )
     }
 }
 
@@ -151,6 +157,7 @@ pub(super) fn derive_scoped_traceability_boundary(
     }
 }
 
+// @applies ADAPTER.FACTS_TO_MODEL.TRACEABILITY_ITEMS
 pub(super) fn collect_repo_items(
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,

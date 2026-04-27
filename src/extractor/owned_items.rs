@@ -6,6 +6,7 @@ Infers the next owned source item for a retained comment block, including langua
 use std::path::Path;
 
 use crate::model::{OwnedItem, SourceLocation};
+use crate::text_lines::skip_blank_lines;
 
 pub(crate) fn extract_owned_item(path: &Path, lines: &[&str], index: usize) -> Option<OwnedItem> {
     match path.extension().and_then(|ext| ext.to_str()) {
@@ -70,13 +71,6 @@ fn build_owned_item(path: &Path, start: usize, body: String) -> Option<OwnedItem
         },
         body,
     })
-}
-
-fn skip_blank_lines(lines: &[&str], mut index: usize) -> usize {
-    while index < lines.len() && lines[index].trim().is_empty() {
-        index += 1;
-    }
-    index
 }
 
 fn skip_line_comments(lines: &[&str], mut index: usize, marker: char) -> usize {

@@ -5,10 +5,15 @@ Builds Go traceability inputs and tool-assisted call edges for the built-in Go p
 // @fileimplements SPECIAL.LANGUAGE_PACKS.GO.ANALYZE.TRACEABILITY
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use url::Url;
 
 use crate::config::ProjectToolchain;
 use crate::model::{ArchitectureTraceabilitySummary, ImplementRef, ParsedArchitecture, ParsedRepo};
@@ -24,20 +29,12 @@ use crate::modules::analyze::{FileOwnership, emit_analysis_status, read_owned_fi
 use super::scope;
 use super::dependencies::collect_go_import_aliases;
 use super::surface::{is_go_path, is_review_surface, is_test_file_path, source_item_kind};
-use super::toolchain::{create_temp_dir, go_list_packages};
+use super::toolchain::{TempDirGuard, create_temp_dir, go_list_packages};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GoTraceabilityPack;
 
 impl TraceabilityLanguagePack for GoTraceabilityPack {
-    fn backward_trace_availability(
-        &self,
-    ) -> crate::modules::analyze::traceability_core::BackwardTraceAvailability {
-        crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
-            "Go backward trace availability must be resolved from the analyzed project root",
-        )
-    }
-
     fn owned_items_for_implementations(
         &self,
         root: &Path,
@@ -113,7 +110,7 @@ pub(super) fn build_traceability_inputs_from_cached_or_live_graph_facts(
     };
     merge_trace_graph_edges(
         &mut graph.edges,
-        build_gopls_reference_edges(root, &collect_callable_items(&source_graphs)),
+        build_gopls_reference_edges(root, &collect_callable_items(&source_graphs))?,
     );
     graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
         parse_source_graph(&scope::normalize_go_path(root, path), body)
@@ -145,6 +142,7 @@ pub(super) fn parse_go_source_graphs(
         .collect()
 }
 
+// @applies ADAPTER.FACTS_TO_MODEL.TRACEABILITY_ITEMS
 pub(super) fn collect_repo_items(
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
@@ -262,13 +260,7 @@ fn build_tool_call_edges(
     root: &Path,
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
 ) -> BTreeMap<String, BTreeSet<String>> {
-    let callable_items = collect_callable_items(source_graphs);
-    if callable_items.is_empty() {
-        return BTreeMap::new();
-    }
-    let mut edges = build_static_call_edges(root, source_graphs);
-    merge_trace_graph_edges(&mut edges, build_gopls_reference_edges(root, &callable_items));
-    edges
+    build_static_call_edges(root, source_graphs)
 }
 
 pub(super) fn build_static_call_edges(
@@ -363,51 +355,40 @@ fn build_go_list_package_edges(
 pub(super) fn build_gopls_reference_edges(
     root: &Path,
     callable_items: &[SourceCallableItem],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let Some(toolchain) = ProjectToolchain::discover(root).ok().flatten() else {
-        return BTreeMap::new();
-    };
-    if !toolchain.tool_available("gopls", &["version"]) {
-        return BTreeMap::new();
-    };
-    let Some(cache_dir) = create_temp_dir("special-go-build-cache") else {
-        return BTreeMap::new();
-    };
-    let grouped_items = group_callable_items_by_path(root, callable_items);
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    if callable_items.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let started_at = Instant::now();
+    let (mut client, index) = start_gopls_client_for_items(
+        root,
+        callable_items,
+        started_at,
+        "gopls reference collection",
+        0,
+    )?;
     let mut edges = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut query_count = 0usize;
     for item in callable_items {
-        let Some((line, column)) = item_name_position(root, item) else {
-            continue;
-        };
-        let output = toolchain
-            .command("gopls")
-            .arg("references")
-            .arg("-d")
-            .arg(format!("{}:{}:{}", item.path.display(), line, column))
-            .env("GOCACHE", cache_dir.path())
-            .output();
-        let Ok(output) = output else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for location in parse_gopls_reference_locations(&stdout) {
-            let Some(caller) = find_containing_item(&grouped_items, &location.path, location.line)
-            else {
-                continue;
-            };
-            if caller.stable_id == item.stable_id {
+        query_count += 1;
+        for caller_id in client.reference_callers(item, &index)? {
+            if caller_id == item.stable_id {
                 continue;
             }
-            edges
-                .entry(caller.stable_id.clone())
-                .or_default()
-                .insert(item.stable_id.clone());
+            edges.entry(caller_id).or_default().insert(item.stable_id.clone());
         }
     }
-    edges
+    emit_analysis_status(&format!(
+        "gopls opened {} file(s) while collecting references",
+        client.opened_file_count()
+    ));
+    client.shutdown()?;
+    emit_analysis_status(&format!(
+        "gopls reference collection queried {} item(s), discovered {} semantic edge(s)",
+        query_count,
+        edges.values().map(BTreeSet::len).sum::<usize>()
+    ));
+    Ok(edges)
 }
 
 pub(super) fn build_reverse_reachable_reference_edges(
@@ -415,21 +396,22 @@ pub(super) fn build_reverse_reachable_reference_edges(
     callable_items: &[SourceCallableItem],
     seed_ids: &BTreeSet<String>,
     parser_edges: &BTreeMap<String, BTreeSet<String>>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let Some(toolchain) = ProjectToolchain::discover(root).ok().flatten() else {
-        return BTreeMap::new();
-    };
-    if !toolchain.tool_available("gopls", &["version"]) {
-        return BTreeMap::new();
-    };
-    let Some(cache_dir) = create_temp_dir("special-go-build-cache") else {
-        return BTreeMap::new();
-    };
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    if callable_items.is_empty() || seed_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let started_at = Instant::now();
+    let (mut client, index) = start_gopls_client_for_items(
+        root,
+        callable_items,
+        started_at,
+        "gopls reverse caller walk",
+        seed_ids.len(),
+    )?;
     let item_by_id = callable_items
         .iter()
         .map(|item| (item.stable_id.clone(), item))
         .collect::<BTreeMap<_, _>>();
-    let grouped_items = group_callable_items_by_path(root, callable_items);
     let mut reverse_parser_edges = BTreeMap::<String, BTreeSet<String>>::new();
     for (caller, callees) in parser_edges {
         for callee in callees {
@@ -439,18 +421,9 @@ pub(super) fn build_reverse_reachable_reference_edges(
                 .insert(caller.clone());
         }
     }
-    emit_analysis_status(&format!(
-        "starting gopls reverse caller walk for {} file(s), {} callable item(s), {} seed root(s)",
-        callable_items
-            .iter()
-            .map(|item| item.path.clone())
-            .collect::<BTreeSet<_>>()
-            .len(),
-        callable_items.len(),
-        seed_ids.len()
-    ));
     let mut edges = BTreeMap::<String, BTreeSet<String>>::new();
     let mut visited = BTreeSet::new();
+    let mut query_count = 0usize;
     let mut pending = seed_ids.iter().cloned().collect::<Vec<String>>();
     while let Some(callee_id) = pending.pop() {
         if !visited.insert(callee_id.clone()) {
@@ -463,35 +436,16 @@ pub(super) fn build_reverse_reachable_reference_edges(
             .get(&callee_id)
             .cloned()
             .unwrap_or_default();
-        let Some((line, column)) = item_name_position(root, callee) else {
-            continue;
-        };
-        let output = toolchain
-            .command("gopls")
-            .arg("references")
-            .arg("-d")
-            .arg(format!("{}:{}:{}", callee.path.display(), line, column))
-            .env("GOCACHE", cache_dir.path())
-            .output();
-        let Ok(output) = output else {
-            continue;
-        };
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for location in parse_gopls_reference_locations(&stdout) {
-                let Some(caller) = find_containing_item(&grouped_items, &location.path, location.line)
-                else {
-                    continue;
-                };
-                if caller.stable_id == callee.stable_id {
-                    continue;
-                }
-                edges
-                    .entry(caller.stable_id.clone())
-                    .or_default()
-                    .insert(callee.stable_id.clone());
-                callers.insert(caller.stable_id.clone());
+        query_count += 1;
+        for caller_id in client.reference_callers(callee, &index)? {
+            if caller_id == callee.stable_id {
+                continue;
             }
+            edges
+                .entry(caller_id.clone())
+                .or_default()
+                .insert(callee.stable_id.clone());
+            callers.insert(caller_id);
         }
         for caller_id in callers {
             if item_by_id.contains_key(&caller_id) && !visited.contains(&caller_id) {
@@ -499,8 +453,17 @@ pub(super) fn build_reverse_reachable_reference_edges(
             }
         }
     }
-    emit_analysis_status("gopls reverse caller walk complete");
-    edges
+    emit_analysis_status(&format!(
+        "gopls opened {} file(s) while walking reverse callers",
+        client.opened_file_count()
+    ));
+    client.shutdown()?;
+    emit_analysis_status(&format!(
+        "gopls reverse caller walk queried {} item(s), discovered {} semantic edge(s)",
+        query_count,
+        edges.values().map(BTreeSet::len).sum::<usize>()
+    ));
+    Ok(edges)
 }
 
 #[derive(Debug, Clone)]
@@ -541,62 +504,341 @@ pub(super) fn collect_callable_items(
     items
 }
 
-fn group_callable_items_by_path<'a>(
-    root: &Path,
-    items: &'a [SourceCallableItem],
-) -> BTreeMap<PathBuf, Vec<&'a SourceCallableItem>> {
-    let mut grouped = BTreeMap::<PathBuf, Vec<&SourceCallableItem>>::new();
-    for item in items {
-        grouped.entry(item.path.clone()).or_default().push(item);
-        let full_path = root.join(&item.path);
-        grouped.entry(full_path.clone()).or_default().push(item);
-        if let Ok(canonical) = fs::canonicalize(&full_path) {
-            grouped.entry(canonical).or_default().push(item);
+#[derive(Debug)]
+struct GoLspItemIndex {
+    by_path: BTreeMap<PathBuf, Vec<IndexedItem>>,
+}
+
+#[derive(Debug, Clone)]
+struct IndexedItem {
+    stable_id: String,
+    start_line: usize,
+    end_line: usize,
+}
+
+impl GoLspItemIndex {
+    fn new(root: &Path, items: &[SourceCallableItem]) -> Self {
+        let mut by_path = BTreeMap::<PathBuf, Vec<IndexedItem>>::new();
+        for item in items {
+            let absolute = normalize_path(root.join(&item.path));
+            by_path.entry(absolute).or_default().push(IndexedItem {
+                stable_id: item.stable_id.clone(),
+                start_line: item.start_line,
+                end_line: item.end_line,
+            });
+        }
+        Self { by_path }
+    }
+
+    fn resolve_containing(&self, path: &Path, line: usize) -> Option<String> {
+        let items = self.by_path.get(path)?;
+        let mut containing = items
+            .iter()
+            .filter(|item| item.start_line <= line && line <= item.end_line);
+        if let Some(item) = containing.next()
+            && containing.next().is_none()
+        {
+            return Some(item.stable_id.clone());
+        }
+        None
+    }
+}
+
+struct GoLspClient {
+    root: PathBuf,
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    next_id: i64,
+    opened_files: BTreeSet<PathBuf>,
+    _cache_dir: TempDirGuard,
+}
+
+impl GoLspClient {
+    fn start(root: &Path) -> Result<Self> {
+        let root = normalize_path(root);
+        let toolchain = ProjectToolchain::discover(&root)?
+            .ok_or_else(|| anyhow!("project does not declare a supported toolchain contract"))?;
+        let cache_dir = create_temp_dir("special-go-lsp-cache")
+            .ok_or_else(|| anyhow!("failed to create temporary Go analysis cache"))?;
+        let mut child = toolchain
+            .command("gopls")
+            .arg("serve")
+            .env("GOCACHE", cache_dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("failed to launch gopls")?;
+        let stdin = child.stdin.take().context("gopls stdin missing")?;
+        let stdout = child.stdout.take().context("gopls stdout missing")?;
+        let mut client = Self {
+            root,
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            next_id: 1,
+            opened_files: BTreeSet::new(),
+            _cache_dir: cache_dir,
+        };
+        client.initialize()?;
+        Ok(client)
+    }
+
+    fn initialize(&mut self) -> Result<()> {
+        let root_uri = Url::from_file_path(&self.root).map_err(|_| {
+            anyhow!("failed to build gopls root uri for {}", self.root.display())
+        })?;
+        let params = json!({
+            "processId": std::process::id(),
+            "rootUri": root_uri.to_string(),
+            "workspaceFolders": [{
+                "uri": root_uri.to_string(),
+                "name": self.root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace"),
+            }],
+            "capabilities": {
+                "textDocument": {
+                    "references": {}
+                }
+            }
+        });
+        let _ = self.request("initialize", params)?;
+        self.notify("initialized", json!({}))?;
+        Ok(())
+    }
+
+    fn reference_callers(
+        &mut self,
+        item: &SourceCallableItem,
+        index: &GoLspItemIndex,
+    ) -> Result<BTreeSet<String>> {
+        let absolute = normalize_path(self.root.join(&item.path));
+        self.ensure_open_file(&absolute)?;
+        let uri = Url::from_file_path(&absolute)
+            .map_err(|_| anyhow!("failed to build gopls uri for {}", absolute.display()))?;
+        let character = query_item_character(&absolute, item)?;
+        let mut callers = BTreeSet::new();
+        for attempt in 0..10 {
+            let response = self.request(
+                "textDocument/references",
+                json!({
+                    "textDocument": { "uri": uri.to_string() },
+                    "position": {
+                        "line": item.start_line.saturating_sub(1),
+                        "character": character,
+                    },
+                    "context": {
+                        "includeDeclaration": false,
+                    }
+                }),
+            );
+            let response = match response {
+                Ok(response) => response,
+                Err(error) if is_retryable_gopls_error(&error) && attempt < 9 => {
+                    std::thread::sleep(Duration::from_millis(200));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            for reference in lsp_locations(&response) {
+                let Ok(uri) = Url::parse(&reference.uri) else {
+                    continue;
+                };
+                let Ok(path) = uri.to_file_path() else {
+                    continue;
+                };
+                if let Some(caller_id) = index.resolve_containing(
+                    &normalize_path(path),
+                    reference.range.start.line as usize + 1,
+                ) {
+                    callers.insert(caller_id);
+                }
+            }
+            break;
+        }
+        Ok(callers)
+    }
+
+    fn ensure_open_file(&mut self, path: &Path) -> Result<()> {
+        let path = normalize_path(path);
+        if !self.opened_files.insert(path.clone()) {
+            return Ok(());
+        }
+        let uri = Url::from_file_path(&path)
+            .map_err(|_| anyhow!("failed to build gopls uri for {}", path.display()))?;
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": uri.to_string(),
+                    "languageId": "go",
+                    "version": 0,
+                    "text": text,
+                }
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn opened_file_count(&self) -> usize {
+        self.opened_files.len()
+    }
+
+    fn shutdown(&mut self) -> Result<()> {
+        let _ = self.request("shutdown", json!({}));
+        let _ = self.notify("exit", json!({}));
+        let _ = self.child.wait();
+        Ok(())
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.write_message(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        }))?;
+
+        loop {
+            let message = self.read_message()?;
+            if message.get("id").and_then(Value::as_i64) != Some(id) {
+                continue;
+            }
+            if let Some(error) = message.get("error") {
+                return Err(anyhow!("gopls request {method} failed: {error}"));
+            }
+            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
     }
-    grouped
+
+    fn notify(&mut self, method: &str, params: Value) -> Result<()> {
+        self.write_message(&json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        }))
+    }
+
+    fn write_message(&mut self, message: &Value) -> Result<()> {
+        let body = serde_json::to_vec(message)?;
+        write!(self.stdin, "Content-Length: {}\r\n\r\n", body.len())?;
+        self.stdin.write_all(&body)?;
+        self.stdin.flush()?;
+        Ok(())
+    }
+
+    fn read_message(&mut self) -> Result<Value> {
+        let mut content_length = None;
+        loop {
+            let mut header = String::new();
+            let bytes = self.stdout.read_line(&mut header)?;
+            if bytes == 0 {
+                return Err(anyhow!("gopls closed the LSP stream"));
+            }
+            if header == "\r\n" {
+                break;
+            }
+            if let Some(value) = header.strip_prefix("Content-Length:") {
+                content_length = Some(value.trim().parse::<usize>()?);
+            }
+        }
+
+        let length = content_length.context("missing gopls content length")?;
+        let mut body = vec![0u8; length];
+        self.stdout.read_exact(&mut body)?;
+        Ok(serde_json::from_slice(&body)?)
+    }
 }
 
-fn item_name_position(root: &Path, item: &SourceCallableItem) -> Option<(usize, usize)> {
-    let text = read_owned_file_text(root, &item.path).ok()?;
-    let line = text.lines().nth(item.start_line.saturating_sub(1))?;
-    let start = item.start_column.min(line.len());
-    let offset = line[start..].find(&item.name)?;
-    Some((item.start_line, start + offset + 1))
+impl Drop for GoLspClient {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
-fn find_containing_item<'a>(
-    grouped: &'a BTreeMap<PathBuf, Vec<&'a SourceCallableItem>>,
-    path: &Path,
-    line: usize,
-) -> Option<&'a SourceCallableItem> {
-    grouped.get(path).and_then(|bucket| {
-        bucket
-            .iter()
-            .copied()
-            .find(|item| item.start_line <= line && line <= item.end_line)
-    })
+fn start_gopls_client_for_items(
+    root: &Path,
+    items: &[SourceCallableItem],
+    started_at: Instant,
+    phase: &str,
+    seed_count: usize,
+) -> Result<(GoLspClient, GoLspItemIndex)> {
+    emit_analysis_status(&format!(
+        "{phase} for {} file(s), {} callable item(s), {} seed root(s)",
+        items.iter().map(|item| &item.path).collect::<BTreeSet<_>>().len(),
+        items.len(),
+        seed_count
+    ));
+    let client = GoLspClient::start(root)?;
+    emit_analysis_status(&format!(
+        "gopls started in {:.1}s",
+        started_at.elapsed().as_secs_f32()
+    ));
+    std::thread::sleep(Duration::from_millis(500));
+    emit_analysis_status(&format!(
+        "gopls initialized workspace for {} indexed file(s) in {:.1}s",
+        items.iter().map(|item| &item.path).collect::<BTreeSet<_>>().len(),
+        started_at.elapsed().as_secs_f32()
+    ));
+    Ok((client, GoLspItemIndex::new(root, items)))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GoReferenceLocation {
-    path: PathBuf,
-    line: usize,
+#[derive(Debug, Deserialize)]
+struct LspLocation {
+    uri: String,
+    range: LspRange,
 }
 
-fn parse_gopls_reference_locations(stdout: &str) -> Vec<GoReferenceLocation> {
-    stdout
+#[derive(Debug, Deserialize)]
+struct LspRange {
+    start: LspPosition,
+}
+
+#[derive(Debug, Deserialize)]
+struct LspPosition {
+    line: u32,
+}
+
+fn lsp_locations(response: &Value) -> Vec<LspLocation> {
+    if response.is_null() {
+        return Vec::new();
+    }
+    if response.is_array() {
+        return serde_json::from_value::<Vec<LspLocation>>(response.clone()).unwrap_or_default();
+    }
+    serde_json::from_value::<LspLocation>(response.clone())
+        .map(|location| vec![location])
+        .unwrap_or_default()
+}
+
+fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
+    path.as_ref()
+        .canonicalize()
+        .unwrap_or_else(|_| path.as_ref().to_path_buf())
+}
+
+fn query_item_character(path: &Path, item: &SourceCallableItem) -> Result<usize> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let line = text
         .lines()
-        .filter_map(|line| {
-            let mut parts = line.splitn(3, ':');
-            let path = parts.next()?;
-            let line_number = parts.next()?.parse::<usize>().ok()?;
-            Some(GoReferenceLocation {
-                path: PathBuf::from(path),
-                line: line_number,
-            })
-        })
-        .collect()
+        .nth(item.start_line.saturating_sub(1))
+        .unwrap_or_default();
+    let start = item.start_column.min(line.len());
+    Ok(line
+        .get(start..)
+        .and_then(|tail| tail.find(&item.name).map(|offset| start + offset))
+        .or_else(|| line.find(&item.name))
+        .unwrap_or(start))
+}
+
+fn is_retryable_gopls_error(error: &anyhow::Error) -> bool {
+    error.to_string().contains("content modified")
 }
 
 fn build_callable_indexes(items: &[SourceCallableItem]) -> CallableIndexes {
@@ -679,14 +921,26 @@ pub(super) fn decode_traceability_graph_facts(
     let Some(facts) = facts else {
         return Ok(None);
     };
-    let facts = serde_json::from_slice::<GoTraceabilityGraphFacts>(facts)?;
+    if let Ok(facts) = serde_json::from_slice::<GoTraceabilityGraphFacts>(facts) {
+        return Ok(Some((
+            facts
+                .source_graphs
+                .into_iter()
+                .map(|(path, graph)| (path, graph.into_parsed()))
+                .collect(),
+            facts.static_edges,
+        )));
+    }
+    let facts = serde_json::from_slice::<GoTraceabilityScopeFacts>(facts)?;
+    let mut edges = facts.static_edges;
+    merge_trace_graph_edges(&mut edges, facts.tool_reference_edges);
     Ok(Some((
         facts
             .source_graphs
             .into_iter()
             .map(|(path, graph)| (path, graph.into_parsed()))
             .collect(),
-        facts.static_edges,
+        edges,
     )))
 }
 

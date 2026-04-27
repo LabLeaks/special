@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::annotation_syntax::is_reserved_special_annotation;
 use crate::model::{BlockLine, CommentBlock};
+use crate::source_paths::has_extension;
 
 use super::owned_items::extract_owned_item;
 
@@ -106,9 +107,10 @@ fn maybe_push_comment_block(
 }
 
 fn line_comment_style_for_path(path: &Path) -> LineCommentStyle {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("sh" | "py") => LineCommentStyle::Hash,
-        _ => LineCommentStyle::Slash,
+    if has_extension(path, &["sh", "py"]) {
+        LineCommentStyle::Hash
+    } else {
+        LineCommentStyle::Slash
     }
 }
 

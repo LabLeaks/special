@@ -1,5 +1,4 @@
 import ScopedHealth.Closure
-import ScopedHealth.ScopeBoundary
 
 namespace SpecialProofs
 namespace ScopedHealth
@@ -21,10 +20,10 @@ def ReachableFrom (R : α → α → Prop) (target : α) : α → Prop :=
 
 /--
 If every node reachable from the chosen seed set is kept, and the current
-target is itself kept, then every original per-target path can be lifted into
-the induced kept relation.
+target is one of those seeds, then every original path from that target stays
+inside the kept graph.
 -/
-theorem lift_path_to_induced_of_keeps_reachable
+theorem path_preserved_when_reachable_nodes_are_kept
     {R : α → α → Prop}
     {Seed : α → Prop}
     {Keep : α → Prop}
@@ -46,7 +45,7 @@ theorem lift_path_to_induced_of_keeps_reachable
 If every node reachable from the chosen seed set is kept, then the per-target
 backward closure is preserved for any kept seed in that set.
 -/
-theorem reachable_from_eq_if_keeps_reachable
+theorem reverse_closure_preserved_when_reachable_nodes_are_kept
     {R : α → α → Prop}
     {Seed : α → Prop}
     {Keep : α → Prop}
@@ -61,45 +60,7 @@ theorem reachable_from_eq_if_keeps_reachable
   · intro h
     exact strip_induced_path h
   · intro h
-    exact lift_path_to_induced_of_keeps_reachable htarget hkeep_reachable h
-
-/--
-If `Keep` is exact for the chosen seed set and `target` belongs to that seed
-set, then the per-target backward closure is preserved under the induced kept
-subgraph.
--/
-theorem reachable_from_eq_under_exact_closure
-    {R : α → α → Prop}
-    {Seed : α → Prop}
-    {Keep : α → Prop}
-    {target : α}
-    (htarget : Seed target)
-    (hkeep : ∀ y, Keep y ↔ Reachable R Seed y) :
-    ReachableFrom (Induced Keep R) target =
-      ReachableFrom R target := by
-  funext x
-  apply propext
-  constructor
-  · intro h
-    exact strip_induced_path h
-  · intro h
-    exact lift_path_to_induced hkeep htarget h
-
-/--
-Scope-boundary corollary of the per-target backward-closure theorem.
-
-For any semantic seed retained by an exact scope boundary, the induced closure
-preserves exactly the same backward-reachable items as the full graph.
--/
-theorem reachable_from_eq_of_exact_scope_boundary
-    {R : α → α → Prop}
-    {σ : Type u}
-    (boundary : ScopeBoundary (σ := σ) R)
-    {target : α}
-    (htarget : boundary.seed target) :
-    ReachableFrom (Induced boundary.keep R) target =
-      ReachableFrom R target := by
-  exact reachable_from_eq_under_exact_closure htarget boundary.keep_exact
+    exact path_preserved_when_reachable_nodes_are_kept htarget hkeep_reachable h
 
 end ScopedHealth
 end SpecialProofs

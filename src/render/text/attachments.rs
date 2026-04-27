@@ -7,6 +7,7 @@ use std::fmt::Write;
 
 use crate::model::{AttestRef, ImplementRef, VerifyRef};
 
+use super::super::labels::{attest_label, implementation_label, verify_label};
 use super::super::templates::text_indent;
 
 pub(super) fn write_block_text(output: &mut String, body: &str, depth: usize) {
@@ -100,24 +101,4 @@ pub(super) fn render_implementation_section(
             write_block_text(output, body, depth + 2);
         }
     }
-}
-
-fn verify_label(verify: &VerifyRef) -> &'static str {
-    if verify.body_location.is_none() && verify.body.is_some() {
-        "@fileverifies"
-    } else {
-        "@verifies"
-    }
-}
-
-fn implementation_label(implementation: &ImplementRef) -> &'static str {
-    if implementation.body_location.is_none() {
-        "@fileimplements"
-    } else {
-        "@implements"
-    }
-}
-
-fn attest_label(attest: &AttestRef) -> &'static str {
-    attest.scope.as_annotation()
 }

@@ -109,6 +109,17 @@ def release_revision(root: Path) -> str:
     return revision_id(root, release_revset(root))
 
 
+def require_clean_working_copy(root: Path) -> None:
+    status = run_checked(root, ["jj", "status", "--no-pager"])
+    if (
+        "The working copy is clean" not in status
+        and "The working copy has no changes." not in status
+     ):
+        raise SystemExit(
+            "release publishing requires a clean working copy; commit or revert changes in `@` first"
+        )
+
+
 def require_releasable_revision(root: Path, revset: str) -> None:
     if is_conflicted_revision(root, revset):
         raise SystemExit(f"release revision `{revset}` has conflicts")
@@ -184,6 +195,7 @@ def main() -> int:
         raise SystemExit("release publishing requires a jj repository root")
     target = release_revset(root)
     if not args.dry_run and not args.allow_mock_publish:
+        require_clean_working_copy(root)
         require_releasable_revision(root, target)
     revision = release_revision(root)
     tag_exists = tag in existing_tags(root)

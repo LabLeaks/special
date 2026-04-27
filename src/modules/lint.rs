@@ -75,6 +75,42 @@ pub(super) fn build_module_lint_report(parsed: &ParsedArchitecture) -> LintRepor
         }
     }
 
+    let pattern_ids: BTreeSet<String> = parsed
+        .patterns
+        .iter()
+        .map(|pattern| pattern.pattern_id.clone())
+        .collect();
+    let mut declared_patterns: BTreeMap<String, usize> = BTreeMap::new();
+    for pattern in &parsed.patterns {
+        if let Some(previous_line) =
+            declared_patterns.insert(pattern.pattern_id.clone(), pattern.location.line)
+        {
+            diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                path: pattern.location.path.clone(),
+                line: pattern.location.line,
+                message: format!(
+                    "duplicate pattern id `{}`; first declared on line {}",
+                    pattern.pattern_id, previous_line
+                ),
+            });
+        }
+    }
+
+    for application in &parsed.pattern_applications {
+        if !pattern_ids.contains(&application.pattern_id) {
+            diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                path: application.location.path.clone(),
+                line: application.location.line,
+                message: format!(
+                    "unknown pattern id `{}` referenced by @applies",
+                    application.pattern_id
+                ),
+            });
+        }
+    }
+
     let mut file_scoped: BTreeMap<PathBuf, usize> = BTreeMap::new();
     let mut item_scoped: BTreeMap<(PathBuf, usize), usize> = BTreeMap::new();
 

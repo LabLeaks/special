@@ -41,14 +41,29 @@ pub(super) fn decode_traceability_graph_facts(
     let Some(facts) = facts else {
         return Ok(None);
     };
-    let facts = serde_json::from_slice::<RustTraceabilityGraphFacts>(facts)?;
+    if let Ok(facts) = serde_json::from_slice::<RustTraceabilityGraphFacts>(facts) {
+        return Ok(Some((
+            facts
+                .source_graphs
+                .into_iter()
+                .map(|(path, graph)| (path, graph.into_parsed()))
+                .collect(),
+            facts.parser_edges,
+            facts
+                .mediated_reasons
+                .into_iter()
+                .map(|(stable_id, reason)| (stable_id, reason.into_parsed()))
+                .collect(),
+        )));
+    }
+    let facts = serde_json::from_slice::<RustTraceabilityScopeFacts>(facts)?;
     Ok(Some((
         facts
             .source_graphs
             .into_iter()
             .map(|(path, graph)| (path, graph.into_parsed()))
             .collect(),
-        facts.parser_edges,
+        facts.edges,
         facts
             .mediated_reasons
             .into_iter()
@@ -346,18 +361,24 @@ impl CachedSourceInvocationKind {
 
 #[derive(Serialize, Deserialize)]
 pub(super) enum CachedRustMediatedReason {
+    BuildScriptEntrypoint,
+    BuildScriptSupportCode,
     TraitImplEntrypoint,
 }
 
 impl CachedRustMediatedReason {
     pub(super) fn from_parsed(reason: RustMediatedReason) -> Self {
         match reason {
+            RustMediatedReason::BuildScriptEntrypoint => Self::BuildScriptEntrypoint,
+            RustMediatedReason::BuildScriptSupportCode => Self::BuildScriptSupportCode,
             RustMediatedReason::TraitImplEntrypoint => Self::TraitImplEntrypoint,
         }
     }
 
     pub(super) fn into_parsed(self) -> RustMediatedReason {
         match self {
+            Self::BuildScriptEntrypoint => RustMediatedReason::BuildScriptEntrypoint,
+            Self::BuildScriptSupportCode => RustMediatedReason::BuildScriptSupportCode,
             Self::TraitImplEntrypoint => RustMediatedReason::TraitImplEntrypoint,
         }
     }

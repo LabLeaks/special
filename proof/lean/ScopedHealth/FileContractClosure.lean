@@ -17,8 +17,8 @@ The kept file set is exactly:
 - the projected scoped files
 - plus every file that owns an item in the reverse closure of the target set
 
-This is stronger than the earlier witness-only boundary because it states the
-kept file set itself, not just downstream consequences.
+This is the execution-layer version of `ProjectedContractClosureBoundary` for
+analyzers that load files while proving item-level preservation.
 -/
 structure FileContractClosureBoundary
     (R : α → α → Prop)
@@ -44,22 +44,9 @@ theorem file_contract_keeps_reachable
   exact (boundary.keep_exact _).2 (Or.inr ⟨x, hx, rfl⟩)
 
 /--
-Under a file contract-closure boundary, every declared target item itself lies
-in a kept file.
--/
-theorem file_contract_keeps_target
-    {R : α → α → Prop}
-    {owner : α → φ}
-    (boundary : FileContractClosureBoundary R owner)
-    {target : α} :
-    boundary.target target → boundary.keep (owner target) := by
-  intro htarget
-  exact (boundary.keep_exact _).2 (Or.inl (boundary.target_projected _ htarget))
-
-/--
-If the kept file set is exactly the file projection of the reverse closure,
-then every declared target preserves the same reverse-reachable closure in the
-induced kept-item subgraph.
+If the kept file set contains every file that owns an item in the reverse
+closure, then every declared target preserves the same reverse-reachable
+closure in the induced kept-item subgraph.
 -/
 theorem reachable_from_eq_of_file_contract_closure_boundary
     {R : α → α → Prop}
@@ -69,14 +56,14 @@ theorem reachable_from_eq_of_file_contract_closure_boundary
     (htarget : boundary.target target) :
     ReachableFrom (Induced (fun x => boundary.keep (owner x)) R) target =
       ReachableFrom R target := by
-  exact reachable_from_eq_if_keeps_reachable
+  exact reverse_closure_preserved_when_reachable_nodes_are_kept
     htarget
     (fun x hx => file_contract_keeps_reachable boundary hx)
 
 /--
-If the kept file set is exactly the file projection of the reverse closure,
-then every declared target preserves the same support-root witnesses in the
-induced kept-item subgraph.
+If the kept file set contains every file that owns an item in the reverse
+closure, then every declared target preserves the same support-root witnesses in
+the induced kept-item subgraph.
 -/
 theorem support_roots_for_eq_of_file_contract_closure_boundary
     {R : α → α → Prop}
@@ -87,7 +74,7 @@ theorem support_roots_for_eq_of_file_contract_closure_boundary
     (htarget : boundary.target target) :
     SupportRootsFor (Induced (fun x => boundary.keep (owner x)) R) IsRoot target =
       SupportRootsFor R IsRoot target := by
-  exact support_roots_for_eq_if_keeps_reachable
+  exact support_roots_preserved_when_reachable_nodes_are_kept
     IsRoot
     htarget
     (fun x hx => file_contract_keeps_reachable boundary hx)

@@ -1,6 +1,6 @@
 /**
 @module SPECIAL.LANGUAGE_PACKS.RUST.ANALYZE.TRACEABILITY
-Builds conservative Rust implementation traceability from analyzable Rust source items through verifying Rust tests to resolved spec lifecycle state without leaking parser-specific details into higher analysis layers. This adapter should refuse to run backward trace unless `rust-analyzer` is available, contribute one combined Rust trace graph from parser and tool-backed edges, and let repo and module projections consume that shared graph instead of redefining separate walks or over-claiming negative proofs.
+Builds conservative Rust implementation traceability from analyzable Rust source items through verifying Rust tests to resolved spec lifecycle state without leaking parser-specific details into higher analysis layers. This adapter should always contribute parser-resolved Rust call edges, enrich that graph with `rust-analyzer` when available, and let repo and module projections consume one combined Rust trace graph instead of redefining separate walks or over-claiming negative proofs.
 */
 // @fileimplements SPECIAL.LANGUAGE_PACKS.RUST.ANALYZE.TRACEABILITY
 use std::collections::{BTreeMap, BTreeSet};
@@ -9,13 +9,15 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 
 use crate::model::{ArchitectureTraceabilitySummary, ImplementRef, ParsedRepo};
-use crate::syntax::{ParsedSourceGraph, parse_source_graph, rust::file_module_segments};
+use crate::syntax::{
+    ParsedSourceGraph, SourceItemKind, parse_source_graph, rust::file_module_segments,
+};
 
 use crate::modules::analyze::{
     FileOwnership, read_owned_file_text,
     traceability_core::{
-        BackwardTraceAvailability, TraceGraph, TraceabilityAnalysis, TraceabilityInputs,
-        TraceabilityLanguagePack, TraceabilityOwnedItem, build_root_supports,
+        TraceGraph, TraceabilityAnalysis, TraceabilityInputs, TraceabilityLanguagePack,
+        TraceabilityOwnedItem, build_root_supports,
         merge_trace_graph_edges, preserved_graph_item_ids_for_reference,
         preserved_item_ids_for_reference,
         summarize_repo_traceability as summarize_shared_repo_traceability,
@@ -64,18 +66,13 @@ impl RustTraceabilityPack {
             semantic_fact_source,
         }
     }
+
+    pub(super) fn is_parser_only(&self) -> bool {
+        self.semantic_fact_source.is_none()
+    }
 }
 
 impl TraceabilityLanguagePack for RustTraceabilityPack {
-    fn backward_trace_availability(&self) -> BackwardTraceAvailability {
-        match self.semantic_fact_source {
-            None => BackwardTraceAvailability::unavailable(
-                "Rust backward trace is unavailable because `rust-analyzer` is not installed",
-            ),
-            Some(_) => BackwardTraceAvailability::default(),
-        }
-    }
-
     fn owned_items_for_implementations(
         &self,
         root: &Path,
@@ -88,13 +85,29 @@ impl TraceabilityLanguagePack for RustTraceabilityPack {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RustMediatedReason {
+    BuildScriptEntrypoint,
+    BuildScriptSupportCode,
     TraitImplEntrypoint,
 }
 
 impl RustMediatedReason {
     fn as_str(self) -> &'static str {
         match self {
+            Self::BuildScriptEntrypoint => "cargo build script entrypoint",
+            Self::BuildScriptSupportCode => "cargo build script support code",
             Self::TraitImplEntrypoint => "trait impl entrypoint",
+        }
+    }
+
+    fn propagated(self) -> Option<Self> {
+        match self {
+            Self::BuildScriptEntrypoint | Self::BuildScriptSupportCode => {
+                Some(Self::BuildScriptSupportCode)
+            }
+            // Trait dispatch explains why the impl method itself is reachable.
+            // Its callees are ordinary implementation code and should still earn
+            // explicit spec or test evidence instead of being hidden by dispatch.
+            Self::TraitImplEntrypoint => None,
         }
     }
 }
@@ -106,12 +119,12 @@ fn build_traceability_inputs_from_parts(
     mut graph: TraceGraph,
     mediated_reasons: &BTreeMap<String, RustMediatedReason>,
 ) -> TraceabilityInputs {
-    let repo_items = collect_repo_items(source_graphs, file_ownership, mediated_reasons);
-
     graph.root_supports = build_root_supports(parsed_repo, source_graphs, |path, body| {
         parse_source_graph(path, body)
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
+    let mediated_reasons = expand_mediated_reasons_through_graph(&graph, mediated_reasons);
+    let repo_items = collect_repo_items(source_graphs, file_ownership, &mediated_reasons);
     TraceabilityInputs {
         repo_items,
         context_items: Vec::new(),
@@ -155,15 +168,12 @@ pub(super) fn build_traceability_graph_facts(
 pub(super) fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
     parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<Vec<u8>> {
     let toolchain_project = super::toolchain::probe_local_toolchain_project(root);
     let semantic_fact_source = selected_semantic_fact_source(toolchain_project.as_ref());
-    if semantic_fact_source.is_none() {
-        return Err(anyhow!(
-            "Rust backward trace is unavailable because `rust-analyzer` is not installed"
-        ));
-    }
     let source_graphs = parse_rust_source_graphs(root, source_files);
     let parser_edges = build_parser_call_edges_with_toolchain(
         root,
@@ -171,13 +181,27 @@ pub(super) fn build_traceability_scope_facts(
         &source_graphs,
         toolchain_project.as_ref(),
     );
-    let edges = build_full_trace_edges(
-        root,
-        &source_graphs,
-        toolchain_project.as_ref(),
+    let mut edges = parser_edges.clone();
+    if matches!(
         semantic_fact_source,
-        &parser_edges,
-    )?;
+        Some(RustSemanticFactSourceKind::RustAnalyzer)
+    ) {
+        let mediated_reasons = collect_mediated_reasons(root, source_files, &source_graphs);
+        let boundary = derive_scoped_traceability_boundary(
+            collect_repo_items(&source_graphs, file_ownership, &mediated_reasons),
+            scoped_source_files,
+        );
+        merge_trace_graph_edges(
+            &mut edges,
+            super::rust_analyzer::build_reverse_reachable_call_edges(
+                root,
+                &collect_rust_analyzer_reference_items(&source_graphs),
+                &boundary.seed_ids,
+                &parser_edges,
+            )
+            .map_err(rust_backward_trace_failure)?,
+        );
+    }
     let root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
         parse_source_graph(path, body)
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
@@ -242,7 +266,7 @@ pub(super) fn expand_traceability_closure_from_facts(
             .map(|(stable_id, support)| (stable_id, support.into_runtime()))
             .collect(),
     };
-    let reference = boundary.reference(&graph);
+    let reference = boundary.reference(&graph).map_err(anyhow::Error::msg)?;
     let preserved_graph_item_ids = preserved_graph_item_ids_for_reference(&reference);
     let item_paths = collect_item_paths_by_stable_id(&source_graphs);
     let kept_files = source_files
@@ -374,6 +398,7 @@ fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
                 (source_graphs, parser_edges, mediated_reasons)
             }
         };
+    let graph_facts_include_scoped_semantics = source_graphs.len() > source_files.len();
     let scoped_boundary = derive_scoped_traceability_boundary(
         collect_repo_items(&source_graphs, file_ownership, &mediated_reasons),
         scoped_source_files,
@@ -391,7 +416,7 @@ fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
             .len()
     ));
     let mut edges = parser_edges.clone();
-    if matches!(
+    if !graph_facts_include_scoped_semantics && matches!(
         traceability_pack.semantic_fact_source,
         Some(RustSemanticFactSourceKind::RustAnalyzer)
     ) {
@@ -411,7 +436,10 @@ fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
     graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
         parse_source_graph(path, body).and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
-    let reference = scoped_boundary.reference(&graph);
+    let reference = scoped_boundary
+        .reference(&graph)
+        .map_err(anyhow::Error::msg)?;
+    let mediated_reasons = expand_mediated_reasons_through_graph(&graph, &mediated_reasons);
     let projected_item_ids = &reference.contract.projected_item_ids;
     let preserved_graph_item_ids = preserved_graph_item_ids_for_reference(&reference);
     let owned_item_ids = scoped_boundary
@@ -419,14 +447,22 @@ fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
         .iter()
         .map(|item| item.stable_id.clone());
     let preserved_context_item_ids = preserved_item_ids_for_reference(&reference, owned_item_ids);
-    let repo_items = scoped_boundary
+    let context_items = scoped_boundary
         .context_items
+        .into_iter()
+        .map(|mut item| {
+            item.mediated_reason = mediated_reasons
+                .get(&item.stable_id)
+                .map(|reason| reason.as_str());
+            item
+        })
+        .collect::<Vec<_>>();
+    let repo_items = context_items
         .iter()
         .filter(|item| projected_item_ids.contains(&item.stable_id))
         .cloned()
         .collect::<Vec<_>>();
-    let context_items = scoped_boundary
-        .context_items
+    let context_items = context_items
         .into_iter()
         .filter(|item| preserved_context_item_ids.contains(&item.stable_id))
         .collect::<Vec<_>>();
@@ -495,6 +531,34 @@ fn build_full_trace_edges(
 
 fn rust_backward_trace_failure(error: anyhow::Error) -> anyhow::Error {
     anyhow!("Rust backward trace is unavailable because `rust-analyzer` trace collection failed: {error:#}")
+}
+
+fn expand_mediated_reasons_through_graph(
+    graph: &TraceGraph,
+    mediated_reasons: &BTreeMap<String, RustMediatedReason>,
+) -> BTreeMap<String, RustMediatedReason> {
+    let mut expanded = mediated_reasons.clone();
+    let mut pending = mediated_reasons
+        .iter()
+        .filter_map(|(stable_id, reason)| reason.propagated().map(|reason| (stable_id.clone(), reason)))
+        .collect::<Vec<_>>();
+
+    while let Some((stable_id, propagated_reason)) = pending.pop() {
+        let Some(callees) = graph.edges.get(&stable_id) else {
+            continue;
+        };
+        for callee in callees {
+            if expanded.contains_key(callee) {
+                continue;
+            }
+            expanded.insert(callee.clone(), propagated_reason);
+            if let Some(next_reason) = propagated_reason.propagated() {
+                pending.push((callee.clone(), next_reason));
+            }
+        }
+    }
+
+    expanded
 }
 
 fn collect_owned_items(
@@ -630,18 +694,17 @@ fn collect_mediated_reasons_in_graph(
     let Ok(file) = syn::parse_file(text) else {
         return BTreeMap::new();
     };
-    let trait_methods =
-        collect_trait_impl_method_qualified_names(&file.items, &file_module_segments(path));
-    if trait_methods.is_empty() {
-        return BTreeMap::new();
-    }
+    let mut reasons = BTreeMap::new();
+    collect_build_script_entrypoint_reason(path, graph, &mut reasons);
 
     let graph_items_by_name = graph
         .items
         .iter()
         .map(|item| (item.qualified_name.as_str(), &item.stable_id))
         .collect::<BTreeMap<_, _>>();
-    let mut reasons = BTreeMap::new();
+
+    let trait_methods =
+        collect_trait_impl_method_qualified_names(&file.items, &file_module_segments(path));
     for qualified_name in trait_methods {
         if let Some(stable_id) = graph_items_by_name.get(qualified_name.as_str()) {
             reasons.insert(
@@ -653,6 +716,25 @@ fn collect_mediated_reasons_in_graph(
     reasons
 }
 
+fn collect_build_script_entrypoint_reason(
+    path: &Path,
+    graph: &ParsedSourceGraph,
+    reasons: &mut BTreeMap<String, RustMediatedReason>,
+) {
+    if path.file_name().and_then(|name| name.to_str()) != Some("build.rs") {
+        return;
+    }
+
+    for item in &graph.items {
+        let reason = if item.kind == SourceItemKind::Function && item.name == "main" {
+            RustMediatedReason::BuildScriptEntrypoint
+        } else {
+            RustMediatedReason::BuildScriptSupportCode
+        };
+        reasons.insert(item.stable_id.clone(), reason);
+    }
+}
+
 fn collect_trait_impl_method_qualified_names<'a>(
     items: impl IntoIterator<Item = &'a syn::Item>,
     module_path: &[String],
@@ -662,18 +744,21 @@ fn collect_trait_impl_method_qualified_names<'a>(
     for item in items {
         match item {
             syn::Item::Impl(item_impl) if item_impl.trait_.is_some() => {
-                let Some(type_name) = impl_self_type_name(&item_impl.self_ty) else {
+                let type_names = impl_self_type_names(&item_impl.self_ty);
+                if type_names.is_empty() {
                     continue;
                 };
                 for impl_item in &item_impl.items {
                     let syn::ImplItem::Fn(method) = impl_item else {
                         continue;
                     };
-                    qualified_names.insert(build_local_qualified_name(
-                        module_path,
-                        std::slice::from_ref(&type_name),
-                        &method.sig.ident.to_string(),
-                    ));
+                    for type_name in &type_names {
+                        qualified_names.insert(build_local_qualified_name(
+                            module_path,
+                            std::slice::from_ref(type_name),
+                            &method.sig.ident.to_string(),
+                        ));
+                    }
                 }
             }
             syn::Item::Mod(item_mod) => {
@@ -694,9 +779,47 @@ fn collect_trait_impl_method_qualified_names<'a>(
     qualified_names
 }
 
-fn impl_self_type_name(ty: &syn::Type) -> Option<String> {
+fn impl_self_type_names(ty: &syn::Type) -> BTreeSet<String> {
     match ty {
-        syn::Type::Path(type_path) => Some(type_path.path.segments.last()?.ident.to_string()),
+        syn::Type::Path(type_path) => type_path
+            .path
+            .segments
+            .last()
+            .map(type_path_segment_names)
+            .unwrap_or_default(),
+        _ => BTreeSet::new(),
+    }
+}
+
+fn type_path_segment_names(segment: &syn::PathSegment) -> BTreeSet<String> {
+    let bare = segment.ident.to_string();
+    let mut names = BTreeSet::from([bare.clone()]);
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return names;
+    };
+    if arguments.args.is_empty() {
+        return names;
+    }
+
+    let rendered_args = arguments
+        .args
+        .iter()
+        .filter_map(render_generic_argument_for_tree_sitter)
+        .collect::<Vec<_>>();
+    if rendered_args.len() == arguments.args.len() {
+        names.insert(format!("{bare}<{}>", rendered_args.join(", ")));
+    }
+    names
+}
+
+fn render_generic_argument_for_tree_sitter(argument: &syn::GenericArgument) -> Option<String> {
+    match argument {
+        syn::GenericArgument::Lifetime(lifetime) => Some(lifetime.to_string()),
+        syn::GenericArgument::Type(syn::Type::Path(type_path)) => type_path
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string()),
         _ => None,
     }
 }

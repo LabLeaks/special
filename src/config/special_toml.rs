@@ -18,7 +18,26 @@ pub(crate) struct SpecialToml {
     pub(crate) version: SpecialVersion,
     pub(crate) version_explicit: bool,
     pub(crate) ignore_patterns: Vec<String>,
+    pub(crate) health_ignore_unexplained_patterns: Vec<String>,
     pub(crate) toolchain_manager: Option<ToolchainManager>,
+    pub(crate) pattern_benchmarks: PatternMetricBenchmarks,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PatternMetricBenchmarks {
+    pub(crate) high: f64,
+    pub(crate) medium: f64,
+    pub(crate) low: f64,
+}
+
+impl Default for PatternMetricBenchmarks {
+    fn default() -> Self {
+        Self {
+            high: 0.55,
+            medium: 0.45,
+            low: 0.20,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,13 +80,36 @@ struct RawSpecialToml {
     root: Option<String>,
     version: Option<String>,
     ignore: Option<Vec<String>>,
+    health: Option<RawHealthConfig>,
     toolchain: Option<RawToolchainConfig>,
+    patterns: Option<RawPatternsConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHealthConfig {
+    #[serde(rename = "ignore-unexplained")]
+    ignore_unexplained: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawToolchainConfig {
     manager: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPatternsConfig {
+    metrics: Option<RawPatternMetricsConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPatternMetricsConfig {
+    high: Option<f64>,
+    medium: Option<f64>,
+    low: Option<f64>,
 }
 
 pub(crate) fn load_special_toml(path: &Path) -> Result<SpecialToml> {
@@ -83,7 +125,13 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
     let key_lines = collect_top_level_key_lines(content);
 
     for key in table.keys() {
-        if key != "root" && key != "version" && key != "ignore" && key != "toolchain" {
+        if key != "root"
+            && key != "version"
+            && key != "ignore"
+            && key != "health"
+            && key != "toolchain"
+            && key != "patterns"
+        {
             let line = key_lines.get(key.as_str()).copied().unwrap_or(1);
             bail!("line {} uses unknown key `{key}`", line);
         }
@@ -119,6 +167,19 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
         config.ignore_patterns = ignore_patterns;
     }
 
+    if let Some(health) = raw.health
+        && let Some(patterns) = health.ignore_unexplained
+    {
+        let line = key_lines.get("health").copied().unwrap_or(1);
+        if patterns.iter().any(|pattern| pattern.trim().is_empty()) {
+            bail!(
+                "line {} must not contain an empty health ignore-unexplained pattern",
+                line
+            );
+        }
+        config.health_ignore_unexplained_patterns = patterns;
+    }
+
     if let Some(toolchain) = raw.toolchain
         && let Some(manager) = toolchain.manager
     {
@@ -126,7 +187,46 @@ pub(super) fn parse_special_toml(content: &str) -> Result<SpecialToml> {
         config.toolchain_manager = Some(ToolchainManager::parse(&manager, line)?);
     }
 
+    if let Some(patterns) = raw.patterns
+        && let Some(metrics) = patterns.metrics
+    {
+        let line = key_lines.get("patterns").copied().unwrap_or(1);
+        config.pattern_benchmarks = parse_pattern_benchmark_config(metrics, line)?;
+    }
+
     Ok(config)
+}
+
+fn parse_pattern_benchmark_config(
+    raw: RawPatternMetricsConfig,
+    line: usize,
+) -> Result<PatternMetricBenchmarks> {
+    let defaults = PatternMetricBenchmarks::default();
+    let benchmarks = PatternMetricBenchmarks {
+        high: parse_probability(raw.high, defaults.high, line)?,
+        medium: parse_probability(raw.medium, defaults.medium, line)?,
+        low: parse_probability(raw.low, defaults.low, line)?,
+    };
+    if !(benchmarks.high >= benchmarks.medium && benchmarks.medium >= benchmarks.low) {
+        bail!(
+            "line {} pattern metric benchmarks must be ordered high >= medium >= low",
+            line
+        );
+    }
+    Ok(benchmarks)
+}
+
+fn parse_probability(value: Option<f64>, default: f64, line: usize) -> Result<f64> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    if !(0.0..=1.0).contains(&value) || !value.is_finite() {
+        bail!(
+            "line {} pattern metric benchmark values must be decimals from 0.0 through 1.0",
+            line
+        );
+    }
+    Ok(value)
 }
 
 fn collect_top_level_key_lines(content: &str) -> std::collections::BTreeMap<String, usize> {
@@ -142,6 +242,12 @@ fn collect_top_level_key_lines(content: &str) -> std::collections::BTreeMap<Stri
                 key_lines
                     .entry("toolchain".to_string())
                     .or_insert(index + 1);
+            }
+            if trimmed == "[health]" {
+                key_lines.entry("health".to_string()).or_insert(index + 1);
+            }
+            if trimmed == "[patterns]" || trimmed.starts_with("[patterns.") {
+                key_lines.entry("patterns".to_string()).or_insert(index + 1);
             }
             continue;
         }
@@ -210,7 +316,7 @@ fn line_for_offset(content: &str, offset: usize) -> usize {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{ToolchainManager, parse_special_toml};
+    use super::{PatternMetricBenchmarks, ToolchainManager, parse_special_toml};
     use crate::config::SpecialVersion;
 
     #[test]
@@ -286,6 +392,71 @@ mod tests {
             parse_special_toml("[toolchain]\nmanager = \"mise\"\n").expect("config should parse");
 
         assert_eq!(config.toolchain_manager, Some(ToolchainManager::Mise));
+    }
+
+    #[test]
+    fn parses_health_ignore_unexplained_patterns() {
+        let config = parse_special_toml(
+            "version = \"1\"\n[health]\nignore-unexplained = [\"generated/**\", \"fixtures.rs\"]\n",
+        )
+        .expect("config should parse");
+
+        assert_eq!(
+            config.health_ignore_unexplained_patterns,
+            vec!["generated/**".to_string(), "fixtures.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_empty_health_ignore_unexplained_patterns() {
+        let err = parse_special_toml("[health]\nignore-unexplained = [\"\"]\n")
+            .expect_err("empty health ignore pattern should fail");
+
+        assert!(
+            err.to_string()
+                .contains("must not contain an empty health ignore-unexplained pattern")
+        );
+    }
+
+    #[test]
+    fn parses_pattern_metric_benchmarks() {
+        let config = parse_special_toml(
+            "version = \"1\"\n[patterns.metrics]\nhigh = 0.81\nmedium = 0.44\nlow = 0.18\n",
+        )
+        .expect("config should parse");
+
+        assert_eq!(
+            config.pattern_benchmarks,
+            PatternMetricBenchmarks {
+                high: 0.81,
+                medium: 0.44,
+                low: 0.18,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_range_pattern_metric_benchmarks() {
+        let err = parse_special_toml("[patterns.metrics]\nhigh = 1.5\n")
+            .expect_err("out of range benchmark should fail");
+
+        assert!(
+            err.to_string()
+                .contains("pattern metric benchmark values must be decimals from 0.0 through 1.0")
+        );
+    }
+
+    #[test]
+    fn rejects_contradictory_pattern_metric_benchmarks() {
+        let err = parse_special_toml(
+            "version = \"1\"\n[patterns.metrics]\nhigh = 0.30\nmedium = 0.50\nlow = 0.20\n",
+        )
+        .expect_err("unordered benchmarks should fail");
+
+        assert!(
+            err.to_string()
+                .contains("pattern metric benchmarks must be ordered high >= medium >= low")
+        );
     }
 
     #[test]

@@ -329,3 +329,167 @@ fn modules_metrics_json_includes_structured_go_analysis() {
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT.TOOLCHAIN_DEGRADED
+fn modules_metrics_warns_when_typescript_analyzer_enrichment_is_unavailable() {
+    let root = temp_repo_dir("special-cli-modules-metrics-typescript-degraded");
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("src")).expect("source dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module APP`\nApp module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("src/app.ts"),
+        "// @fileimplements APP\nexport function run() { return 1; }\n",
+    )
+    .expect("TypeScript fixture should be written");
+
+    let output = run_special(&root, &["arch", "--metrics"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("TypeScript analyzer enrichment degraded"));
+    assert!(stderr.contains("install a resolvable `typescript` package"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.GO.TOOLCHAIN_DEGRADED
+fn modules_metrics_warns_when_go_analyzer_enrichment_is_unavailable() {
+    let root = temp_repo_dir("special-cli-modules-metrics-go-degraded");
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("app")).expect("source dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(root.join("go.mod"), "module example.com/app\n\ngo 1.23\n")
+        .expect("go.mod should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module APP`\nApp module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("app/main.go"),
+        "// @fileimplements APP\npackage app\n\nfunc Run() int { return 1 }\n",
+    )
+    .expect("Go fixture should be written");
+
+    let output = run_special(&root, &["arch", "--metrics"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("Go analyzer enrichment degraded"));
+    assert!(stderr.contains("provide a working `go` tool"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.TYPESCRIPT.COUPLING
+fn modules_metrics_uses_typescript_compiler_resolution_for_path_alias_coupling() {
+    let root = temp_repo_dir("special-cli-modules-metrics-typescript-alias-coupling");
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("src")).expect("source dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(root.join(".tool-versions"), "nodejs 24.15.0\n")
+        .expect(".tool-versions should be written");
+    fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@app/*":["src/*"]}},"include":["src/**/*.ts"]}"#,
+    )
+    .expect("tsconfig should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module APP`\nApp module.\n\n### `@module SHARED`\nShared module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("src/app.ts"),
+        "// @fileimplements APP\nimport { sharedValue } from \"@app/shared\";\n\nexport function run() { return sharedValue(); }\n",
+    )
+    .expect("TypeScript app fixture should be written");
+    fs::write(
+        root.join("src/shared.ts"),
+        "// @fileimplements SHARED\nexport function sharedValue() { return 1; }\n",
+    )
+    .expect("TypeScript shared fixture should be written");
+
+    let output = run_special(&root, &["arch", "APP", "--metrics", "--json"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(
+        !stderr.contains("TypeScript analyzer enrichment degraded"),
+        "TypeScript compiler-backed coupling test must execute the enriched analyzer path: {stderr}"
+    );
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let app = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "APP")))
+        .expect("app module should be present");
+    assert_eq!(app["analysis"]["coupling"]["fan_out"], Value::from(1));
+    assert_eq!(
+        app["analysis"]["coupling"]["external_target_count"],
+        Value::from(0)
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.MODULE_COMMAND.METRICS.GO.COUPLING
+fn modules_metrics_uses_go_list_resolution_for_module_import_coupling() {
+    let root = temp_repo_dir("special-cli-modules-metrics-go-list-coupling");
+    fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
+    fs::create_dir_all(root.join("app")).expect("app dir should be created");
+    fs::create_dir_all(root.join("shared")).expect("shared dir should be created");
+    fs::write(root.join("special.toml"), "version = \"1\"\nroot = \".\"\n")
+        .expect("special.toml should be written");
+    fs::write(root.join(".tool-versions"), "go 1.23.12\n")
+        .expect(".tool-versions should be written");
+    fs::write(root.join("go.mod"), "module example.com/demo\n\ngo 1.23\n")
+        .expect("go.mod should be written");
+    fs::write(
+        root.join("_project/ARCHITECTURE.md"),
+        "# Architecture\n\n### `@module APP`\nApp module.\n\n### `@module SHARED`\nShared module.\n",
+    )
+    .expect("architecture fixture should be written");
+    fs::write(
+        root.join("app/main.go"),
+        "// @fileimplements APP\npackage app\n\nimport \"example.com/demo/shared\"\n\nfunc Run() int { return shared.SharedValue() }\n",
+    )
+    .expect("Go app fixture should be written");
+    fs::write(
+        root.join("shared/shared.go"),
+        "// @fileimplements SHARED\npackage shared\n\nfunc SharedValue() int { return 1 }\n",
+    )
+    .expect("Go shared fixture should be written");
+
+    let output = run_special(&root, &["arch", "APP", "--metrics", "--json"]);
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(
+        !stderr.contains("Go analyzer enrichment degraded"),
+        "Go tool-backed coupling test must execute the enriched analyzer path: {stderr}"
+    );
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let app = json["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find_map(|node| find_node_by_id(node, "APP")))
+        .expect("app module should be present");
+    assert_eq!(app["analysis"]["coupling"]["fan_out"], Value::from(1));
+    assert_eq!(
+        app["analysis"]["coupling"]["external_target_count"],
+        Value::from(0)
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}

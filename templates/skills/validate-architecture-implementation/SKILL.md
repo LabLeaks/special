@@ -1,36 +1,48 @@
 ---
 name: validate-architecture-implementation
-description: Use this skill when checking whether a concrete architecture module is honestly implemented by the code that claims to implement it. Inspect one module with `special arch MODULE.ID --verbose`, use `--metrics` when you need unknown-unknowns evidence, and decide whether the module intent and implementation really match.
+description: Use this skill when reviewing whether code matches an intended module or subsystem responsibility. Compare the module description to the attached implementation, then decide whether to keep, move, narrow, split, or add architecture annotations.
 ---
 
 # Validate Architecture Implementation
 
-Use this skill when you need to judge whether a concrete architecture module is honestly implemented by the code that claims to implement it.
+## When To Use
 
-1. Start from one exact `@module` id, not a whole subtree.
-2. Run `special arch MODULE.ID --verbose` and read the module text before reading the attached `@implements` bodies.
-3. Use the command family consistently:
-   - `special arch MODULE.ID` for the normal ownership tree
-   - `special arch --metrics` for the architecture-wide grouped summary first
-   - `special arch MODULE.ID --metrics` for the deeper evidence on one boundary without dumping the whole repo
-   - `special arch MODULE.ID --metrics --verbose` for the full detailed drilldown
-4. Use `special arch MODULE.ID --metrics --verbose` when you need evidence about unknown unknowns inside the claimed boundary:
-   - hidden or uncovered implementation
-   - broad `@fileimplements` ownership that may hide odd items
-   - unusually complex, outbound-heavy, isolated, or panic-heavy items
-5. Treat `special arch` as the centralized view, not the central source of truth. Prefer architecture declarations near the owning code and use the CLI to assemble the whole picture.
-6. When architecture intent itself is wrong or incomplete, update the tracked source-local `@module` text instead of editing incidental runtime copies or burying the design elsewhere.
-7. Review each attached implementation body and decide whether it implements the exact module intent rather than a nearby module or a purely organizational `@area`.
-8. Treat `@area` as structure only. If a node is conceptual grouping, it should not carry direct implementation expectations.
-9. Read metrics at two levels:
-   - plain-language explanation first
-   - exact structural definition second
-10. Treat metrics as evidence, not verdicts. They can surface suspicious items or coarse boundaries, but they do not prove a dependency is wrong or that an annotation must be moved.
-11. Use `special arch --unimplemented` to find current modules that still have no direct `@implements`.
-12. Run `special lint` if ownership looks malformed or the attachments seem inconsistent.
-13. Treat duplicate `@implements`, unknown module ids, and area-targeted `@implements` as architecture integrity problems.
-14. Keep product-contract questions separate. If the real question is shipped behavior or whether a test proves a claim, switch to `special specs` and the product-spec workflow instead.
-15. Remember that `@implements` is traceability, not behavior proof. A module may have multiple implementing sites, but broad spread is a smell worth calling out.
-16. If you delegate or fan this review out to subagents, explicitly instruct each agent to run `special arch MODULE.ID --verbose` and `special arch MODULE.ID --metrics --verbose` for their exact boundary. Use `special arch --metrics` only for the broad architecture-wide summary, and use `special health` only when the question is genuinely cross-cutting rather than module-bound. Do not rely on freehand code reading alone for architecture correspondence audits.
+Use this when a task asks:
+
+- does this file belong to this module?
+- is this module honestly implemented?
+- did a refactor leave architecture annotations stale?
+- is one file claiming too much ownership?
+- should this code become a new module?
+
+This can be used before or after Special is integrated.
+
+## How To Use
+
+1. Pick one intended boundary.
+2. If a module id exists, run `special arch MODULE.ID --verbose`.
+3. Read the module description.
+4. Read the attached `@implements` or `@fileimplements` body.
+5. Decide whether the code actually performs that responsibility.
+6. Use `special arch MODULE.ID --metrics --verbose` when you need complexity, coupling, ownership, or hidden-item evidence.
+7. If pattern applications appear, inspect them with `special patterns PATTERN.ID --verbose`.
+
+Useful commands:
+
+```sh
+special arch MODULE.ID --verbose
+special arch MODULE.ID --metrics --verbose
+special arch --unimplemented
+special lint
+```
+
+## What To Do With Results
+
+- If the code matches the module, keep the annotation.
+- If the description is wrong, edit the `@module` text where it is written.
+- If the code belongs elsewhere, move `@implements`.
+- If a file-level attachment hides unrelated items, use narrower item-level attachments or split the module.
+- If a current module has no implementation, add implementation or mark it planned.
+- If the issue is behavior proof, switch to product specs.
 
 Read [references/validation-checklist.md](references/validation-checklist.md) for the review rubric and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.

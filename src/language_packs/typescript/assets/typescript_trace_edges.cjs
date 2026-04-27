@@ -16,7 +16,7 @@ function loadTypeScript(moduleEntry) {
 
 function resolveImportedFiles(ts, sourceFile, options, host, trackedFiles) {
   const imported = ts.preProcessFile(sourceFile.text, true, true).importedFiles || [];
-  const resolved = new Set();
+  const resolved = [];
   for (const entry of imported) {
     const moduleName = entry.fileName;
     const resolution = ts.resolveModuleName(
@@ -29,7 +29,7 @@ function resolveImportedFiles(ts, sourceFile, options, host, trackedFiles) {
     if (!resolvedFileName) continue;
     const normalized = normalize(resolvedFileName);
     if (trackedFiles.has(normalized)) {
-      resolved.add(normalized);
+      resolved.push({ specifier: moduleName, fileName: normalized });
     }
   }
   return resolved;
@@ -104,6 +104,17 @@ function matchDeclaredItem(ts, grouped, decl) {
   return candidates[0] || null;
 }
 
+function reverseParserEdges(parserEdges) {
+  const reverse = new Map();
+  for (const [caller, callees] of Object.entries(parserEdges || {})) {
+    for (const callee of callees || []) {
+      if (!reverse.has(callee)) reverse.set(callee, new Set());
+      reverse.get(callee).add(caller);
+    }
+  }
+  return reverse;
+}
+
 function main() {
   const moduleEntry = process.argv[2];
   if (!moduleEntry) {
@@ -115,6 +126,7 @@ function main() {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const mode = input.mode || 'trace_edges';
   const grouped = groupItemsByPath(input.items);
+  const itemById = new Map(input.items.map((item) => [item.stable_id, item]));
   const trackedFiles = new Set(input.source_files.map(normalize));
 
   let rootNames = input.source_files.map(normalize);
@@ -136,7 +148,9 @@ function main() {
         path.dirname(configPath)
       );
       if (!parsed.errors.length) {
-        rootNames = parsed.fileNames.map(normalize);
+        rootNames = input.project_source_files
+          ? input.source_files.map(normalize)
+          : parsed.fileNames.map(normalize);
         options = parsed.options;
       }
     }
@@ -169,25 +183,98 @@ function main() {
       if (sourceFile.isDeclarationFile) continue;
       const normalized = normalize(sourceFile.fileName);
       if (!trackedFiles.has(normalized)) continue;
-      for (const importedFile of resolveImportedFiles(
+      for (const imported of resolveImportedFiles(
         ts,
         sourceFile,
         options,
         languageServiceHost,
         trackedFiles
       )) {
-        fileEdgeSet.add(`${normalized}\t${importedFile}`);
+        fileEdgeSet.add(`${normalized}\t${imported.fileName}\t${imported.specifier}`);
       }
     }
     const file_edges = Array.from(fileEdgeSet).map((entry) => {
-      const [from, to] = entry.split('\t');
-      return { from, to };
+      const [from, to, specifier] = entry.split('\t');
+      return { from, to, specifier };
     });
     process.stdout.write(JSON.stringify({ file_edges }));
     return;
   }
 
   const edgeSet = new Set();
+  let referenceQueryCount = 0;
+
+  function outputEdges() {
+    const programFileCount = program
+      .getSourceFiles()
+      .filter((sourceFile) => !sourceFile.isDeclarationFile).length;
+    const edges = Array.from(edgeSet).map((entry) => {
+      const [caller, callee] = entry.split('\t');
+      return { caller, callee };
+    });
+    process.stdout.write(JSON.stringify({
+      edges,
+      stats: {
+        program_file_count: programFileCount,
+        tracked_file_count: trackedFiles.size,
+        reference_query_count: referenceQueryCount,
+      },
+    }));
+  }
+
+  function recordReferenceCallers(item, pending) {
+    const normalizedPath = normalize(item.path);
+    if (!trackedFiles.has(normalizedPath)) return;
+    const sourceFile = program.getSourceFile(normalizedPath);
+    if (!sourceFile) return;
+    const position = itemNameOffset(sourceFile, item);
+    referenceQueryCount += 1;
+    const referenceGroups = languageService.findReferences(normalizedPath, position) || [];
+    for (const group of referenceGroups) {
+      for (const reference of group.references || []) {
+        if (reference.isDefinition) continue;
+        const callerLine =
+          sourceFile.fileName === reference.fileName
+            ? sourceFile.getLineAndCharacterOfPosition(reference.textSpan.start).line + 1
+            : (() => {
+                const refSource = program.getSourceFile(reference.fileName);
+                if (!refSource) return null;
+                return refSource.getLineAndCharacterOfPosition(reference.textSpan.start).line + 1;
+              })();
+        if (callerLine == null) continue;
+        const caller = findContainingItem(grouped, reference.fileName, callerLine);
+        if (caller && caller.stable_id !== item.stable_id) {
+          edgeSet.add(`${caller.stable_id}\t${item.stable_id}`);
+          pending.push(caller.stable_id);
+        }
+      }
+    }
+  }
+
+  if (mode === 'reverse_trace_edges') {
+    const reverseParserEdges = new Map();
+    for (const [caller, callees] of Object.entries(input.parser_edges || {})) {
+      for (const callee of callees || []) {
+        if (!reverseParserEdges.has(callee)) reverseParserEdges.set(callee, []);
+        reverseParserEdges.get(callee).push(caller);
+      }
+    }
+    const pending = Array.from(input.seed_item_ids || []);
+    const visited = new Set();
+    while (pending.length) {
+      const calleeId = pending.pop();
+      if (visited.has(calleeId)) continue;
+      visited.add(calleeId);
+      for (const parserCaller of reverseParserEdges.get(calleeId) || []) {
+        if (!visited.has(parserCaller)) pending.push(parserCaller);
+      }
+      const item = itemById.get(calleeId);
+      if (!item) continue;
+      recordReferenceCallers(item, pending);
+    }
+    outputEdges();
+    return;
+  }
 
   function visit(sourceFile, node) {
     if (ts.isCallExpression(node)) {
@@ -223,37 +310,10 @@ function main() {
   }
 
   for (const item of input.items) {
-    const normalizedPath = normalize(item.path);
-    if (!trackedFiles.has(normalizedPath)) continue;
-    const sourceFile = program.getSourceFile(normalizedPath);
-    if (!sourceFile) continue;
-    const position = itemNameOffset(sourceFile, item);
-    const referenceGroups = languageService.findReferences(normalizedPath, position) || [];
-    for (const group of referenceGroups) {
-      for (const reference of group.references || []) {
-        if (reference.isDefinition) continue;
-        const callerLine =
-          sourceFile.fileName === reference.fileName
-            ? sourceFile.getLineAndCharacterOfPosition(reference.textSpan.start).line + 1
-            : (() => {
-                const refSource = program.getSourceFile(reference.fileName);
-                if (!refSource) return null;
-                return refSource.getLineAndCharacterOfPosition(reference.textSpan.start).line + 1;
-              })();
-        if (callerLine == null) continue;
-        const caller = findContainingItem(grouped, reference.fileName, callerLine);
-        if (caller && caller.stable_id !== item.stable_id) {
-          edgeSet.add(`${caller.stable_id}\t${item.stable_id}`);
-        }
-      }
-    }
+    recordReferenceCallers(item, []);
   }
 
-  const edges = Array.from(edgeSet).map((entry) => {
-    const [caller, callee] = entry.split('\t');
-    return { caller, callee };
-  });
-  process.stdout.write(JSON.stringify({ edges }));
+  outputEdges();
 }
 
 main();

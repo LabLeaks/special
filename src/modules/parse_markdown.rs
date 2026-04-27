@@ -8,15 +8,17 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::annotation_syntax::{ReservedSpecialAnnotation, reserved_special_annotation_rest};
 use crate::discovery::{DiscoveryConfig, discover_annotation_files};
 use crate::model::{
-    ArchitectureKind, Diagnostic, DiagnosticSeverity, ModuleDecl, ParsedArchitecture, PlanState,
-    SourceLocation,
+    ArchitectureKind, Diagnostic, DiagnosticSeverity, ModuleDecl, ParsedArchitecture,
+    PatternDefinition, PlanState, SourceLocation,
 };
 
 use super::parse::declarations::{
-    collect_doc_description_lines, maybe_consume_doc_planned, normalized_architecture_heading,
-    parse_module_header, skip_blank_doc_lines,
+    collect_doc_description_lines, maybe_consume_doc_planned, maybe_consume_pattern_strictness,
+    normalized_annotation_line, normalized_architecture_heading, normalized_pattern_heading,
+    parse_module_header, parse_pattern_id, skip_blank_doc_lines,
 };
 use crate::parser::starts_markdown_fence;
 
@@ -48,7 +50,60 @@ pub(super) fn parse_markdown_architecture_decls(
                 continue;
             }
 
+            if let Some(raw_pattern) = normalized_pattern_heading(raw) {
+                let line_number = index + 1;
+                let Some(pattern_id) =
+                    parse_pattern_id(raw_pattern, "@pattern", parsed, &path, line_number)
+                else {
+                    index += 1;
+                    continue;
+                };
+                let mut cursor = skip_blank_doc_lines(&lines, index + 1);
+                let strictness = if let Some(strictness) = maybe_consume_pattern_strictness(
+                    normalized_annotation_line(lines.get(cursor).copied()),
+                    parsed,
+                    &path,
+                    cursor + 1,
+                ) {
+                    cursor = skip_blank_doc_lines(&lines, cursor + 1);
+                    strictness
+                } else {
+                    Default::default()
+                };
+                let (description_lines, cursor) = collect_doc_description_lines(&lines, cursor);
+                parsed.patterns.push(PatternDefinition {
+                    pattern_id,
+                    strictness,
+                    text: description_lines.join(" "),
+                    location: SourceLocation {
+                        path: path.to_path_buf(),
+                        line: line_number,
+                    },
+                });
+                index = cursor;
+                continue;
+            }
+
             let Some((kind, raw_decl)) = normalized_architecture_heading(raw) else {
+                if let Some(annotation) = normalized_annotation_line(Some(raw))
+                    && (reserved_special_annotation_rest(
+                        annotation,
+                        ReservedSpecialAnnotation::Applies,
+                    )
+                    .is_some()
+                        || reserved_special_annotation_rest(
+                            annotation,
+                            ReservedSpecialAnnotation::FileApplies,
+                        )
+                        .is_some())
+                {
+                    parsed.diagnostics.push(Diagnostic {
+                        severity: DiagnosticSeverity::Error,
+                        path: path.to_path_buf(),
+                        line: index + 1,
+                        message: "@applies and @fileapplies must attach to source code, not markdown declarations".to_string(),
+                    });
+                }
                 index += 1;
                 continue;
             };

@@ -17,6 +17,10 @@ pub(crate) enum ReservedSpecialAnnotation {
     Area,
     Implements,
     FileImplements,
+    Pattern,
+    Strictness,
+    Applies,
+    FileApplies,
 }
 
 impl ReservedSpecialAnnotation {
@@ -34,6 +38,10 @@ impl ReservedSpecialAnnotation {
             Self::Area => "@area",
             Self::Implements => "@implements",
             Self::FileImplements => "@fileimplements",
+            Self::Pattern => "@pattern",
+            Self::Strictness => "@strictness",
+            Self::Applies => "@applies",
+            Self::FileApplies => "@fileapplies",
         }
     }
 }
@@ -51,6 +59,10 @@ const RESERVED_SPECIAL_ANNOTATIONS: &[ReservedSpecialAnnotation] = &[
     ReservedSpecialAnnotation::Area,
     ReservedSpecialAnnotation::Implements,
     ReservedSpecialAnnotation::FileImplements,
+    ReservedSpecialAnnotation::Pattern,
+    ReservedSpecialAnnotation::Strictness,
+    ReservedSpecialAnnotation::Applies,
+    ReservedSpecialAnnotation::FileApplies,
 ];
 
 pub(crate) fn reserved_special_annotation(text: &str) -> Option<ReservedSpecialAnnotation> {
@@ -92,6 +104,28 @@ pub(crate) fn is_any_tag_boundary(text: &str) -> bool {
     is_reserved_special_annotation(text) || is_foreign_tag_boundary(text)
 }
 
+pub(crate) fn normalize_markdown_annotation_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let trimmed = trimmed
+        .strip_prefix('>')
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let trimmed = trimmed.trim_start_matches('#').trim_start();
+    let trimmed = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .unwrap_or(trimmed);
+    let trimmed = trimmed
+        .strip_prefix('`')
+        .and_then(|inner| inner.strip_suffix('`'))
+        .unwrap_or(trimmed);
+    let trimmed = trimmed.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
 fn starts_with_tag_like_boundary(text: &str) -> bool {
     let Some(rest) = text.strip_prefix('@').or_else(|| text.strip_prefix('\\')) else {
         return false;
@@ -119,6 +153,13 @@ mod tests {
         assert!(is_reserved_special_annotation("@implements SPECIAL.RENDER"));
         assert!(is_reserved_special_annotation(
             "@fileimplements SPECIAL.RENDER"
+        ));
+        assert!(is_reserved_special_annotation(
+            "@pattern APP.READ_EDIT_PANEL"
+        ));
+        assert!(is_reserved_special_annotation("@strictness high"));
+        assert!(is_reserved_special_annotation(
+            "@applies APP.READ_EDIT_PANEL"
         ));
         assert!(is_reserved_special_annotation("@fileverifies EXPORT.CSV"));
         assert!(is_reserved_special_annotation("@fileattests EXPORT.CSV"));

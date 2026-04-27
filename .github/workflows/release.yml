@@ -139,7 +139,18 @@ jobs:
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
+      - name: Install Lean kernel toolchain
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+      - name: Cache embedded Lean kernel
+        uses: actions/cache@v4
+        with:
+          path: target/special-lean-kernel-cache
+          key: special-lean-kernel-${{ runner.os }}-${{ matrix.host }}-${{ hashFiles('proof/lean/lean-toolchain', 'proof/lean/lakefile.toml', 'proof/lean/lake-manifest.json', 'proof/lean/**/*.lean') }}
       - name: Build artifacts
+        env:
+          SPECIAL_BUILD_LEAN_KERNEL: "1"
         run: |
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json

@@ -4,7 +4,7 @@
 
 - Show me what this project currently claims is current.
 - What is the current validated state of the export subsystem?
-- Materialize the current spec tree and show me the exact support for this claim.
+- Show me the exact support for this current claim.
 - I need to know what the project actually ships today.
 
 ## Should Not Trigger

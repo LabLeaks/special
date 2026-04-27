@@ -5,12 +5,15 @@ Coordinates shared projection policy and output backends for text, JSON, and HTM
 // @fileimplements SPECIAL.RENDER
 use anyhow::Result;
 
-use crate::model::{LintReport, ModuleDocument, OverviewDocument, RepoDocument, SpecDocument};
+use crate::model::{
+    LintReport, ModuleDocument, OverviewDocument, PatternDocument, RepoDocument, SpecDocument,
+};
 
 mod common;
 mod html;
 mod html_common;
 mod json;
+mod labels;
 mod projection;
 mod templates;
 mod text;
@@ -27,6 +30,10 @@ pub fn render_repo_text(document: &RepoDocument, verbose: bool) -> String {
     text::render_repo_text(document, verbose)
 }
 
+pub fn render_pattern_text(document: &PatternDocument, verbose: bool) -> String {
+    text::render_pattern_text(document, verbose)
+}
+
 pub fn render_overview_text(document: &OverviewDocument) -> String {
     text::render_overview_text(document)
 }
@@ -41,6 +48,10 @@ pub fn render_module_json(document: &ModuleDocument, verbose: bool) -> Result<St
 
 pub fn render_repo_json(document: &RepoDocument, verbose: bool) -> Result<String> {
     json::render_repo_json(document, verbose)
+}
+
+pub fn render_pattern_json(document: &PatternDocument, verbose: bool) -> Result<String> {
+    json::render_pattern_json(document, verbose)
 }
 
 pub fn render_overview_json(document: &OverviewDocument) -> Result<String> {

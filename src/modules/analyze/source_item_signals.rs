@@ -26,22 +26,19 @@ pub(crate) fn summarize_source_item_signals_with_metrics(
         .iter()
         .map(|item| ItemSignalRecord::from_source_item(item, metrics_by_stable_id))
         .collect::<Vec<_>>();
-    let local_names = records
-        .iter()
-        .map(|item| item.name.clone())
-        .collect::<Vec<_>>();
+    let local_stable_ids_by_name = local_stable_ids_by_name(&records);
     for item in &mut records {
-        item.observe_edges(&local_names);
+        item.observe_edges(&local_stable_ids_by_name);
     }
 
     let mut inbound_counts: BTreeMap<String, usize> = BTreeMap::new();
     for item in &records {
-        for callee in &item.internal_callees {
+        for callee in &item.internal_callee_ids {
             *inbound_counts.entry(callee.clone()).or_default() += 1;
         }
     }
     for item in &mut records {
-        item.inbound_internal_refs = inbound_counts.get(&item.name).copied().unwrap_or(0);
+        item.inbound_internal_refs = inbound_counts.get(&item.stable_id).copied().unwrap_or(0);
     }
 
     let mut connected_items = records
@@ -88,7 +85,7 @@ pub(crate) fn summarize_source_item_signals_with_metrics(
         .filter(|item| {
             !item.root_visible
                 && !item.is_test
-                && !reachable_names.iter().any(|name| name == &item.name)
+                && !reachable_names.iter().any(|id| id == &item.stable_id)
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -191,6 +188,7 @@ pub(crate) fn summarize_source_item_signals_with_metrics(
 
 #[derive(Clone)]
 struct ItemSignalRecord {
+    stable_id: String,
     name: String,
     kind: ModuleItemKind,
     public: bool,
@@ -205,7 +203,7 @@ struct ItemSignalRecord {
     internal_refs: usize,
     inbound_internal_refs: usize,
     external_refs: usize,
-    internal_callees: Vec<String>,
+    internal_callee_ids: Vec<String>,
     observed_call_names: Vec<String>,
 }
 
@@ -219,6 +217,7 @@ impl ItemSignalRecord {
             .copied()
             .unwrap_or_default();
         Self {
+            stable_id: item.stable_id.clone(),
             name: item.name.clone(),
             kind: match item.kind {
                 SourceItemKind::Function => ModuleItemKind::Function,
@@ -236,16 +235,20 @@ impl ItemSignalRecord {
             internal_refs: 0,
             inbound_internal_refs: 0,
             external_refs: 0,
-            internal_callees: Vec::new(),
+            internal_callee_ids: Vec::new(),
             observed_call_names: item.calls.iter().map(|call| call.name.clone()).collect(),
         }
     }
 
-    fn observe_edges(&mut self, local_names: &[String]) {
+    fn observe_edges(&mut self, local_stable_ids_by_name: &BTreeMap<String, BTreeSet<String>>) {
         for call_name in &self.observed_call_names {
-            if local_names.iter().any(|name| name == call_name) {
+            if let Some(callee_ids) = local_stable_ids_by_name.get(call_name) {
                 self.internal_refs += 1;
-                self.internal_callees.push(call_name.clone());
+                if callee_ids.len() == 1
+                    && let Some(callee_id) = callee_ids.iter().next()
+                {
+                    self.internal_callee_ids.push(callee_id.clone());
+                }
             } else {
                 self.external_refs += 1;
             }
@@ -270,15 +273,26 @@ impl ItemSignalRecord {
     }
 }
 
+fn local_stable_ids_by_name(records: &[ItemSignalRecord]) -> BTreeMap<String, BTreeSet<String>> {
+    let mut ids_by_name = BTreeMap::<String, BTreeSet<String>>::new();
+    for record in records {
+        ids_by_name
+            .entry(record.name.clone())
+            .or_default()
+            .insert(record.stable_id.clone());
+    }
+    ids_by_name
+}
+
 fn reachable_from_roots(items: &[ItemSignalRecord]) -> Vec<String> {
     let adjacency = items
         .iter()
-        .map(|item| (item.name.clone(), item.internal_callees.clone()))
+        .map(|item| (item.stable_id.clone(), item.internal_callee_ids.clone()))
         .collect::<BTreeMap<_, _>>();
     let mut queue = items
         .iter()
         .filter(|item| item.root_visible || item.is_test)
-        .map(|item| item.name.clone())
+        .map(|item| item.stable_id.clone())
         .collect::<VecDeque<_>>();
     let mut seen = BTreeSet::new();
 
@@ -296,4 +310,68 @@ fn reachable_from_roots(items: &[ItemSignalRecord]) -> Vec<String> {
 
 fn is_process_entrypoint(item: &SourceItem) -> bool {
     item.kind == SourceItemKind::Function && item.name == "main"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::{CallSyntaxKind, SourceCall, SourceSpan};
+
+    fn span(line: usize) -> SourceSpan {
+        SourceSpan {
+            start_line: line,
+            end_line: line,
+            start_column: 0,
+            end_column: 0,
+            start_byte: 0,
+            end_byte: 0,
+        }
+    }
+
+    fn source_item(
+        stable_id: &str,
+        name: &str,
+        root_visible: bool,
+        calls: Vec<&str>,
+    ) -> SourceItem {
+        SourceItem {
+            source_path: "src/lib.rs".to_string(),
+            stable_id: stable_id.to_string(),
+            name: name.to_string(),
+            qualified_name: stable_id.to_string(),
+            module_path: Vec::new(),
+            container_path: Vec::new(),
+            shape_fingerprint: String::new(),
+            shape_node_count: 0,
+            kind: SourceItemKind::Function,
+            span: span(1),
+            public: root_visible,
+            root_visible,
+            is_test: false,
+            calls: calls
+                .into_iter()
+                .map(|name| SourceCall {
+                    name: name.to_string(),
+                    qualifier: None,
+                    syntax: CallSyntaxKind::Identifier,
+                    span: span(1),
+                })
+                .collect(),
+            invocations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn item_signal_reachability_uses_stable_ids_not_display_names() {
+        let summary = summarize_source_item_signals_with_metrics(
+            &[
+                source_item("src/lib.rs:ControllerA.handle:1", "handle", true, vec![]),
+                source_item("src/lib.rs:ControllerB.handle:8", "handle", false, vec![]),
+            ],
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(summary.unreached_item_count, 1);
+        assert_eq!(summary.unreached_items[0].name, "handle");
+    }
 }

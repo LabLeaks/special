@@ -8,8 +8,11 @@ use std::path::PathBuf;
 
 use crate::modules::analyze::traceability_core::{
     ProjectedTraceabilityContract, ProjectedTraceabilityReference, TraceGraph,
-    TraceabilityOwnedItem, build_projected_traceability_reference, collect_support_root_ids,
+    TraceabilityOwnedItem, build_projected_traceability_contract,
+    build_projected_traceability_reference_from_projected_items,
 };
+#[cfg(test)]
+use crate::modules::analyze::traceability_core::use_rust_reference_traceability_kernel_for_tests;
 
 /// Current Go scoped traceability separates projected output items from the
 /// broader working context still used to collect raw reverse-call information.
@@ -60,22 +63,26 @@ impl ScopedTraceabilityBoundary {
     /// scoped boundary. This is the target set used by the shared projected-
     /// contract theorem family.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn exact_contract(&self, graph: &TraceGraph) -> ScopedTraceabilityContract {
-        let preserved_reverse_closure_target_ids =
-            collect_support_root_ids(self.projected_item_ids.iter().cloned(), graph)
-                .into_iter()
-                .filter_map(|(item_id, supports)| (!supports.is_empty()).then_some(item_id))
-                .collect::<BTreeSet<_>>();
+    // @applies TRACEABILITY.SCOPED_PROJECTED_KERNEL
+    pub(super) fn exact_contract(
+        &self,
+        graph: &TraceGraph,
+    ) -> Result<ScopedTraceabilityContract, String> {
+        #[cfg(test)]
+        use_rust_reference_traceability_kernel_for_tests();
 
-        ScopedTraceabilityContract {
-            projected_item_ids: self.projected_item_ids.clone(),
-            preserved_reverse_closure_target_ids,
-        }
+        build_projected_traceability_contract(self.projected_item_ids.clone(), graph)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn reference(&self, graph: &TraceGraph) -> ScopedTraceabilityReference {
-        build_projected_traceability_reference(self.exact_contract(graph), graph)
+    pub(super) fn reference(&self, graph: &TraceGraph) -> Result<ScopedTraceabilityReference, String> {
+        #[cfg(test)]
+        use_rust_reference_traceability_kernel_for_tests();
+
+        build_projected_traceability_reference_from_projected_items(
+            self.projected_item_ids.clone(),
+            graph,
+        )
     }
 }
 
@@ -201,7 +208,7 @@ mod tests {
         };
 
         let working = boundary.working_contract();
-        let exact = boundary.exact_contract(&graph);
+        let exact = boundary.exact_contract(&graph).expect("exact traceability contract should derive");
 
         assert_eq!(
             working.preserved_reverse_closure_target_ids,

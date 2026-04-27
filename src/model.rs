@@ -17,7 +17,13 @@ pub use analysis::{
     ModuleItemSignal, ModuleItemSignalsSummary, ModuleMetricsSummary, ModuleQualitySummary,
     ModuleTraceabilityItem, ModuleTraceabilitySummary,
 };
-pub use architecture::{ImplementRef, ModuleDecl, ModuleFilter, ModuleNode, ParsedArchitecture};
+pub use architecture::{
+    ImplementRef, ModuleDecl, ModuleFilter, ModuleNode, ParsedArchitecture, PatternApplication,
+    PatternApplicationNode, PatternBenchmarkEstimate, PatternCandidateConfidence,
+    PatternClusterCandidate, PatternClusterInterpretation, PatternClusterItem, PatternDefinition,
+    PatternDocument, PatternFilter, PatternMetricsSummary, PatternMissingApplicationCandidate,
+    PatternModuleRef, PatternNode, PatternSimilarityMetrics, PatternStrictness,
+};
 pub use core::{
     ArchitectureKind, BlockLine, CommentBlock, DeclaredStateFilter, DeprecatedRelease,
     DiagnosticSeverity, ModelInvariantError, NodeKind, OwnedItem, PlanState, PlannedRelease,

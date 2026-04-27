@@ -7,4 +7,5 @@ special-spec.html
 __pycache__/
 *.pyc
 AGENTS.md
+BACKLOG.md
 _project/

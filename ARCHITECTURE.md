@@ -1,6 +1,6 @@
 # Architecture
 
-`special modules` is the canonical architecture view for this repo.
+`special arch` is the canonical architecture view for this repo.
 
 This file records project-specific architectural rationale that does not belong to one concrete
 source file. It should explain why this repo is shaped the way it is, not restate the module tree
@@ -15,7 +15,7 @@ This repo is intentionally split into a few broad responsibilities:
 - domain and materialization
   Parsed records become typed domain nodes before text, JSON, or HTML rendering.
 - architecture analysis
-  `special modules --metrics` should keep a shared analysis core and hang
+  `special arch --metrics` should keep a shared analysis core and hang
   language-specific analyzers beneath it rather than letting one parser model
   define the whole feature.
   The next provider expansions should validate that split with TypeScript and Go

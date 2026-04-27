@@ -3,9 +3,9 @@
 ## Should Trigger
 
 - Check whether this current claim is actually validated by its attached test.
-- Review whether the verify for `APP.CONFIG.EXPLICIT_ROOT` is honest.
+- Review whether this verify is honest.
 - I need to know if this spec is truly supported or if the test is adjacent hand-waving.
-- Use `special specs SPEC.ID --verbose` and tell me whether the contract really matches the code.
+- Tell me whether this contract really matches the proof.
 
 ## Should Not Trigger
 

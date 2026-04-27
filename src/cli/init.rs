@@ -32,7 +32,7 @@ pub(super) fn execute_init(current_dir: &Path) -> Result<ExitCode> {
     fs::write(
         &config_path,
         format!(
-            "version = \"{}\"\nroot = \".\"\n\n# Optional: tell tool-backed traceability to use the project's declared toolchain.\n# Out of the box, special understands these project contracts:\n#   - `mise.toml`\n#   - `.tool-versions` (asdf-compatible)\n#\n# If your project root is not where the toolchain file lives, or you want to pin the\n# contract explicitly, uncomment this block:\n#\n# [toolchain]\n# manager = \"mise\" # or \"asdf\"\n",
+            "version = \"{}\"\nroot = \".\"\n\n# Optional: keep generated or fixture-heavy paths out of health's\n# unexplained-by-spec bucket without hiding them from discovery or architecture.\n#\n# [health]\n# ignore-unexplained = [\"generated/**\"]\n#\n# Optional: tell tool-backed traceability to use the project's declared toolchain.\n# Out of the box, special understands these project contracts:\n#   - `mise.toml`\n#   - `.tool-versions` (asdf-compatible)\n#\n# If your project root is not where the toolchain file lives, or you want to pin the\n# contract explicitly, uncomment this block:\n#\n# [toolchain]\n# manager = \"mise\" # or \"asdf\"\n#\n# Optional: tune advisory pattern similarity benchmark centers.\n# Leave this commented out unless the default estimates are noisy for your codebase.\n#\n# [patterns.metrics]\n# high = 0.55\n# medium = 0.45\n# low = 0.20\n",
             SpecialVersion::CURRENT.as_str()
         ),
     )?;

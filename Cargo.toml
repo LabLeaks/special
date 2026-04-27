@@ -1,6 +1,6 @@
 [package]
 name = "special-cli"
-version = "0.7.1"
+version = "0.8.0"
 edition = "2024"
 repository = "https://github.com/LabLeaks/special"
 
@@ -16,6 +16,7 @@ anyhow = "1.0"
 askama = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.1"
 globset = "0.4"
 ignore = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -28,6 +29,9 @@ tree-sitter-rust = "0.24.0"
 tree-sitter-typescript = "0.23.2"
 toml = "0.8"
 url = "2.5"
+
+[build-dependencies]
+flate2 = "1.1"
 
 # The profile that 'dist' will build with
 [profile.dist]

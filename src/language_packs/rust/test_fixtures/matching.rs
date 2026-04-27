@@ -9,6 +9,7 @@ use super::support::{
     create_dirs, write_architecture, write_file, write_special_toml, write_specs,
 };
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_file_verify_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs"]);
     write_special_toml(root);
@@ -29,6 +30,7 @@ pub fn write_traceability_file_verify_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_name_collision_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs"]);
     write_special_toml(root);
@@ -54,6 +56,7 @@ pub fn write_traceability_name_collision_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_qualified_match_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs"]);
     write_special_toml(root);
@@ -74,6 +77,7 @@ pub fn write_traceability_qualified_match_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_transitive_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs"]);
     write_special_toml(root);

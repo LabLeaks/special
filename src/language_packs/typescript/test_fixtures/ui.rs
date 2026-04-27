@@ -12,6 +12,7 @@ use super::support::{
 const JSX_TSCONFIG: &str = "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"CommonJS\",\n    \"jsx\": \"preserve\"\n  },\n  \"include\": [\"src/**/*.ts\", \"src/**/*.tsx\"]\n}\n";
 const NEXT_TSCONFIG: &str = "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"ESNext\",\n    \"jsx\": \"preserve\"\n  },\n  \"include\": [\"app/**/*.tsx\", \"components/**/*.tsx\"]\n}\n";
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_react_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -41,6 +42,7 @@ pub fn write_typescript_react_traceability_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_next_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "app", "components"]);
     write_special_toml(root);

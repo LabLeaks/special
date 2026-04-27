@@ -10,6 +10,7 @@ use super::support::{
     write_specs,
 };
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_imported_call_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
     write_rust_toolchain_contract(root);
@@ -40,6 +41,7 @@ pub fn write_traceability_imported_call_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_mediated_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_rust_toolchain_contract(root);
@@ -65,6 +67,7 @@ pub fn write_traceability_mediated_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_cross_file_module_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "render"]);
     write_special_toml(root);
@@ -95,6 +98,7 @@ pub fn write_traceability_cross_file_module_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_self_method_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs"]);
     write_special_toml(root);
@@ -115,6 +119,7 @@ pub fn write_traceability_self_method_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_instance_method_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
     write_rust_toolchain_contract(root);

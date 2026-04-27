@@ -27,6 +27,7 @@ pub(super) fn parse_source_graph_for_language(
         .and_then(|descriptor| (descriptor.parse_source_graph)(path, text))
 }
 
+// @applies REGISTRY.PROVIDER_DESCRIPTOR
 fn descriptor_for_path(path: &Path) -> Option<&'static language_packs::LanguagePackDescriptor> {
     language_packs::descriptors()
         .iter()

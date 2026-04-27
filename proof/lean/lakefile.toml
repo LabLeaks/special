@@ -1,7 +1,11 @@
 name = "special_scoped_health"
 version = "0.1.0"
-defaultTargets = ["ScopedHealth"]
+defaultTargets = ["ScopedHealth", "special_traceability_kernel"]
 
 [[lean_lib]]
 name = "ScopedHealth"
 roots = ["ScopedHealth"]
+
+[[lean_exe]]
+name = "special_traceability_kernel"
+root = "ScopedHealth.KernelCli"

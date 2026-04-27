@@ -1,21 +1,43 @@
 ---
 name: inspect-current-spec-state
-description: Use this skill when you need the current validated product-spec state. Start with bare `special` when you need quick orientation, then materialize the current tree with `special specs --current` and scope into exact claims with `special specs SPEC.ID --verbose`.
+description: Use this skill when you need to know what behavior the project currently claims and supports. Use `special specs --current` when available, or identify that the project lacks a tracked current contract.
 ---
 
 # Inspect Current Spec State
 
-Use this skill when you need to understand what the project currently claims is current and supported.
+## When To Use
 
-1. Start with bare `special` if you need a quick overview of where to look next.
-2. Run `special specs --current` to view the current tree only.
-3. Use `special specs --current --metrics` when you need grouped support and lifecycle counts across the current surface.
-4. If you need a narrower view, scope to the exact node with `special specs --current SPEC.ID`.
-5. If you need to understand why a claim is current, use `special specs SPEC.ID --verbose`.
-5. Treat groups as navigation only; the real contract lives on direct `@spec` nodes.
-6. Use this skill before making statements about what the project currently ships.
-7. Learn the repo's main contract layout first so you inspect the authoritative declarations instead of a convenient but secondary file.
-9. If the question turns out to be about architecture structure, implementation ownership, or whether code honestly implements a module rather than shipped behavior, switch surfaces instead of forcing it through product specs: use `special arch`, `@module`, `@area`, and `@implements`.
-10. If the question is broader code health rather than contract state, switch to `special health` instead of trying to infer it from the spec tree.
+Use this before saying what the product currently does:
+
+- preparing release notes
+- answering “is this supported?”
+- checking current behavior before changing it
+- auditing whether claims are verified
+- introducing Special because current behavior is only implicit
+
+## How To Use
+
+1. If Special is present, run `special specs --current`.
+2. Use `special specs --current --metrics` for counts and gaps.
+3. Scope with `special specs --current SPEC.ID` for one area.
+4. Use `special specs SPEC.ID --verbose` to read the proof for one claim.
+5. If Special is not present, inspect tests/docs/public behavior and report that the current contract is untracked.
+
+Useful commands:
+
+```sh
+special
+special specs --current
+special specs --current --metrics
+special specs SPEC.ID --verbose
+```
+
+## What To Do With Results
+
+- If a current claim is verified, you can cite it.
+- If a current claim lacks support, add proof or mark it planned.
+- If the behavior is real but untracked, add a spec.
+- If the question is about ownership, use architecture skills.
+- If the question is about code health, use `special health`.
 
 Read [references/state-walkthrough.md](references/state-walkthrough.md) for the walkthrough and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.

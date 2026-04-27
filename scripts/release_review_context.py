@@ -61,8 +61,35 @@ def discover_latest_semver_tag(root: Path, backend: str, head: str) -> str:
             f"no reachable semver release tags found from {head}; pass --full or provide --base"
         )
 
-    versions.sort()
-    return versions[-1][1]
+    for _, candidate in sorted(versions, reverse=True):
+        if not tag_points_at_head(root, backend, candidate, head):
+            return candidate
+
+    raise SystemExit(
+        "no reachable semver release tags before the review head; pass --full or provide --base"
+    )
+
+
+def tag_points_at_head(root: Path, backend: str, tag: str, head: str) -> bool:
+    if backend == "jj":
+        if jj_revset_has_match(root, f"({tag}) & ({head})"):
+            return True
+        if jj_revision_is_empty(root, head):
+            return jj_revset_has_match(root, f"({tag}) & parents({head})")
+        return False
+
+    tag_commit = run_checked(root, ["git", "rev-list", "-n", "1", tag]).strip()
+    head_commit = run_checked(root, ["git", "rev-parse", head]).strip()
+    return tag_commit == head_commit
+
+
+def jj_revset_has_match(root: Path, revset: str) -> bool:
+    output = run_checked(root, ["jj", "log", "-r", revset, "--no-graph", "-T", "commit_id"])
+    return bool(output.strip())
+
+
+def jj_revision_is_empty(root: Path, revset: str) -> bool:
+    return run_checked(root, ["jj", "log", "-r", revset, "--no-graph", "-T", "empty"]).strip() == "true"
 
 
 def resolve_commit(root: Path, backend: str, rev: str) -> str:

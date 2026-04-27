@@ -11,8 +11,7 @@ use crate::language_packs::typescript::analyze::boundary::derive_scoped_traceabi
 use crate::model::ArchitectureTraceabilitySummary;
 
 use super::super::helpers::{
-    build_typescript_fixture_context, build_typescript_summary_from_closure,
-    filter_summary_to_display_path, index_file_ownership_for_test_owned,
+    build_typescript_fixture_context, filter_summary_to_display_path,
     is_typescript_tooling_unavailable, resolve_scoped_source_file,
 };
 
@@ -31,77 +30,6 @@ pub(crate) fn build_direct_scoped_typescript_analysis_pair(
         filter_summary_to_display_path(full, scoped_path),
         filter_summary_to_display_path(scoped, scoped_path),
         root,
-    ))
-}
-
-pub(crate) fn build_live_scoped_typescript_analysis_pair(
-    root: &Path,
-    scoped_path: &str,
-) -> Option<(ArchitectureTraceabilitySummary, ArchitectureTraceabilitySummary)> {
-    analyze::typescript_runtime(root)?;
-
-    let parsed_architecture =
-        crate::modules::parse_architecture(root, &[]).expect("architecture should parse");
-    let parsed_repo =
-        crate::parser::parse_repo(root, &[], crate::parser::ParseDialect::CurrentV1)
-            .expect("repo annotations should parse");
-    let discovered = crate::discovery::discover_annotation_files(crate::discovery::DiscoveryConfig {
-        root,
-        ignore_patterns: &[],
-    })
-    .expect("fixture files should be discovered");
-    let file_ownership = index_file_ownership_for_test_owned(&parsed_architecture);
-    let full_summary = build_typescript_summary_from_closure(
-        root,
-        &discovered.source_files,
-        None,
-        &parsed_repo,
-        &parsed_architecture,
-        &file_ownership,
-    )?;
-    let facts = match analyze::build_traceability_scope_facts(
-        root,
-        &discovered.source_files,
-        &parsed_repo,
-    ) {
-        Ok(facts) => facts,
-        Err(error) if is_typescript_tooling_unavailable(&error) => return None,
-        Err(error) => panic!("scope facts should build: {error}"),
-    };
-    let facts: analyze::TypeScriptTraceabilityScopeFacts =
-        serde_json::from_slice(&facts).expect("scope facts should deserialize");
-    let scoped_source_file = resolve_scoped_source_file(&discovered.source_files, root, scoped_path);
-    let boundary = derive_scoped_traceability_boundary(
-        &discovered.source_files,
-        std::slice::from_ref(&scoped_source_file),
-        &facts.adjacency,
-    );
-    let full_inputs = match analyze::build_traceability_inputs_for_typescript(
-        root,
-        &discovered.source_files,
-        None,
-        &parsed_repo,
-        &parsed_architecture,
-        &file_ownership,
-    ) {
-        Ok(inputs) => inputs,
-        Err(error) if is_typescript_tooling_unavailable(&error) => return None,
-        Err(error) => panic!("full typescript inputs should build: {error}"),
-    };
-    let exact_contract = boundary.exact_contract(&discovered.source_files, &full_inputs);
-    let exact_closure = exact_contract.preserved_file_closure.clone();
-    let scoped_summary = build_typescript_summary_from_closure(
-        root,
-        &exact_closure,
-        Some(std::slice::from_ref(&scoped_source_file)),
-        &parsed_repo,
-        &parsed_architecture,
-        &file_ownership,
-    )?;
-
-    Some((
-        filter_summary_to_display_path(full_summary, scoped_path),
-        filter_summary_to_display_path(scoped_summary, scoped_path),
     ))
 }
 
@@ -133,7 +61,7 @@ pub(crate) fn build_direct_scoped_typescript_analysis_pair_raw(
         }
         Err(error) => panic!("full typescript analysis should build: {error}"),
     };
-    let scope_facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo)
+    let scope_facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership)
     {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
@@ -165,7 +93,7 @@ pub(crate) fn build_direct_scoped_typescript_analysis_pair_raw(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let exact_contract = scoped_boundary.exact_contract(&source_files, &full_inputs);
+    let exact_contract = scoped_boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
     let graph_facts =
         match analyze::build_traceability_graph_facts(&root, &exact_contract.preserved_file_closure) {
             Ok(facts) => facts,

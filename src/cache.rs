@@ -22,7 +22,7 @@ mod storage;
 #[cfg(test)]
 pub use stats::CacheStats;
 
-const CACHE_SCHEMA_VERSION: u32 = 7;
+const CACHE_SCHEMA_VERSION: u32 = 8;
 const CACHE_LOCK_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
 const CACHE_LOCK_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const CACHE_LOCK_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -51,6 +51,7 @@ pub fn with_cache_status_notifier<T>(
     stats::with_cache_status_notifier(notifier, f)
 }
 
+// @applies SINGLE_FLIGHT.CACHE_FILL
 pub fn load_or_parse_repo(
     root: &Path,
     ignore_patterns: &[String],
@@ -76,6 +77,7 @@ pub fn load_or_parse_repo(
     Ok(parsed)
 }
 
+// @applies SINGLE_FLIGHT.CACHE_FILL
 pub fn load_or_parse_architecture(
     root: &Path,
     ignore_patterns: &[String],
@@ -102,6 +104,7 @@ pub fn load_or_parse_architecture(
     Ok(parsed)
 }
 
+// @applies SINGLE_FLIGHT.CACHE_FILL
 pub fn load_or_build_repo_analysis_summary(
     root: &Path,
     ignore_patterns: &[String],
@@ -136,6 +139,7 @@ pub fn load_or_build_repo_analysis_summary(
     Ok(summary)
 }
 
+// @applies SINGLE_FLIGHT.CACHE_FILL
 pub fn load_or_build_scoped_repo_analysis_summary(
     root: &Path,
     ignore_patterns: &[String],
@@ -188,6 +192,61 @@ pub fn load_or_build_scoped_repo_analysis_summary(
     Ok(summary)
 }
 
+// @applies SINGLE_FLIGHT.CACHE_FILL
+pub fn load_or_build_bounded_repo_analysis_summary(
+    root: &Path,
+    ignore_patterns: &[String],
+    version: SpecialVersion,
+    parsed_architecture: &ParsedArchitecture,
+    parsed_repo: &ParsedRepo,
+    within_paths: &[std::path::PathBuf],
+) -> Result<ArchitectureAnalysisSummary> {
+    let fingerprint = fingerprint::scoped_repo_analysis_fingerprint(
+        root,
+        ignore_patterns,
+        version,
+        parsed_repo,
+        within_paths,
+    )?;
+    let scope_hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        "bounded".hash(&mut hasher);
+        for path in crate::modules::analyze::normalized_scope_paths(root, within_paths) {
+            path.hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    let cache_path = storage::cache_file_path(
+        root,
+        &format!("repo-analysis-within-{scope_hash:016x}-v{CACHE_SCHEMA_VERSION}.json"),
+    );
+    if let Some(summary) = storage::read_repo_analysis_cache(&cache_path, fingerprint)? {
+        stats::record_repo_analysis_hit();
+        return Ok(summary);
+    }
+
+    let _guard = lock::acquire_cache_fill_lock(&cache_path)?;
+    if let Some(summary) = storage::read_repo_analysis_cache(&cache_path, fingerprint)? {
+        stats::record_repo_analysis_hit();
+        return Ok(summary);
+    }
+
+    let summary = analyze::build_bounded_repo_analysis_summary(
+        root,
+        ignore_patterns,
+        parsed_architecture,
+        parsed_repo,
+        within_paths,
+    )?;
+    storage::write_repo_analysis_cache(&cache_path, fingerprint, &summary)?;
+    stats::record_repo_analysis_miss();
+    Ok(summary)
+}
+
+// @applies SINGLE_FLIGHT.CACHE_FILL
 pub fn load_or_build_language_pack_blob(
     root: &Path,
     purpose: &str,
@@ -220,6 +279,7 @@ pub fn load_or_build_language_pack_blob(
     Ok(facts)
 }
 
+// @applies SINGLE_FLIGHT.CACHE_FILL
 pub fn load_or_build_architecture_analysis(
     root: &Path,
     ignore_patterns: &[String],

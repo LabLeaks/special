@@ -21,7 +21,7 @@ pub(crate) fn build_typescript_input_comparison_context(
 ) -> Option<TypeScriptInputComparisonContext> {
     let (root, parsed_repo, parsed_architecture, source_files, file_ownership) =
         build_typescript_fixture_context(fixture_name, fixture_writer)?;
-    let scope_facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo)
+    let scope_facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership)
     {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
@@ -53,7 +53,7 @@ pub(crate) fn build_typescript_input_comparison_context(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let contract = boundary.exact_contract(&source_files, &full_inputs);
+    let contract = boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
     let graph_facts = match analyze::build_traceability_graph_facts(
         &root,
         &contract.preserved_file_closure,
@@ -84,7 +84,8 @@ pub(crate) fn build_typescript_input_comparison_context(
         &contract.preserved_file_closure,
         Some(std::slice::from_ref(&scoped_source_file)),
         scoped_inputs,
-    );
+    )
+    .expect("scoped typescript inputs should narrow");
 
     Some((full_inputs, scoped_inputs, contract.projected_item_ids, root))
 }
@@ -96,7 +97,7 @@ pub(crate) fn build_typescript_reference_comparison_context(
 ) -> Option<TypeScriptReferenceComparisonContext> {
     let (root, parsed_repo, parsed_architecture, source_files, file_ownership) =
         build_typescript_fixture_context(fixture_name, fixture_writer)?;
-    let scope_facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo)
+    let scope_facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership)
     {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
@@ -128,8 +129,8 @@ pub(crate) fn build_typescript_reference_comparison_context(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let exact_contract = boundary.exact_contract(&source_files, &full_inputs);
-    let reference = boundary.reference(&source_files, &full_inputs);
+    let exact_contract = boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
+    let reference = boundary.reference(&source_files, &full_inputs).expect("traceability reference should derive");
     let graph_facts = match analyze::build_traceability_graph_facts(
         &root,
         &reference.contract.preserved_file_closure,
@@ -160,7 +161,8 @@ pub(crate) fn build_typescript_reference_comparison_context(
         &reference.contract.preserved_file_closure,
         Some(std::slice::from_ref(&scoped_source_file)),
         scoped_inputs,
-    );
+    )
+    .expect("scoped typescript inputs should narrow");
 
     Some((exact_contract, reference, full_inputs, scoped_inputs, root))
 }

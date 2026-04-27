@@ -8,6 +8,9 @@ Pack-owned TypeScript fixture facade that delegates analysis, traceability, and 
 mod analysis;
 #[path = "test_fixtures/callbacks.rs"]
 mod callbacks;
+#[allow(clippy::duplicate_mod)]
+#[path = "../shared/test_fixture_support.rs"]
+mod shared_support;
 #[path = "test_fixtures/support.rs"]
 mod support;
 #[path = "test_fixtures/traceability.rs"]

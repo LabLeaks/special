@@ -10,6 +10,7 @@ use crate::model::{
     DeprecatedRelease, Diagnostic, DiagnosticSeverity, NodeKind, ParsedRepo, PlannedRelease,
 };
 use crate::planned_syntax::PlannedSyntax;
+pub(super) use crate::text_lines::skip_blank_lines as skip_blank_markdown_lines;
 
 use super::super::declarations::{
     AdjacentLifecycle, parse_adjacent_spec_deprecated, parse_adjacent_spec_planned,
@@ -29,13 +30,6 @@ pub(super) fn parse_markdown_spec_decl(line: &str) -> Option<(NodeKind, &str)> {
             .strip_prefix("@group ")
             .map(|rest| (NodeKind::Group, rest))
     }
-}
-
-pub(super) fn skip_blank_markdown_lines(lines: &[&str], mut index: usize) -> usize {
-    while index < lines.len() && lines[index].trim().is_empty() {
-        index += 1;
-    }
-    index
 }
 
 pub(super) fn maybe_consume_markdown_planned(

@@ -4,8 +4,8 @@ Renders projected specs, modules, repo health, overviews, and lint diagnostics i
 */
 // @fileimplements SPECIAL.RENDER.TEXT
 use crate::model::{
-    ArchitectureMetricsSummary, GroupedCount, RepoMetricsSummary, RepoTraceabilityMetrics,
-    SpecMetricsSummary,
+    ArchitectureMetricsSummary, GroupedCount, PatternDocument, PatternNode, RepoMetricsSummary,
+    RepoTraceabilityMetrics, SpecMetricsSummary,
 };
 
 mod analysis;
@@ -26,6 +26,167 @@ pub(super) use self::module::render_module_text;
 pub(super) use self::overview::render_overview_text;
 pub(super) use self::repo::render_repo_text;
 pub(super) use self::spec::render_spec_text;
+
+pub(super) fn render_pattern_text(document: &PatternDocument, verbose: bool) -> String {
+    let mut output = String::new();
+    if let Some(metrics) = &document.metrics {
+        output.push_str("special patterns metrics\n");
+        output.push_str(&format!("  total patterns: {}\n", metrics.total_patterns));
+        output.push_str(&format!(
+            "  total definitions: {}\n",
+            metrics.total_definitions
+        ));
+        output.push_str(&format!(
+            "  total applications: {}\n",
+            metrics.total_applications
+        ));
+        output.push_str(&format!(
+            "  modules with applications: {}\n",
+            metrics.modules_with_applications
+        ));
+        output.push_str(&format!(
+            "  possible missing applications: {}\n",
+            metrics.possible_missing_applications.len()
+        ));
+        for candidate in &metrics.possible_missing_applications {
+            output.push_str(&format!(
+                "    {} {} {:.3} at {}:{} ({})\n",
+                candidate.confidence.label(),
+                candidate.pattern_id,
+                candidate.score,
+                candidate.location.path.display(),
+                candidate.location.line,
+                candidate.item_name
+            ));
+        }
+        output.push_str(&format!(
+            "  possible pattern clusters: {}\n",
+            metrics.possible_pattern_clusters.len()
+        ));
+        for cluster in &metrics.possible_pattern_clusters {
+            output.push_str(&format!(
+                "    {} item(s), score {:.3}, suggested strictness {}, {}\n",
+                cluster.item_count,
+                cluster.score,
+                cluster.suggested_strictness.as_str(),
+                cluster.interpretation.label()
+            ));
+            output.push_str(&format!("      meaning: {}\n", cluster.meaning));
+            output.push_str(&format!("      exact: {}\n", cluster.precise));
+            for item in &cluster.items {
+                output.push_str(&format!(
+                    "      {} at {}:{}\n",
+                    item.item_name,
+                    item.location.path.display(),
+                    item.location.line
+                ));
+            }
+        }
+    }
+
+    for pattern in &document.patterns {
+        append_pattern_node_text(&mut output, pattern, 0, verbose);
+    }
+
+    if output.is_empty() {
+        "No patterns found.".to_string()
+    } else {
+        output.trim_end().to_string()
+    }
+}
+
+fn append_pattern_node_text(
+    output: &mut String,
+    pattern: &PatternNode,
+    depth: usize,
+    verbose: bool,
+) {
+    let indent = "  ".repeat(depth);
+    let detail_indent = "  ".repeat(depth + 1);
+    output.push_str(&format!("{indent}{}\n", pattern.id));
+    output.push_str(&format!(
+        "{detail_indent}definition: {}\n",
+        if pattern.definition.is_some() {
+            "present"
+        } else {
+            "missing"
+        }
+    ));
+    if let Some(definition) = &pattern.definition {
+        output.push_str(&format!(
+            "{detail_indent}strictness: {}\n",
+            definition.strictness.as_str()
+        ));
+    }
+    if verbose && let Some(definition) = &pattern.definition {
+        output.push_str(&format!(
+            "{detail_indent}  {}:{}\n",
+            definition.location.path.display(),
+            definition.location.line
+        ));
+        if !definition.text.is_empty() {
+            output.push_str(&format!("{detail_indent}    {}\n", definition.text));
+        }
+    }
+    if let Some(metrics) = &pattern.metrics {
+        output.push_str(&format!(
+            "{detail_indent}similarity: {} scored application(s), {} pair(s)\n",
+            metrics.scored_applications, metrics.pair_count
+        ));
+        if let Some(mean) = metrics.mean_similarity {
+            output.push_str(&format!("{detail_indent}  mean: {mean:.3}\n"));
+        }
+        if let (Some(min), Some(max)) = (metrics.min_similarity, metrics.max_similarity) {
+            output.push_str(&format!("{detail_indent}  range: {min:.3}-{max:.3}\n"));
+        }
+        if let Some(expected) = metrics.expected_similarity {
+            output.push_str(&format!("{detail_indent}  expected: {expected:.3}\n"));
+        }
+        if let Some(benchmark) = metrics.benchmark_estimate {
+            output.push_str(&format!(
+                "{detail_indent}  benchmark estimate: {}\n",
+                benchmark.label()
+            ));
+        }
+    }
+    output.push_str(&format!(
+        "{detail_indent}applications: {}\n",
+        pattern.applications.len()
+    ));
+    for application in &pattern.applications {
+        let owner = application
+            .module_id
+            .as_deref()
+            .map(|id| format!("{id} at "))
+            .unwrap_or_default();
+        output.push_str(&format!(
+            "{detail_indent}  {}{}:{}\n",
+            owner,
+            application.location.path.display(),
+            application.location.line
+        ));
+        if verbose && let Some(body) = &application.body {
+            for line in body.lines() {
+                output.push_str(&format!("{detail_indent}    {line}\n"));
+            }
+        }
+    }
+    output.push_str(&format!(
+        "{detail_indent}modules: {}\n",
+        pattern.modules.len()
+    ));
+    for module in &pattern.modules {
+        output.push_str(&format!(
+            "{detail_indent}  {} at {}:{}\n",
+            module.id,
+            module.location.path.display(),
+            module.location.line
+        ));
+    }
+    for child in &pattern.children {
+        append_pattern_node_text(output, child, depth + 1, verbose);
+    }
+}
 
 pub(super) fn render_spec_metrics_text(metrics: &SpecMetricsSummary) -> String {
     let mut output = String::from("special specs metrics\n");

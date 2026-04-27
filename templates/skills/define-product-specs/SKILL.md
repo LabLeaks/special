@@ -1,23 +1,60 @@
 ---
 name: define-product-specs
-description: Use this skill when scoping a feature, defining behavior, or rewriting vague requirements into product specs. Write present-tense claims, use `@group` only for structure, and keep each current spec narrow enough for one self-contained verify.
+description: Use this skill when turning requirements, feature ideas, bug reports, roadmap notes, or vague behavior into clear product claims. Create or update Special specs as the durable contract: `@group` for structure, `@spec` for real claims, and planned/current state based on what actually ships.
 ---
 
 # Define Product Specs
 
-Use this skill when you are turning requirements, roadmap items, or vague behavior into explicit product specs, whether the repo already uses `special` or you are introducing it now.
+## When To Use
 
-1. Write claims as clear, present-tense statements about externally meaningful behavior or other durable contract facts.
-2. Use `@group` for structure-only nodes and `@spec` for real claims.
-3. Keep `@planned` local to the exact claim that is not current yet.
-4. Split claims until each current `@spec` can point to one honest, self-contained `@verifies` or `@attests` artifact.
-5. Verify at the same boundary as the claim. Prefer public APIs, observable outcomes, and structured outputs over helpers and internal call sequences.
-6. If a parent claim says something real, give it direct support. Child support does not justify a parent `@spec`.
-7. Declare missing intermediate ids explicitly as `@group` nodes instead of relying on dotted ids alone.
-8. Design verifies around parser reality: each `@verifies` block names exactly one spec id and attaches to the next supported item.
-9. If the repo already has a primary place for contract declarations, keep new claims there instead of inventing a second contract layout.
-10. Keep product specs on true behavior boundaries or the test-owned proving surface. Avoid placing behavior specs on internal implementation modules unless that file is itself the real user-visible or system-visible boundary.
-11. Use `@module`, `@area`, and `@implements` for architecture intent instead of product specs. Reach for `special arch` when the question is structure, ownership, refactor shape, or whether code honestly implements a module rather than shipped behavior.
-12. Favor claims and verifies that survive refactors. Avoid incidental implementation details, helper structure, and transient choices that are expected to churn.
+Use this when a developer task starts with unclear behavior:
+
+- scoping a new feature
+- turning a bug report into expected behavior
+- deciding what a change should promise users
+- moving roadmap or backlog prose into a real contract
+- introducing Special specs to a repo that does not have them yet
+
+Do not use this for implementation ownership or code organization. Use module/architecture guidance for that.
+
+## How To Use
+
+1. Write the behavior in plain English first.
+2. Split it into stable claims that should survive refactors.
+3. Use `@group ID` only for navigation.
+4. Use `@spec ID` for each real claim.
+5. Mark a claim `@planned` if it is not current yet.
+6. Make each current claim narrow enough for one honest `@verifies` or `@attests` artifact.
+7. If Special already exists, run `special specs --metrics` and place new claims near the existing contract surface.
+8. If Special is not set up yet, add the smallest useful spec surface near tests, docs, or a dedicated contract file.
+
+Example:
+
+```md
+@group EXPORT
+CSV export behavior.
+
+@spec EXPORT.CSV.HEADER
+CSV exports include a header row with the selected column names.
+```
+
+Example verify:
+
+```rust
+// @verifies EXPORT.CSV.HEADER
+#[test]
+fn csv_export_includes_selected_headers() {
+    let csv = export_csv(["id", "status"]);
+    assert_eq!(csv.lines().next(), Some("id,status"));
+}
+```
+
+## What To Do With Results
+
+- If the claim is current, add or tighten a verify.
+- If the claim is future work, keep it `@planned`.
+- If a claim describes internals, move it to architecture text or pattern guidance.
+- If a claim needs exact prose or exact output, say so in the spec.
+- After editing, run `special specs --metrics` and `special lint` when available.
 
 Read [references/spec-writing.md](references/spec-writing.md) for the writing rubric and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.

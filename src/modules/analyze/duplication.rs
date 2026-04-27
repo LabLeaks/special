@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::model::{ArchitectureDuplicateItem, ArchitectureRepoSignalsSummary, ModuleItemKind};
+use crate::source_paths::{looks_like_test_path, normalize_existing_or_joined_path};
 use crate::syntax::{
     CallSyntaxKind, SourceInvocationKind, SourceItem, SourceItemKind, parse_source_graph,
 };
@@ -24,7 +25,23 @@ pub(super) fn apply_duplicate_item_summary(
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
     coverage: &mut ArchitectureRepoSignalsSummary,
 ) -> Result<()> {
+    apply_duplicate_item_summary_in_files(root, parsed, file_ownership, None, coverage)
+}
+
+pub(super) fn apply_duplicate_item_summary_in_files(
+    root: &Path,
+    parsed: &crate::model::ParsedArchitecture,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    source_files: Option<&[PathBuf]>,
+    coverage: &mut ArchitectureRepoSignalsSummary,
+) -> Result<()> {
     let mut items = Vec::new();
+    let source_files = source_files.map(|paths| {
+        paths
+            .iter()
+            .map(|path| normalize_file_path(root, path))
+            .collect::<BTreeSet<_>>()
+    });
 
     for module in &parsed.modules {
         let implementations = parsed
@@ -32,22 +49,27 @@ pub(super) fn apply_duplicate_item_summary(
             .iter()
             .filter(|implementation| implementation.module_id == module.id)
             .collect::<Vec<_>>();
-        let mut module_items = collect_owned_items(root, &implementations, file_ownership)?
-            .into_iter()
-            .filter_map(|item| {
-                let duplicate_key = duplication_key(&item)?;
-                Some(OwnedDuplicateItem {
-                    module_id: module.id.clone(),
-                    source_path: item.source_path,
-                    name: item.name,
-                    kind: match item.kind {
-                        SourceItemKind::Function => ModuleItemKind::Function,
-                        SourceItemKind::Method => ModuleItemKind::Method,
-                    },
-                    duplicate_key,
-                })
+        let mut module_items = collect_owned_items(
+            root,
+            &implementations,
+            file_ownership,
+            source_files.as_ref(),
+        )?
+        .into_iter()
+        .filter_map(|item| {
+            let duplicate_key = duplication_key(&item)?;
+            Some(OwnedDuplicateItem {
+                module_id: module.id.clone(),
+                source_path: item.source_path,
+                name: item.name,
+                kind: match item.kind {
+                    SourceItemKind::Function => ModuleItemKind::Function,
+                    SourceItemKind::Method => ModuleItemKind::Method,
+                },
+                duplicate_key,
             })
-            .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
         items.append(&mut module_items);
     }
 
@@ -94,11 +116,15 @@ fn collect_owned_items(
     root: &Path,
     implementations: &[&crate::model::ImplementRef],
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    source_files: Option<&BTreeSet<PathBuf>>,
 ) -> Result<Vec<SourceItem>> {
     let mut items = Vec::new();
     let mut seen_file_scoped = BTreeSet::new();
     for implementation in implementations {
         let path = &implementation.location.path;
+        if source_files.is_some_and(|allowed| !path_matches_allowed(root, path, allowed)) {
+            continue;
+        }
         if let Some(body) = &implementation.body {
             if let Some(graph) = parse_source_graph(path, body) {
                 items.extend(graph.items);
@@ -119,6 +145,14 @@ fn collect_owned_items(
     }
 
     Ok(items)
+}
+
+fn path_matches_allowed(root: &Path, path: &Path, allowed: &BTreeSet<PathBuf>) -> bool {
+    allowed.contains(&normalize_file_path(root, path))
+}
+
+fn normalize_file_path(root: &Path, path: &Path) -> PathBuf {
+    normalize_existing_or_joined_path(root, path)
 }
 
 struct OwnedDuplicateItem {
@@ -252,24 +286,4 @@ fn score_occurrences(shape_fingerprint: &str, markers: &[&str]) -> usize {
         .iter()
         .map(|marker| shape_fingerprint.matches(marker).count())
         .sum()
-}
-
-fn looks_like_test_path(path: &str) -> bool {
-    let path = Path::new(path);
-    if path
-        .components()
-        .any(|component| component.as_os_str() == "tests" || component.as_os_str() == "__tests__")
-    {
-        return true;
-    }
-
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            name.ends_with("_test.go")
-                || name.ends_with(".test.ts")
-                || name.ends_with(".test.tsx")
-                || name.ends_with(".spec.ts")
-                || name.ends_with(".spec.tsx")
-        })
 }

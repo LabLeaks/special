@@ -59,15 +59,11 @@ struct ProjectSkillsDestination {
 
 impl ProjectSkillsDestination {
     fn display(&self) -> String {
-        match &self.path {
-            Some(path) => path.display().to_string(),
-            None => format!(
-                "unavailable ({})",
-                self.unavailable_reason
-                    .as_deref()
-                    .unwrap_or("failed to resolve project root")
-            ),
-        }
+        display_destination_path(
+            self.path.as_deref(),
+            self.unavailable_reason.as_deref(),
+            "failed to resolve project root",
+        )
     }
 
     fn require_path(&self) -> Result<PathBuf> {
@@ -96,15 +92,11 @@ struct GlobalSkillsDestination {
 
 impl GlobalSkillsDestination {
     fn display(&self) -> String {
-        match &self.path {
-            Some(path) => path.display().to_string(),
-            None => format!(
-                "unavailable ({})",
-                self.unavailable_reason
-                    .as_deref()
-                    .unwrap_or("failed to resolve global skills root")
-            ),
-        }
+        display_destination_path(
+            self.path.as_deref(),
+            self.unavailable_reason.as_deref(),
+            "failed to resolve global skills root",
+        )
     }
 
     fn require_path(&self) -> Result<PathBuf> {
@@ -300,6 +292,20 @@ fn render_skills_overview() -> String {
     }
     .render()
     .expect("skills overview template should render")
+}
+
+fn display_destination_path(
+    path: Option<&Path>,
+    unavailable_reason: Option<&str>,
+    fallback_reason: &str,
+) -> String {
+    match path {
+        Some(path) => path.display().to_string(),
+        None => format!(
+            "unavailable ({})",
+            unavailable_reason.unwrap_or(fallback_reason)
+        ),
+    }
 }
 
 fn prompt_install_destination(

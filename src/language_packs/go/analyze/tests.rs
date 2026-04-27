@@ -12,9 +12,10 @@ use crate::discovery::{DiscoveryConfig, discover_annotation_files};
 use crate::model::{ArchitectureTraceabilityItem, ArchitectureTraceabilitySummary};
 use crate::modules::analyze::FileOwnership;
 use crate::modules::analyze::traceability_core::{
-    effective_context_item_ids_for_inputs, preserved_item_ids_for_reference,
-    projected_item_ids_for_inputs, projected_reverse_closure_for_inputs,
-    projected_support_root_ids_for_inputs,
+    TraceabilityAnalysis, TraceabilityInputs, TraceabilityItemSupport, build_traceability_analysis,
+    collect_reverse_reachable_ids, collect_support_root_ids, effective_context_item_ids_for_inputs,
+    preserved_item_ids_for_reference, projected_item_ids_for_inputs,
+    projected_reverse_closure_for_inputs, projected_support_root_ids_for_inputs,
 };
 use crate::modules::parse_architecture;
 use crate::parser::{ParseDialect, parse_repo};
@@ -36,6 +37,31 @@ use test_fixtures::{
     write_go_reference_traceability_fixture, write_go_tool_traceability_fixture,
     write_go_traceability_fixture,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SupportFingerprint {
+    name: String,
+    has_item_scoped_support: bool,
+    has_file_scoped_support: bool,
+    current_specs: BTreeSet<String>,
+    planned_specs: BTreeSet<String>,
+    deprecated_specs: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ModuleConnectivityFingerprint {
+    module_backed_by_current_specs: bool,
+    module_connected_to_current_specs: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReverseSubgraphFingerprint {
+    node_ids: BTreeSet<String>,
+    internal_edges: BTreeMap<String, BTreeSet<String>>,
+    root_supports: BTreeMap<String, SupportFingerprint>,
+}
+
+type GoProjectionFixture = (&'static str, fn(&Path), &'static str);
 
 #[test]
 fn scoped_go_analysis_matches_full_then_filtered_traceability_summary() {
@@ -236,6 +262,126 @@ fn scoped_go_embedded_interface_projected_reverse_closure_matches_full_analysis(
 }
 
 #[test]
+fn scoped_go_direct_projected_reverse_subgraph_matches_full_analysis() {
+    assert_direct_scoped_go_projected_reverse_subgraph_matches_full_analysis(
+        "special-go-proof-boundary-direct-reverse-subgraph",
+        write_go_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_reference_projected_reverse_subgraph_matches_full_analysis() {
+    assert_direct_scoped_go_projected_reverse_subgraph_matches_full_analysis(
+        "special-go-proof-boundary-reference-reverse-subgraph",
+        write_go_reference_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_direct_context_reverse_closure_matches_full_analysis() {
+    assert_direct_scoped_go_context_reverse_closure_matches_full_analysis(
+        "special-go-proof-boundary-direct-context-reverse-closure",
+        write_go_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_direct_context_reverse_subgraph_matches_full_analysis() {
+    assert_direct_scoped_go_context_reverse_subgraph_matches_full_analysis(
+        "special-go-proof-boundary-direct-context-reverse-subgraph",
+        write_go_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_direct_context_support_roots_match_full_analysis() {
+    assert_direct_scoped_go_context_support_roots_match_full_analysis(
+        "special-go-proof-boundary-direct-context-support-roots",
+        write_go_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_direct_structure_matches_full_analysis() {
+    assert_direct_scoped_go_structure_matches_full_then_filtered(
+        "special-go-proof-boundary-direct-structure",
+        write_go_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_reference_structure_matches_full_analysis() {
+    assert_direct_scoped_go_structure_matches_full_then_filtered(
+        "special-go-proof-boundary-reference-structure",
+        write_go_reference_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_reference_contract_matches_scoped_inputs() {
+    assert_direct_scoped_go_reference_contract_matches_scoped_inputs(
+        "special-go-proof-boundary-reference-contract",
+        write_go_reference_traceability_fixture,
+        "app/main.go",
+    );
+}
+
+#[test]
+fn scoped_go_all_projected_reverse_subgraphs_match_full_analysis() {
+    assert_for_all_go_projection_fixtures(
+        "projected-reverse-subgraph",
+        assert_direct_scoped_go_projected_reverse_subgraph_matches_full_analysis,
+    );
+}
+
+#[test]
+fn scoped_go_all_context_support_roots_match_full_analysis() {
+    assert_for_all_go_projection_fixtures(
+        "context-support-roots",
+        assert_direct_scoped_go_context_support_roots_match_full_analysis,
+    );
+}
+
+#[test]
+fn scoped_go_all_context_reverse_closures_match_full_analysis() {
+    assert_for_all_go_projection_fixtures(
+        "context-reverse-closure",
+        assert_direct_scoped_go_context_reverse_closure_matches_full_analysis,
+    );
+}
+
+#[test]
+fn scoped_go_all_context_reverse_subgraphs_match_full_analysis() {
+    assert_for_all_go_projection_fixtures(
+        "context-reverse-subgraph",
+        assert_direct_scoped_go_context_reverse_subgraph_matches_full_analysis,
+    );
+}
+
+#[test]
+fn scoped_go_all_structures_match_full_then_filtered() {
+    assert_for_all_go_projection_fixtures(
+        "structure",
+        assert_direct_scoped_go_structure_matches_full_then_filtered,
+    );
+}
+
+#[test]
+fn scoped_go_all_reference_contracts_match_scoped_inputs() {
+    assert_for_all_go_projection_fixtures(
+        "reference-contract",
+        assert_direct_scoped_go_reference_contract_matches_scoped_inputs,
+    );
+}
+
+#[test]
 fn scoped_go_working_contract_is_broader_than_exact_contract() {
     let context = build_go_boundary_context(
         "special-go-proof-boundary-direct-contract",
@@ -243,7 +389,7 @@ fn scoped_go_working_contract_is_broader_than_exact_contract() {
         "app/main.go",
     );
     let working = context.boundary.working_contract();
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
 
     assert_eq!(
         working.projected_item_ids,
@@ -279,8 +425,8 @@ fn scoped_go_exact_contract_targets_supported_projected_items() {
         write_go_reference_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -322,8 +468,8 @@ fn scoped_go_interface_exact_contract_targets_supported_projected_items() {
         write_go_interface_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -354,8 +500,8 @@ fn scoped_go_embedding_exact_contract_targets_supported_projected_items() {
         write_go_embedding_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -386,8 +532,8 @@ fn scoped_go_method_value_exact_contract_targets_supported_projected_items() {
         write_go_method_value_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -418,8 +564,8 @@ fn scoped_go_embedding_method_value_exact_contract_targets_supported_projected_i
         write_go_embedding_method_value_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -450,8 +596,8 @@ fn scoped_go_method_expression_exact_contract_targets_supported_projected_items(
         write_go_method_expression_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -482,8 +628,8 @@ fn scoped_go_receiver_collision_exact_contract_targets_supported_projected_items
         write_go_receiver_collision_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -514,8 +660,8 @@ fn scoped_go_embedded_interface_exact_contract_targets_supported_projected_items
         write_go_embedded_interface_traceability_fixture,
         "app/main.go",
     );
-    let exact = context.boundary.exact_contract(&context.full_inputs.graph);
-    let reference = context.boundary.reference(&context.full_inputs.graph);
+    let exact = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let reference = context.boundary.reference(&context.full_inputs.graph).expect("traceability reference should derive");
 
     assert_eq!(
         stable_id_suffixes(&exact.projected_item_ids),
@@ -1125,6 +1271,7 @@ struct GoBoundaryContext {
 
 struct GoReferenceComparisonContext {
     root: PathBuf,
+    boundary: super::boundary::ScopedTraceabilityBoundary,
     reference: super::boundary::ScopedTraceabilityReference,
     full_inputs: crate::modules::analyze::traceability_core::TraceabilityInputs,
     full_owned_item_ids: BTreeSet<String>,
@@ -1308,6 +1455,142 @@ fn assert_direct_scoped_go_projected_reverse_closure_matches_full_analysis(
     );
 }
 
+fn assert_direct_scoped_go_projected_reverse_subgraph_matches_full_analysis(
+    fixture_name: &str,
+    fixture_writer: fn(&Path),
+    scoped_path: &str,
+) {
+    let context = build_go_reference_comparison_context(fixture_name, fixture_writer, scoped_path);
+    assert_eq!(
+        reverse_subgraphs_for_item_ids(
+            &context.scoped_inputs,
+            context
+                .reference
+                .contract
+                .projected_item_ids
+                .iter()
+                .cloned()
+                .collect()
+        ),
+        reverse_subgraphs_for_item_ids(
+            &context.full_inputs,
+            context
+                .reference
+                .contract
+                .projected_item_ids
+                .iter()
+                .cloned()
+                .collect()
+        ),
+    );
+}
+
+fn assert_direct_scoped_go_context_support_roots_match_full_analysis(
+    fixture_name: &str,
+    fixture_writer: fn(&Path),
+    scoped_path: &str,
+) {
+    let context = build_go_reference_comparison_context(fixture_name, fixture_writer, scoped_path);
+    let scoped_context_ids = effective_context_item_ids(&context.scoped_inputs);
+    assert_eq!(
+        support_root_ids_for_item_ids(&context.scoped_inputs, scoped_context_ids.clone()),
+        support_root_ids_for_item_ids(&context.full_inputs, scoped_context_ids),
+    );
+}
+
+fn assert_direct_scoped_go_context_reverse_closure_matches_full_analysis(
+    fixture_name: &str,
+    fixture_writer: fn(&Path),
+    scoped_path: &str,
+) {
+    let context = build_go_reference_comparison_context(fixture_name, fixture_writer, scoped_path);
+    let scoped_context_ids = effective_context_item_ids(&context.scoped_inputs);
+    assert_eq!(
+        reverse_reachable_ids_for_item_ids(&context.scoped_inputs, scoped_context_ids.clone()),
+        reverse_reachable_ids_for_item_ids(&context.full_inputs, scoped_context_ids),
+    );
+}
+
+fn assert_direct_scoped_go_context_reverse_subgraph_matches_full_analysis(
+    fixture_name: &str,
+    fixture_writer: fn(&Path),
+    scoped_path: &str,
+) {
+    let context = build_go_reference_comparison_context(fixture_name, fixture_writer, scoped_path);
+    let scoped_context_ids = effective_context_item_ids(&context.scoped_inputs);
+    assert_eq!(
+        reverse_subgraphs_for_item_ids(&context.scoped_inputs, scoped_context_ids.clone()),
+        reverse_subgraphs_for_item_ids(&context.full_inputs, scoped_context_ids),
+    );
+}
+
+fn assert_direct_scoped_go_structure_matches_full_then_filtered(
+    fixture_name: &str,
+    fixture_writer: fn(&Path),
+    scoped_path: &str,
+) {
+    let context = build_go_reference_comparison_context(fixture_name, fixture_writer, scoped_path);
+    let full = build_traceability_analysis(context.full_inputs.clone());
+    let scoped = build_traceability_analysis(context.scoped_inputs.clone());
+    let projected_ids = context.reference.contract.projected_item_ids.clone();
+
+    assert_eq!(
+        analysis_item_ids(&scoped, &projected_ids),
+        projected_ids,
+        "scoped Go repo items should be exactly the projected item set",
+    );
+    assert_eq!(
+        projected_supported_item_ids(&full, &projected_ids),
+        projected_supported_item_ids(&scoped, &projected_ids),
+    );
+    assert_eq!(
+        projected_support_fingerprints(&full, &projected_ids),
+        projected_support_fingerprints(&scoped, &projected_ids),
+    );
+    assert_eq!(
+        projected_module_connectivity(&full, &projected_ids),
+        projected_module_connectivity(&scoped, &projected_ids),
+    );
+}
+
+fn assert_direct_scoped_go_reference_contract_matches_scoped_inputs(
+    fixture_name: &str,
+    fixture_writer: fn(&Path),
+    scoped_path: &str,
+) {
+    let context = build_go_reference_comparison_context(fixture_name, fixture_writer, scoped_path);
+    let exact_contract = context.boundary.exact_contract(&context.full_inputs.graph).expect("exact traceability contract should derive");
+    let scoped_reference = context.boundary.reference(&context.scoped_inputs.graph).expect("traceability reference should derive");
+    let scoped_context_ids = effective_context_item_ids_for_inputs(&context.scoped_inputs);
+
+    assert_eq!(
+        exact_contract.projected_item_ids,
+        projected_item_ids_for_inputs(&context.scoped_inputs),
+    );
+    assert_eq!(
+        context.reference.contract.projected_item_ids,
+        scoped_reference.contract.projected_item_ids,
+    );
+    assert_eq!(
+        context
+            .reference
+            .contract
+            .preserved_reverse_closure_target_ids,
+        scoped_reference
+            .contract
+            .preserved_reverse_closure_target_ids,
+    );
+    assert_eq!(
+        context.reference.exact_reverse_closure,
+        scoped_reference.exact_reverse_closure,
+    );
+    assert!(
+        exact_contract
+            .preserved_reverse_closure_target_ids
+            .is_subset(&scoped_context_ids),
+    );
+}
+
 fn build_go_reference_comparison_context(
     fixture_name: &str,
     fixture_writer: fn(&Path),
@@ -1343,7 +1626,7 @@ fn build_go_reference_comparison_context(
         full_inputs.repo_items.clone(),
         std::slice::from_ref(&scoped_source_file),
     );
-    let reference = boundary.reference(&full_inputs.graph);
+    let reference = boundary.reference(&full_inputs.graph).expect("traceability reference should derive");
     let full_owned_item_ids = full_inputs
         .repo_items
         .iter()
@@ -1362,6 +1645,7 @@ fn build_go_reference_comparison_context(
 
     GoReferenceComparisonContext {
         root,
+        boundary,
         reference,
         full_inputs,
         full_owned_item_ids,
@@ -1388,7 +1672,7 @@ fn assert_go_scope_facts_expand_to_exact_closure(
     })
     .expect("fixture files should be discovered");
     let file_ownership = index_file_ownership_for_test_owned(&parsed_architecture);
-    let facts = super::build_traceability_scope_facts(&root, &discovered.source_files, &parsed_repo)
+    let facts = super::build_traceability_scope_facts(&root, &discovered.source_files, &discovered.source_files, &parsed_repo, &file_ownership)
         .expect("go scope facts should build");
     let scoped_source_file = resolve_scoped_source_file(&discovered.source_files, &root, scoped_path);
     let closure_files = super::expand_traceability_closure_from_facts(
@@ -1440,7 +1724,7 @@ fn assert_go_scope_facts_runtime_matches_full_then_filtered_summary(
     })
     .expect("fixture files should be discovered");
     let file_ownership = index_file_ownership_for_test_owned(&parsed_architecture);
-    let facts = super::build_traceability_scope_facts(&root, &discovered.source_files, &parsed_repo)
+    let facts = super::build_traceability_scope_facts(&root, &discovered.source_files, &discovered.source_files, &parsed_repo, &file_ownership)
         .expect("go scope facts should build");
     let scoped_source_file = resolve_scoped_source_file(&discovered.source_files, &root, scoped_path);
     let closure_files = super::expand_traceability_closure_from_facts(
@@ -1513,6 +1797,207 @@ fn filter_summary_to_display_path(
         .len();
     summary.sort_items();
     summary
+}
+
+fn analysis_item_ids(
+    analysis: &TraceabilityAnalysis,
+    projected_ids: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    analysis
+        .repo_items
+        .iter()
+        .filter(|item| projected_ids.contains(&item.stable_id))
+        .map(|item| item.stable_id.clone())
+        .collect()
+}
+
+fn projected_supported_item_ids(
+    analysis: &TraceabilityAnalysis,
+    projected_ids: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    analysis
+        .repo_items
+        .iter()
+        .filter(|item| projected_ids.contains(&item.stable_id))
+        .filter(|item| analysis.item_supports.contains_key(&item.stable_id))
+        .map(|item| item.stable_id.clone())
+        .collect()
+}
+
+fn projected_support_fingerprints(
+    analysis: &TraceabilityAnalysis,
+    projected_ids: &BTreeSet<String>,
+) -> BTreeMap<String, Vec<SupportFingerprint>> {
+    analysis
+        .repo_items
+        .iter()
+        .filter(|item| projected_ids.contains(&item.stable_id))
+        .map(|item| {
+            let supports = analysis
+                .item_supports
+                .get(&item.stable_id)
+                .into_iter()
+                .flatten()
+                .map(support_fingerprint)
+                .collect::<Vec<_>>();
+            (item.stable_id.clone(), supports)
+        })
+        .collect()
+}
+
+fn projected_module_connectivity(
+    analysis: &TraceabilityAnalysis,
+    projected_ids: &BTreeSet<String>,
+) -> BTreeMap<String, ModuleConnectivityFingerprint> {
+    analysis
+        .repo_items
+        .iter()
+        .filter(|item| projected_ids.contains(&item.stable_id))
+        .map(|item| {
+            (
+                item.stable_id.clone(),
+                ModuleConnectivityFingerprint {
+                    module_backed_by_current_specs: item
+                        .module_ids
+                        .iter()
+                        .any(|module_id| {
+                            analysis.current_spec_backed_module_ids.contains(module_id)
+                        }),
+                    module_connected_to_current_specs: analysis
+                        .module_connected_item_ids
+                        .contains(&item.stable_id),
+                },
+            )
+        })
+        .collect()
+}
+
+fn support_fingerprint(support: &TraceabilityItemSupport) -> SupportFingerprint {
+    SupportFingerprint {
+        name: support.name.clone(),
+        has_item_scoped_support: support.has_item_scoped_support,
+        has_file_scoped_support: support.has_file_scoped_support,
+        current_specs: support.current_specs.clone(),
+        planned_specs: support.planned_specs.clone(),
+        deprecated_specs: support.deprecated_specs.clone(),
+    }
+}
+
+fn effective_context_item_ids(inputs: &TraceabilityInputs) -> Vec<String> {
+    let items = if inputs.context_items.is_empty() {
+        &inputs.repo_items
+    } else {
+        &inputs.context_items
+    };
+    items.iter().map(|item| item.stable_id.clone()).collect()
+}
+
+fn support_root_ids_for_item_ids(
+    inputs: &TraceabilityInputs,
+    item_ids: Vec<String>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let wanted = item_ids.iter().cloned().collect::<BTreeSet<_>>();
+    collect_support_root_ids(item_ids, &inputs.graph)
+        .into_iter()
+        .filter(|(item_id, _)| wanted.contains(item_id))
+        .collect()
+}
+
+fn reverse_reachable_ids_for_item_ids(
+    inputs: &TraceabilityInputs,
+    item_ids: Vec<String>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    collect_reverse_reachable_ids(item_ids, &inputs.graph)
+}
+
+fn reverse_subgraphs_for_item_ids(
+    inputs: &TraceabilityInputs,
+    item_ids: Vec<String>,
+) -> BTreeMap<String, ReverseSubgraphFingerprint> {
+    let closures = collect_reverse_reachable_ids(item_ids.clone(), &inputs.graph);
+    item_ids
+        .into_iter()
+        .map(|item_id| {
+            let mut node_ids = closures.get(&item_id).cloned().unwrap_or_default();
+            node_ids.insert(item_id.clone());
+            let internal_edges = inputs
+                .graph
+                .edges
+                .iter()
+                .filter(|(caller, _)| node_ids.contains(*caller))
+                .map(|(caller, callees)| {
+                    (
+                        caller.clone(),
+                        callees
+                            .iter()
+                            .filter(|callee| node_ids.contains(*callee))
+                            .cloned()
+                            .collect(),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let root_supports = inputs
+                .graph
+                .root_supports
+                .iter()
+                .filter(|(item_id, _)| node_ids.contains(*item_id))
+                .map(|(item_id, support)| (item_id.clone(), support_fingerprint(support)))
+                .collect::<BTreeMap<_, _>>();
+            (
+                item_id,
+                ReverseSubgraphFingerprint {
+                    node_ids,
+                    internal_edges,
+                    root_supports,
+                },
+            )
+        })
+        .collect()
+}
+
+fn assert_for_all_go_projection_fixtures(
+    property: &str,
+    assertion: fn(&str, fn(&Path), &str),
+) {
+    for (fixture_name, fixture_writer, scoped_path) in go_projection_fixtures() {
+        let test_name = format!("special-go-proof-boundary-{fixture_name}-{property}");
+        assertion(&test_name, fixture_writer, scoped_path);
+    }
+}
+
+fn go_projection_fixtures() -> Vec<GoProjectionFixture> {
+    vec![
+        ("direct", write_go_traceability_fixture, "app/main.go"),
+        ("tool", write_go_tool_traceability_fixture, "app/main.go"),
+        ("reference", write_go_reference_traceability_fixture, "app/main.go"),
+        ("interface", write_go_interface_traceability_fixture, "app/main.go"),
+        ("embedding", write_go_embedding_traceability_fixture, "app/main.go"),
+        (
+            "method-value",
+            write_go_method_value_traceability_fixture,
+            "app/main.go",
+        ),
+        (
+            "embedding-method-value",
+            write_go_embedding_method_value_traceability_fixture,
+            "app/main.go",
+        ),
+        (
+            "method-expression",
+            write_go_method_expression_traceability_fixture,
+            "app/main.go",
+        ),
+        (
+            "receiver-collision",
+            write_go_receiver_collision_traceability_fixture,
+            "app/main.go",
+        ),
+        (
+            "embedded-interface",
+            write_go_embedded_interface_traceability_fixture,
+            "app/main.go",
+        ),
+    ]
 }
 
 fn assert_traceability_summaries_match(

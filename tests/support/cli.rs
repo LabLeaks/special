@@ -35,9 +35,9 @@ pub use architecture::{
     write_unreached_code_module_analysis_fixture,
 };
 pub use command::{
-    go_toolchain_available, run_special, run_special_raw, run_special_with_env_removed,
-    run_special_with_input, run_special_with_input_and_env, rust_analyzer_available, spawn_special,
-    temp_repo_dir, typescript_traceability_available,
+    go_toolchain_available, run_special, run_special_raw, run_special_with_env,
+    run_special_with_env_removed, run_special_with_input, run_special_with_input_and_env,
+    rust_analyzer_available, spawn_special, temp_repo_dir, typescript_traceability_available,
 };
 pub use render::{
     find_node_by_id, html_node_has_badge, installed_skill_ids, listed_skill_ids,

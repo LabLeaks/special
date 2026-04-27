@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.0 - 2026-04-27
+
+- Added first-class project patterns with `@pattern`, `@applies`, and
+  `@fileapplies`, plus `special patterns` views, metrics, strictness guidance,
+  and advisory deterministic source-shape analysis for missing applications and
+  repeated code clusters.
+- Upgraded scoped health traceability so Rust, TypeScript, and Go can build
+  targeted graph projections while preserving the same projected traceability
+  result as full analysis filtered to the target.
+- Moved the scoped traceability projection through the production Lean kernel,
+  with the Rust reference kept as an explicit debug/test oracle instead of a
+  production fallback.
+- Added `special health --target`, `--within`, and `--symbol` scoping and
+  tightened analyzer status reporting around degraded or unavailable tool-backed
+  traceability.
+- Refined self-hosted architecture and health surfaces around generated
+  template adapters, build-script support, language-pack traceability parity,
+  and source-based pattern guidance.
+
 ## 0.7.1 - 2026-04-25
 
 - TypeScript and Go now get the same `special arch --metrics` depth as Rust:
@@ -56,7 +75,7 @@
 - Added `@fileattests` as the file-scoped attestation companion to `@attests`, so long review artifacts can attach predictably without item-scope ambiguity.
 - Tightened the self-hosted architecture around the metrics POC by splitting the extractor, markdown declaration parsing, architecture declaration helpers, and skill-install transaction flow into clearer module boundaries.
 - Refreshed the Homebrew install support record for the current release line and relaxed help-surface verifies so they prove semantic command/help contracts instead of incidental prose.
-- Hardened the reusable spec and architecture audit skills so delegated fan-out reviews explicitly use `special spec ... --verbose` and `special modules ... --verbose/--metrics --verbose` as their primary evidence source.
+- Hardened the reusable spec and architecture audit skills so delegated fan-out reviews explicitly use `special specs ... --verbose` and `special modules ... --verbose/--metrics --verbose` as their primary evidence source.
 
 ## 0.4.0 - 2026-04-15
 

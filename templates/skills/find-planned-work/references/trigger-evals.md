@@ -2,10 +2,10 @@
 
 ## Should Trigger
 
-- What product-spec work is still planned?
+- What product work is still planned?
 - Show me the planned items for the next release.
-- Materialize the roadmap and planned branches for this subsystem.
-- Find the specs that are not current yet.
+- Turn this roadmap section into planned specs.
+- Find claims that are not current yet.
 
 ## Should Not Trigger
 

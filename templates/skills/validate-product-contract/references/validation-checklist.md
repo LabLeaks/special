@@ -6,7 +6,7 @@ Use this checklist when deciding whether a claim is honestly supported:
 2. Confirm the support is attached to that exact claim, not just a nearby parent or child.
 3. Confirm the support body is self-contained enough to judge locally.
 4. Confirm the verify sits at the right abstraction boundary for the claim.
-5. Use `special specs --metrics` first when you need the broader support or lifecycle distribution around a subtree before deciding which exact claim to inspect.
+5. Use `special specs --metrics` when you need broader support or lifecycle counts.
 6. Confirm the claim is current only if the support is genuinely good enough.
 
 Good pairing:

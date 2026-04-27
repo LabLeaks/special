@@ -5,9 +5,10 @@ Renders projected specs and modules into HTML views with shared styling and best
 // @fileimplements SPECIAL.RENDER.HTML
 use askama::Template;
 
-use crate::model::{GroupedCount, RepoTraceabilityMetrics, SpecMetricsSummary, VerifyRef};
+use crate::model::{GroupedCount, RepoTraceabilityMetrics, SpecMetricsSummary};
 
 use super::html_common::escape_html;
+pub(super) use super::labels::{attest_label, implementation_label, verify_label};
 use super::projection::{
     ProjectedArchitectureTraceability, ProjectedCount, ProjectedExplanation, ProjectedMetaLine,
     ProjectedRepoSignals,
@@ -369,24 +370,4 @@ pub(super) fn projected_explanation(explanation: &ProjectedExplanation) -> HtmlE
         plain: explanation.plain.to_string(),
         precise: explanation.precise.to_string(),
     }
-}
-
-pub(super) fn verify_label(verify: &VerifyRef) -> &'static str {
-    if verify.body_location.is_none() && verify.body.is_some() {
-        "@fileverifies"
-    } else {
-        "@verifies"
-    }
-}
-
-pub(super) fn implementation_label(implementation: &crate::model::ImplementRef) -> &'static str {
-    if implementation.body_location.is_none() {
-        "@fileimplements"
-    } else {
-        "@implements"
-    }
-}
-
-pub(super) fn attest_label(attest: &crate::model::AttestRef) -> &'static str {
-    attest.scope.as_annotation()
 }

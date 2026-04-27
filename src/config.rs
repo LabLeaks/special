@@ -16,7 +16,7 @@ mod test_support;
 mod version;
 
 pub use resolution::{RootResolution, RootSource};
-pub(crate) use special_toml::{ToolchainManager, load_special_toml};
+pub(crate) use special_toml::{PatternMetricBenchmarks, ToolchainManager, load_special_toml};
 pub use version::SpecialVersion;
 
 pub fn resolve_project_root(start: &Path) -> Result<RootResolution> {

@@ -13,14 +13,16 @@ use crate::model::{
     ParsedRepo,
 };
 
-use self::dependencies::GoDependencySummary;
+use self::dependencies::{GoDependencyResolver, GoDependencySummary};
 use self::surface::{GoSurfaceSummary, is_go_path};
 use self::traceability::GoTraceabilityPack;
 use crate::modules::analyze::source_item_signals::summarize_source_item_signals_with_metrics;
 use crate::modules::analyze::traceability_core::{
     TraceabilityAnalysis, TraceabilityLanguagePack,
 };
-use crate::modules::analyze::{FileOwnership, ProviderModuleAnalysis, visit_owned_texts};
+use crate::modules::analyze::{
+    FileOwnership, ProviderModuleAnalysis, emit_analysis_status, visit_owned_texts,
+};
 
 #[path = "analyze/dependencies.rs"]
 mod dependencies;
@@ -40,6 +42,7 @@ mod toolchain;
 #[path = "analyze/traceability.rs"]
 mod traceability;
 
+// @applies ADAPTER.FACTS_TO_MODEL
 pub(crate) fn analyze_module(
     root: &Path,
     implementations: &[&ImplementRef],
@@ -75,7 +78,7 @@ pub(crate) fn analyze_module(
             quality.observe(path, text, &graph);
             owned_items.extend(graph.items);
         }
-        dependencies.observe(root, text);
+        dependencies.observe(root, text, &context.dependency_resolver);
         Ok(())
     })?;
 
@@ -103,6 +106,7 @@ pub(crate) fn analyze_module(
 pub(crate) struct GoRepoAnalysisContext {
     traceability_pack: GoTraceabilityPack,
     traceability: Option<TraceabilityAnalysis>,
+    dependency_resolver: GoDependencyResolver,
     pub(crate) traceability_unavailable_reason: Option<String>,
 }
 
@@ -116,9 +120,17 @@ pub(crate) fn build_traceability_graph_facts(
 pub(crate) fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
     parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<Vec<u8>> {
-    scope::build_traceability_scope_facts(root, source_files, parsed_repo)
+    scope::build_traceability_scope_facts(
+        root,
+        source_files,
+        scoped_source_files,
+        parsed_repo,
+        file_ownership,
+    )
 }
 
 pub(crate) fn expand_traceability_closure_from_facts(
@@ -142,6 +154,12 @@ pub(crate) fn build_repo_analysis_context(
     include_traceability: bool,
 ) -> GoRepoAnalysisContext {
     let traceability_pack = GoTraceabilityPack;
+    let dependency_resolver = GoDependencyResolver::from_project(root);
+    if !source_files.is_empty() && !dependency_resolver.is_tool_backed() {
+        emit_analysis_status(
+            "Go analyzer enrichment degraded: declare Go through special.toml, mise.toml, or .tool-versions and provide a working `go` tool to enable go-list-backed dependency and coupling metrics",
+        );
+    }
     let base_traceability_unavailable_reason = toolchain::go_backward_trace_unavailable_reason(root);
     let (traceability, traceability_unavailable_reason) =
         if !include_traceability || base_traceability_unavailable_reason.is_some() {
@@ -171,12 +189,18 @@ pub(crate) fn build_repo_analysis_context(
             };
             match analysis {
                 Ok(traceability) => (Some(traceability), None),
-                Err(error) => (None, Some(error.to_string())),
+                Err(error) => (
+                    None,
+                    Some(format!(
+                        "Go backward trace is unavailable because gopls trace collection failed: {error:#}"
+                    )),
+                ),
             }
         };
     GoRepoAnalysisContext {
         traceability_pack,
         traceability,
+        dependency_resolver,
         traceability_unavailable_reason,
     }
 }

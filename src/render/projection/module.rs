@@ -31,6 +31,10 @@ fn strip_module_implementation_bodies(mut node: ModuleNode) -> ModuleNode {
         implementation.body_location = None;
         implementation.body = None;
     }
+    for application in &mut node.pattern_applications {
+        application.body_location = None;
+        application.body = None;
+    }
     node.children = node
         .children
         .into_iter()

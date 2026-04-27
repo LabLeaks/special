@@ -23,14 +23,32 @@ special health --html emits an HTML repo-wide quality view.
 @spec SPECIAL.HEALTH_COMMAND.VERBOSE
 special health --verbose includes fuller detail for repo-wide quality signals when built-in analyzers provide it.
 
-@spec SPECIAL.HEALTH_COMMAND.SCOPE
-special health PATH scopes repo-wide quality and traceability reporting to analyzable items in matching files or directories without changing the underlying repo analysis model.
+@spec SPECIAL.HEALTH_COMMAND.TARGET
+special health --target PATH scopes repo-wide quality and traceability reporting to analyzable items in matching files or directories without changing the underlying repo analysis model.
+
+@spec SPECIAL.HEALTH_COMMAND.NO_POSITIONAL_SCOPE
+special health requires explicit --target PATH instead of accepting positional path scopes.
 
 @spec SPECIAL.HEALTH_COMMAND.SYMBOL
-special health PATH --symbol NAME narrows the health view to items in that scoped file whose symbol name matches NAME.
+special health --target PATH --symbol NAME narrows the health view to items in that scoped file whose symbol name matches NAME.
 
-@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY
-special health surfaces repo-wide Rust backward trace only when `rust-analyzer` is available; otherwise it says that Rust backward trace is unavailable.
+    @spec SPECIAL.HEALTH_COMMAND.WITHIN
+    special health --within PATH hard-limits the analysis corpus for advanced monorepo and performance use cases.
+
+    @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY
+    special health surfaces repo-wide implementation traceability for analyzable Rust, TypeScript, and Go source items through built-in language packs.
+
+    @spec SPECIAL.HEALTH_COMMAND.TARGET.TRACEABILITY
+    special health --target PATH preserves traceability semantics while narrowing health output to the requested scope.
+
+    @spec SPECIAL.HEALTH_COMMAND.TARGET.TRACEABILITY.SCOPED_GRAPH_DISCOVERY
+    special health --target PATH can build scoped traceability directly from the requested target while preserving the same projected traceability result as full analysis filtered to that target.
+
+    @spec SPECIAL.HEALTH_COMMAND.TARGET.TRACEABILITY.NO_EAGER_FACT_BLOBS
+    special health --target PATH uses scoped graph discovery without building eager whole-repo language-pack traceability fact blobs when the selected language pack supports scoped discovery.
+
+    @spec SPECIAL.HEALTH_COMMAND.TARGET.TRACEABILITY.LANGUAGE_PARITY
+    special health --target PATH supports scoped graph discovery for the built-in Rust, TypeScript, and Go traceability language packs.
 
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.TYPESCRIPT
 special health surfaces built-in TypeScript implementation traceability for analyzable TypeScript source items.
@@ -74,17 +92,23 @@ special health combines parser and Go tool-backed reference edges so callback-st
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.ALL_SUPPORTING_ROOTS
 special health includes every verifying test and verified spec claim that supports one traced implementation item when backward trace is available.
 
-@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.UNAVAILABLE
-special health reports when Rust backward trace is unavailable instead of guessing from weaker analysis.
+@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.RUST_DEGRADED
+special health reports a degraded analyzer status when Rust traceability falls back to parser-resolved call edges because `rust-analyzer` is unavailable.
 
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.UNEXPLAINED
 special health keeps currently unexplained implementation separate from traced and statically mediated implementation.
 
+@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.DETERMINISTIC_ORDERING
+special health emits traceability item lists in deterministic source/name order rather than analyzer discovery order.
+
+@spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.IGNORE_UNEXPLAINED
+special.toml `[health] ignore-unexplained` patterns remove matching files from the health traceability unexplained-by-spec bucket without hiding those files from analysis.
+
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.DEFAULT_VISIBLE
 special health surfaces traceability in the default health view.
 
-@spec SPECIAL.HEALTH_COMMAND.JSON.TRACEABILITY
-special health --json includes structured Rust backward-trace output at the repo boundary when available, or a structured unavailable reason when it is not.
+    @spec SPECIAL.HEALTH_COMMAND.JSON.TRACEABILITY
+    special health --json includes structured language-pack traceability output at the repo boundary, including degraded status when a built-in traceability analyzer cannot provide its richer semantic route.
 
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.UNEXPLAINED.EVIDENCE
 special health surfaces raw unexplained-item evidence, including visibility, test-file placement, declared-module ownership, whether the owning module already has current-spec-traced code, and whether the item is structurally connected inside that module to traced code, across text, HTML, and JSON output when backward trace is available.
@@ -404,12 +428,28 @@ fn repo_scope_progress_limits_traceability_contexts_to_scoped_languages() {
     )
     .expect("rust test fixture should be written");
 
-    let output = run_special(&root, &["health", "src/app.ts", "--json"]);
+    let output = run_special(&root, &["health", "--target", "src/app.ts", "--json"]);
     assert!(output.status.success());
 
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
     assert!(stderr.contains("building typescript analysis context"));
     assert!(!stderr.contains("building rust analysis context"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.HEALTH_COMMAND.NO_POSITIONAL_SCOPE
+fn repo_rejects_positional_path_scope() {
+    let root = temp_repo_dir("special-cli-health-no-positional-scope");
+    write_duplicate_item_signals_module_analysis_fixture(&root);
+
+    let output = run_special(&root, &["health", "alpha.rs"]);
+    assert!(!output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("health path scopes must use --target PATH"));
+    assert!(stderr.contains("special health --target alpha.rs"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -500,12 +540,15 @@ fn repo_verbose_includes_fuller_repo_signal_detail() {
 }
 
 #[test]
-// @verifies SPECIAL.HEALTH_COMMAND.SCOPE
+// @verifies SPECIAL.HEALTH_COMMAND.TARGET
 fn repo_scope_limits_repo_signals_to_matching_files() {
     let root = temp_repo_dir("special-cli-repo-scope-signals");
     write_duplicate_item_signals_module_analysis_fixture(&root);
 
-    let output = run_special(&root, &["health", "alpha.rs", "--json", "--verbose"]);
+    let output = run_special(
+        &root,
+        &["health", "--target", "alpha.rs", "--json", "--verbose"],
+    );
     assert!(output.status.success());
 
     let json: Value =
@@ -528,12 +571,15 @@ fn repo_scope_limits_repo_signals_to_matching_files() {
 }
 
 #[test]
-// @verifies SPECIAL.HEALTH_COMMAND.SCOPE
+// @verifies SPECIAL.HEALTH_COMMAND.TARGET
 fn repo_scope_limits_traceability_to_matching_files() {
     let root = temp_repo_dir("special-cli-repo-scope-traceability");
     write_typescript_traceability_fixture(&root);
 
-    let output = run_special(&root, &["health", "src/app.ts", "--json", "--verbose"]);
+    let output = run_special(
+        &root,
+        &["health", "--target", "src/app.ts", "--json", "--verbose"],
+    );
     assert!(output.status.success());
 
     let json: Value =
@@ -568,6 +614,91 @@ fn repo_scope_limits_traceability_to_matching_files() {
 }
 
 #[test]
+// @verifies SPECIAL.HEALTH_COMMAND.WITHIN
+fn repo_within_hard_limits_analysis_corpus() {
+    let root = temp_repo_dir("special-cli-repo-within-hard-corpus");
+    write_typescript_traceability_fixture(&root);
+
+    let output = run_special(
+        &root,
+        &[
+            "health",
+            "--target",
+            "src/app.ts",
+            "--within",
+            "src/app.ts",
+            "--json",
+            "--verbose",
+        ],
+    );
+    assert!(output.status.success());
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
+    assert!(stderr.contains("hard analysis corpus matches 1 of"));
+    assert!(stderr.contains("building language analysis contexts from 1 bounded source files"));
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    if json["analysis"]["traceability_unavailable_reason"].is_null() {
+        let traceability = &json["analysis"]["traceability"];
+        let all_names = [
+            "current_spec_items",
+            "statically_mediated_items",
+            "unexplained_items",
+        ]
+        .iter()
+        .flat_map(|key| {
+            traceability[*key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item["name"].as_str())
+        })
+        .collect::<Vec<_>>();
+        assert!(all_names.contains(&"liveImpl"));
+        assert!(!all_names.contains(&"sharedValue"));
+    } else {
+        assert_typescript_traceability_unavailable(&json);
+    }
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.HEALTH_COMMAND.WITHIN
+fn repo_within_hard_limits_duplicate_corpus() {
+    let root = temp_repo_dir("special-cli-repo-within-duplicates");
+    write_duplicate_item_signals_module_analysis_fixture(&root);
+
+    let output = run_special(
+        &root,
+        &[
+            "health",
+            "--target",
+            "alpha.rs",
+            "--within",
+            "alpha.rs",
+            "--json",
+            "--verbose",
+        ],
+    );
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    assert_eq!(
+        json["analysis"]["repo_signals"]["duplicate_items"],
+        Value::from(0)
+    );
+    assert_eq!(
+        json["analysis"]["repo_signals"]["duplicate_item_details"],
+        Value::Null
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
 // @verifies SPECIAL.HEALTH_COMMAND.SYMBOL
 fn repo_symbol_scope_narrows_health_view_to_one_symbol() {
     let root = temp_repo_dir("special-cli-health-symbol");
@@ -577,6 +708,7 @@ fn repo_symbol_scope_narrows_health_view_to_one_symbol() {
         &root,
         &[
             "health",
+            "--target",
             "src/app.ts",
             "--symbol",
             "liveImpl",
@@ -618,7 +750,7 @@ fn repo_symbol_scope_requires_exactly_one_path() {
     let output = run_special(&root, &["health", "--symbol", "liveImpl"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
-    assert!(stderr.contains("--symbol requires exactly one PATH"));
+    assert!(stderr.contains("--symbol requires exactly one --target path"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -633,12 +765,12 @@ fn repo_surfaces_traceability() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
     assert!(stdout.contains("traceability"));
-    assert!(stdout.contains(
-        "unavailable: Rust backward trace is unavailable because `rust-analyzer` is not installed"
-    ));
-    assert!(!stdout.contains("current spec item:"));
-    assert!(!stdout.contains("unexplained item:"));
+    assert!(stderr.contains("Rust analyzer enrichment degraded"));
+    assert!(stdout.contains("current spec item:"));
+    assert!(stdout.contains("unexplained item:"));
+    assert!(!stdout.contains("unavailable:"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -654,10 +786,13 @@ fn repo_json_includes_structured_traceability() {
 
     let json: Value =
         serde_json::from_slice(&output.stdout).expect("json output should be valid json");
-    assert_eq!(json["analysis"]["traceability"], Value::Null);
     assert_eq!(
         json["analysis"]["traceability_unavailable_reason"],
-        Value::from("Rust backward trace is unavailable because `rust-analyzer` is not installed")
+        Value::Null
+    );
+    assert_eq!(
+        json["analysis"]["traceability"]["current_spec_items"][0]["name"],
+        Value::from("live_impl")
     );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -673,7 +808,7 @@ fn repo_non_verbose_traceability_stays_summary_only() {
     assert!(text_output.status.success());
     let text_stdout = String::from_utf8(text_output.stdout).expect("stdout should be utf-8");
     assert!(text_stdout.contains("traceability"));
-    assert!(text_stdout.contains("unavailable:"));
+    assert!(!text_stdout.contains("unavailable:"));
     assert!(!text_stdout.contains("current spec item:"));
     assert!(!text_stdout.contains("unexplained item:"));
 
@@ -681,19 +816,18 @@ fn repo_non_verbose_traceability_stays_summary_only() {
     assert!(json_output.status.success());
     let json: Value =
         serde_json::from_slice(&json_output.stdout).expect("json output should be valid json");
-    assert_eq!(json["analysis"]["traceability"], Value::Null);
-    assert!(
-        json["analysis"]["traceability_unavailable_reason"]
-            .as_str()
-            .is_some_and(|reason| reason.contains("rust-analyzer"))
+    assert_eq!(
+        json["analysis"]["traceability_unavailable_reason"],
+        Value::Null
     );
+    assert!(json["analysis"]["traceability"].is_object());
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
 
 #[test]
-// @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.UNAVAILABLE
-fn repo_traceability_reports_unavailable_in_html_too() {
+// @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.RUST_DEGRADED
+fn repo_traceability_reports_rust_parser_degradation_status() {
     let root = temp_repo_dir("special-cli-repo-traceability-html-unavailable");
     write_traceability_module_analysis_fixture(&root);
 
@@ -701,9 +835,10 @@ fn repo_traceability_reports_unavailable_in_html_too() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
     assert!(stdout.contains("traceability"));
-    assert!(stdout.contains("rust-analyzer"));
-    assert!(stdout.contains("unavailable"));
+    assert!(!stdout.contains("unavailable"));
+    assert!(stderr.contains("Rust analyzer enrichment degraded"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -720,35 +855,26 @@ fn repo_traceability_keeps_all_supporting_roots_for_one_item() {
     let json: Value =
         serde_json::from_slice(&output.stdout).expect("json output should be valid json");
 
-    if rust_analyzer_available() {
-        let current_items = json["analysis"]["traceability"]["current_spec_items"]
-            .as_array()
-            .expect("current spec items should be an array");
-        let shared_helper = current_items
-            .iter()
-            .find(|item| item["name"] == "shared_helper")
-            .expect("shared helper should be current");
+    let current_items = json["analysis"]["traceability"]["current_spec_items"]
+        .as_array()
+        .expect("current spec items should be an array");
+    let shared_helper = current_items
+        .iter()
+        .find(|item| item["name"] == "shared_helper")
+        .expect("shared helper should be current");
 
-        assert_eq!(
-            shared_helper["current_specs"],
-            serde_json::json!(["APP.ALPHA", "APP.BETA"])
-        );
-        assert_eq!(
-            shared_helper["verifying_tests"],
-            serde_json::json!(["verifies_alpha_path", "verifies_beta_path"])
-        );
-        assert_eq!(
-            json["analysis"]["traceability_unavailable_reason"],
-            Value::Null
-        );
-    } else {
-        assert_eq!(json["analysis"]["traceability"], Value::Null);
-        assert!(
-            json["analysis"]["traceability_unavailable_reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("rust-analyzer"))
-        );
-    }
+    assert_eq!(
+        shared_helper["current_specs"],
+        serde_json::json!(["APP.ALPHA", "APP.BETA"])
+    );
+    assert_eq!(
+        shared_helper["verifying_tests"],
+        serde_json::json!(["verifies_alpha_path", "verifies_beta_path"])
+    );
+    assert_eq!(
+        json["analysis"]["traceability_unavailable_reason"],
+        Value::Null
+    );
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }
@@ -829,12 +955,11 @@ fn repo_traceability_resolves_instance_method_dispatch_when_rust_analyzer_is_ava
             Value::Null
         );
     } else {
-        assert_eq!(json["analysis"]["traceability"], Value::Null);
-        assert!(
-            json["analysis"]["traceability_unavailable_reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("rust-analyzer"))
+        assert_eq!(
+            json["analysis"]["traceability_unavailable_reason"],
+            Value::Null
         );
+        assert!(json["analysis"]["traceability"].is_object());
     }
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -1597,56 +1722,84 @@ fn repo_review_surface_excludes_public_test_helpers() {
     let json: Value =
         serde_json::from_slice(&output.stdout).expect("json output should be valid json");
 
-    if rust_analyzer_available() {
-        assert_eq!(
-            json["analysis"]["traceability"]["unexplained_public_items"],
-            Value::from(2)
-        );
-        assert_eq!(
-            json["analysis"]["traceability"]["unexplained_test_file_items"],
-            Value::from(1)
-        );
-        assert_eq!(
-            json["analysis"]["traceability"]["unexplained_review_surface_items"],
-            Value::from(1)
-        );
+    assert_eq!(
+        json["analysis"]["traceability"]["unexplained_public_items"],
+        Value::from(2)
+    );
+    assert_eq!(
+        json["analysis"]["traceability"]["unexplained_test_file_items"],
+        Value::from(1)
+    );
+    assert_eq!(
+        json["analysis"]["traceability"]["unexplained_review_surface_items"],
+        Value::from(1)
+    );
 
-        let unexplained = json["analysis"]["traceability"]["unexplained_items"]
-            .as_array()
-            .expect("unexplained items should be an array");
-        let public_names = unexplained
-            .iter()
-            .filter(|item| item["public"] == true)
-            .map(|item| {
-                (
-                    item["name"].as_str().expect("name should be present"),
-                    item["review_surface"] == true,
-                    item["test_file"] == true,
-                )
-            })
-            .collect::<Vec<_>>();
-        assert!(public_names.contains(&("public_orphan", true, false)));
-        assert!(public_names.contains(&("test_public_orphan", false, true)));
-        let internal_names = unexplained
-            .iter()
-            .filter(|item| item["public"] == false)
-            .map(|item| {
-                (
-                    item["name"].as_str().expect("name should be present"),
-                    item["review_surface"] == true,
-                )
-            })
-            .collect::<Vec<_>>();
-        assert!(internal_names.contains(&("internal_orphan", false)));
-    } else {
-        assert_eq!(json["analysis"]["traceability"], Value::Null);
-        assert_eq!(
-            json["analysis"]["traceability_unavailable_reason"],
-            Value::from(
-                "Rust backward trace is unavailable because `rust-analyzer` is not installed",
+    let unexplained = json["analysis"]["traceability"]["unexplained_items"]
+        .as_array()
+        .expect("unexplained items should be an array");
+    let public_names = unexplained
+        .iter()
+        .filter(|item| item["public"] == true)
+        .map(|item| {
+            (
+                item["name"].as_str().expect("name should be present"),
+                item["review_surface"] == true,
+                item["test_file"] == true,
             )
-        );
-    }
+        })
+        .collect::<Vec<_>>();
+    assert!(public_names.contains(&("public_orphan", true, false)));
+    assert!(public_names.contains(&("test_public_orphan", false, true)));
+    let internal_names = unexplained
+        .iter()
+        .filter(|item| item["public"] == false)
+        .map(|item| {
+            (
+                item["name"].as_str().expect("name should be present"),
+                item["review_surface"] == true,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(internal_names.contains(&("internal_orphan", false)));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.IGNORE_UNEXPLAINED
+fn repo_health_config_ignores_unexplained_traceability_paths() {
+    let root = temp_repo_dir("special-cli-repo-health-ignore-unexplained");
+    write_traceability_review_surface_fixture(&root);
+    fs::write(
+        root.join("special.toml"),
+        "version = \"1\"\nroot = \".\"\n\n[toolchain]\nmanager = \"mise\"\n\n[health]\nignore-unexplained = [\"src/lib.rs\"]\n",
+    )
+    .expect("special.toml should be written");
+
+    let output = run_special(&root, &["health", "--json", "--verbose"]);
+    assert!(output.status.success());
+
+    let json: Value =
+        serde_json::from_slice(&output.stdout).expect("json output should be valid json");
+    let traceability = &json["analysis"]["traceability"];
+    assert_eq!(
+        traceability["unexplained_review_surface_items"],
+        Value::from(0)
+    );
+    assert_eq!(traceability["unexplained_public_items"], Value::from(1));
+    let current_items = traceability["current_spec_items"]
+        .as_array()
+        .expect("current spec items should be present");
+    assert!(
+        current_items
+            .iter()
+            .any(|item| item["path"] == "src/lib.rs" && item["name"] == "exercise")
+    );
+    let unexplained = traceability["unexplained_items"]
+        .as_array()
+        .expect("unexplained items should be present");
+    assert!(unexplained.iter().all(|item| item["path"] != "src/lib.rs"));
 
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
 }

@@ -36,7 +36,7 @@ release review grants read access only to the project root.
 without `--full`, release review is diff-scoped against the baseline tag.
 
 @spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.JJ_LATEST_TAG_BASELINE
-release review uses the latest reachable semver tag before the reviewed head as the default baseline.
+release review uses the latest reachable semver tag before the review head as the default baseline, excluding the current release tag when jj is on an empty child of that release.
 
 @spec SPECIAL.QUALITY.RUST.RELEASE_REVIEW.SYNTAX_AWARE_CHANGED_CONTEXT
 release review extracts syntax-aware changed context for supported languages.
@@ -410,6 +410,18 @@ fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_jj_repo() {
     );
     run_jj(&root, &["tag", "set", "-r", "@-", "v0.4.1"]);
 
+    fs::write(root.join("c.txt"), "three\n").expect("head fixture should be written");
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "head",
+        ],
+    );
+
     run_jj(
         &root,
         &["new", "v0.1.0", "--no-edit", "-m", "unrelated_branch"],
@@ -431,6 +443,50 @@ fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_jj_repo() {
     );
     assert_eq!(
         latest_reachable_semver_tag_for_repo(&root, "jj", "v0.4.1"),
+        "v0.1.0".to_string()
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+fn release_review_excludes_current_release_tag_from_jj_baseline() {
+    let root = unique_review_temp_repo("jj-head-tag-baseline");
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(&root).expect("temp repo should be created");
+
+    run_jj(&root, &["git", "init", "."]);
+
+    fs::write(root.join("a.txt"), "one\n").expect("first fixture should be written");
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "first",
+        ],
+    );
+    run_jj(&root, &["tag", "set", "-r", "@-", "v0.1.0"]);
+
+    fs::write(root.join("b.txt"), "two\n").expect("second fixture should be written");
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "second",
+        ],
+    );
+    run_jj(&root, &["tag", "set", "-r", "@-", "v0.2.0"]);
+
+    assert_eq!(
+        latest_reachable_semver_tag_for_repo(&root, "jj", "@"),
         "v0.1.0".to_string()
     );
 
@@ -480,9 +536,9 @@ fn release_review_uses_latest_reachable_semver_tag_not_global_max_in_git_repo() 
     run_git(&["commit", "-m", "unrelated"]);
     run_git(&["tag", "v9.0.0"]);
     run_git(&["checkout", "-"]);
-    fs::write(root.join("d.txt"), "four\n").expect("fourth fixture should be written");
+    fs::write(root.join("d.txt"), "four\n").expect("head fixture should be written");
     run_git(&["add", "d.txt"]);
-    run_git(&["commit", "-m", "third"]);
+    run_git(&["commit", "-m", "head"]);
 
     assert_eq!(
         latest_reachable_semver_tag_for_repo(&root, "git", "HEAD"),

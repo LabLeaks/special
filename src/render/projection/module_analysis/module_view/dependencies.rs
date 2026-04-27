@@ -1,3 +1,4 @@
+// @fileimplements SPECIAL.RENDER.PROJECTION.MODULE_ANALYSIS.MODULE_VIEW
 use crate::model::ModuleAnalysisSummary;
 
 use super::super::{ProjectedCount, ProjectedMetaLine, count};

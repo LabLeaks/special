@@ -11,6 +11,7 @@ use super::support::{
 
 const JSX_TSCONFIG: &str = "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"ESNext\",\n    \"jsx\": \"preserve\"\n  },\n  \"include\": [\"src/**/*.ts\", \"src/**/*.tsx\"]\n}\n";
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_event_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -45,6 +46,7 @@ pub fn write_typescript_event_traceability_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_forwarded_callback_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -79,6 +81,7 @@ pub fn write_typescript_forwarded_callback_traceability_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_hook_callback_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -118,6 +121,7 @@ pub fn write_typescript_hook_callback_traceability_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_effect_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -147,6 +151,7 @@ pub fn write_typescript_effect_traceability_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_context_traceability_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);

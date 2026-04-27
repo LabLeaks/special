@@ -94,6 +94,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
+pub(super) use crate::annotation_syntax::normalize_markdown_annotation_line;
 use crate::extractor::collect_comment_blocks;
 use crate::model::{CommentBlock, Diagnostic, DiagnosticSeverity, ParsedRepo};
 use block::{ParseRules, parse_block};
@@ -118,28 +119,6 @@ pub fn parse_repo(
     }
     parse_markdown_declarations(root, ignore_patterns, &mut parsed, rules)?;
     Ok(parsed)
-}
-
-pub(super) fn normalize_markdown_annotation_line(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let trimmed = trimmed
-        .strip_prefix('>')
-        .map(str::trim_start)
-        .unwrap_or(trimmed);
-    let trimmed = trimmed.trim_start_matches('#').trim_start();
-    let trimmed = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .unwrap_or(trimmed);
-    let trimmed = trimmed
-        .strip_prefix('`')
-        .and_then(|inner| inner.strip_suffix('`'))
-        .unwrap_or(trimmed);
-    let trimmed = trimmed.trim();
-    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 pub(super) fn starts_markdown_fence(line: &str) -> bool {

@@ -20,19 +20,33 @@ use super::boundary::derive_scoped_traceability_boundary;
 use super::dependencies::{collect_go_import_aliases, resolve_internal_imports};
 use super::traceability::{
     CachedParsedSourceGraph, CachedTraceabilityItemSupport, GoTraceabilityScopeFacts,
-    build_gopls_reference_edges, build_reverse_reachable_reference_edges, build_static_call_edges,
-    collect_callable_items, collect_repo_items, decode_traceability_graph_facts,
-    parse_go_source_graphs,
+    build_reverse_reachable_reference_edges, build_static_call_edges, collect_callable_items,
+    collect_repo_items, decode_traceability_graph_facts, parse_go_source_graphs,
 };
 
 pub(super) fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
     parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<Vec<u8>> {
     let source_graphs = parse_go_source_graphs(root, source_files);
     let static_edges = build_static_call_edges(root, &source_graphs);
-    let tool_reference_edges = build_gopls_reference_edges(root, &collect_callable_items(&source_graphs));
+    let repo_items = collect_repo_items(&source_graphs, file_ownership);
+    let known_source_paths = source_graphs.keys().cloned().collect::<Vec<_>>();
+    let normalized_scoped_source_files = scoped_source_files
+        .iter()
+        .map(|path| normalize_go_path_for_known_sources(path, &known_source_paths))
+        .collect::<Vec<_>>();
+    let boundary =
+        derive_scoped_traceability_boundary(repo_items, &normalized_scoped_source_files);
+    let tool_reference_edges = build_reverse_reachable_reference_edges(
+        root,
+        &collect_callable_items(&source_graphs),
+        &boundary.seed_ids,
+        &static_edges,
+    )?;
     let root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
         parse_source_graph(path, body)
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
@@ -101,7 +115,7 @@ pub(super) fn expand_traceability_closure_from_facts(
             .collect(),
     };
     merge_trace_graph_edges(&mut graph.edges, facts.tool_reference_edges);
-    let reference = boundary.reference(&graph);
+    let reference = boundary.reference(&graph).map_err(anyhow::Error::msg)?;
     let preserved_item_ids = reference
         .contract
         .projected_item_ids
@@ -169,6 +183,7 @@ pub(super) fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
             (source_graphs, static_edges)
         }
     };
+    let graph_facts_include_scoped_semantics = source_graphs.len() > source_files.len();
     let normalized_scoped_source_files = scoped_source_files
         .iter()
         .map(|path| normalize_go_path(root, path))
@@ -192,15 +207,17 @@ pub(super) fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
 
     let mut edges = static_edges;
     let reverse_seed_edges = edges.clone();
-    merge_trace_graph_edges(
-        &mut edges,
-        build_reverse_reachable_reference_edges(
-            root,
-            &collect_callable_items(&source_graphs),
-            &scoped_seed_ids,
-            &reverse_seed_edges,
-        ),
-    );
+    if !graph_facts_include_scoped_semantics {
+        merge_trace_graph_edges(
+            &mut edges,
+            build_reverse_reachable_reference_edges(
+                root,
+                &collect_callable_items(&source_graphs),
+                &scoped_seed_ids,
+                &reverse_seed_edges,
+            )?,
+        );
+    }
     let mut graph = TraceGraph {
         edges,
         root_supports: BTreeMap::new(),
@@ -211,14 +228,14 @@ pub(super) fn build_scoped_traceability_inputs_from_cached_or_live_graph_facts(
     });
     let retained_context_items = boundary.context_items.clone();
 
-    Ok(narrow_scoped_traceability_inputs_for_go(
+    narrow_scoped_traceability_inputs_for_go(
         boundary,
         TraceabilityInputs {
             repo_items: retained_context_items.clone(),
             context_items: retained_context_items,
             graph,
         },
-    ))
+    )
 }
 
 pub(super) fn normalize_go_path(root: &Path, path: &Path) -> PathBuf {
@@ -238,8 +255,10 @@ pub(super) fn normalize_go_path_for_known_sources(
 fn narrow_scoped_traceability_inputs_for_go(
     boundary: super::boundary::ScopedTraceabilityBoundary,
     inputs: TraceabilityInputs,
-) -> TraceabilityInputs {
-    let reference = boundary.reference(&inputs.graph);
+) -> Result<TraceabilityInputs> {
+    let reference = boundary
+        .reference(&inputs.graph)
+        .map_err(anyhow::Error::msg)?;
     let projected_item_ids = &reference.contract.projected_item_ids;
     let preserved_item_ids =
         crate::modules::analyze::traceability_core::preserved_graph_item_ids_for_reference(
@@ -279,11 +298,11 @@ fn narrow_scoped_traceability_inputs_for_go(
             .collect(),
     };
 
-    TraceabilityInputs {
+    Ok(TraceabilityInputs {
         repo_items,
         context_items,
         graph,
-    }
+    })
 }
 
 fn collect_item_paths_by_stable_id(

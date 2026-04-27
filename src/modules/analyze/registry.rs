@@ -4,12 +4,13 @@ Projects the shared `SPECIAL.LANGUAGE_PACKS` registry onto implementation analys
 */
 // @fileimplements SPECIAL.MODULES.ANALYZE.REGISTRY
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use crate::cache::load_or_build_language_pack_blob;
-use crate::language_packs::{self, LanguagePackAnalysisContext};
+use crate::language_packs::{self, LanguagePackAnalysisContext, ScopedTraceabilityPreparation};
 use crate::model::{
     ArchitectureTraceabilitySummary, ImplementRef, ModuleAnalysisOptions, ParsedArchitecture,
     ParsedRepo,
@@ -31,6 +32,9 @@ enum TraceabilityPreparation {
         reason: String,
     },
 }
+
+const SCOPED_TRACEABILITY_MODE_ENV: &str = "SPECIAL_SCOPED_TRACEABILITY_MODE";
+const EAGER_SCOPED_TRACEABILITY_MODE: &str = "eager";
 
 fn language_label(language: SourceLanguage) -> &'static str {
     match language.id() {
@@ -58,6 +62,7 @@ fn declared_project_tools(descriptor: &language_packs::LanguagePackDescriptor) -
     (!tools.is_empty()).then(|| tools.join(", "))
 }
 
+// @applies REGISTRY.PROVIDER_DESCRIPTOR
 pub(super) fn build_repo_analysis_contexts(
     root: &Path,
     source_files: &[PathBuf],
@@ -160,6 +165,7 @@ pub(super) fn build_repo_analysis_contexts(
     contexts
 }
 
+// @applies REGISTRY.PROVIDER_DESCRIPTOR
 fn prepare_traceability_inputs(
     root: &Path,
     descriptor: &language_packs::LanguagePackDescriptor,
@@ -176,7 +182,18 @@ fn prepare_traceability_inputs(
             include_traceability: false,
         };
     }
-    let resolved_source_files = match resolve_traceability_source_files(
+    if scoped_graph_discovery_enabled(descriptor, scoped_source_files) {
+        status::emit_analysis_status(&format!(
+            "{} scoped traceability is using scoped graph discovery",
+            descriptor.language.id()
+        ));
+        return TraceabilityPreparation::Ready {
+            source_files: source_files.to_vec(),
+            graph_facts: None,
+            include_traceability: true,
+        };
+    }
+    let (resolved_source_files, scoped_graph_facts) = match resolve_traceability_source_files(
         root,
         descriptor,
         source_files,
@@ -194,20 +211,19 @@ fn prepare_traceability_inputs(
             };
         }
     };
-    let graph_facts = match resolve_traceability_graph_facts(
-        root,
-        descriptor,
-        &resolved_source_files,
-        true,
-    ) {
-        Ok(facts) => facts,
-        Err(error) => {
-            return TraceabilityPreparation::ExplicitlyUnavailable {
-                reason: format!(
-                    "{} backward trace is unavailable because traceability graph fact preparation failed: {error}",
-                    language_label(descriptor.language)
-                ),
-            };
+    let graph_facts = if scoped_graph_facts.is_some() {
+        scoped_graph_facts
+    } else {
+        match resolve_traceability_graph_facts(root, descriptor, &resolved_source_files, true) {
+            Ok(facts) => facts,
+            Err(error) => {
+                return TraceabilityPreparation::ExplicitlyUnavailable {
+                    reason: format!(
+                        "{} backward trace is unavailable because traceability graph fact preparation failed: {error}",
+                        language_label(descriptor.language)
+                    ),
+                };
+            }
         }
     };
 
@@ -218,6 +234,20 @@ fn prepare_traceability_inputs(
     }
 }
 
+fn scoped_graph_discovery_enabled(
+    descriptor: &language_packs::LanguagePackDescriptor,
+    scoped_source_files: Option<&[PathBuf]>,
+) -> bool {
+    descriptor.scoped_traceability_preparation
+        == ScopedTraceabilityPreparation::ScopedGraphDiscovery
+        && scoped_source_files.is_some_and(|files| !files.is_empty())
+        && !eager_scoped_traceability_requested()
+}
+
+fn eager_scoped_traceability_requested() -> bool {
+    env::var(SCOPED_TRACEABILITY_MODE_ENV).as_deref() == Ok(EAGER_SCOPED_TRACEABILITY_MODE)
+}
+
 fn resolve_traceability_source_files(
     root: &Path,
     descriptor: &language_packs::LanguagePackDescriptor,
@@ -225,21 +255,22 @@ fn resolve_traceability_source_files(
     scoped_source_files: Option<&[PathBuf]>,
     parsed_repo: &ParsedRepo,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
-) -> Result<Vec<PathBuf>> {
+) -> Result<(Vec<PathBuf>, Option<Vec<u8>>)> {
     let Some(scoped_source_files) = scoped_source_files else {
-        return Ok(source_files.to_vec());
+        return Ok((source_files.to_vec(), None));
     };
     if scoped_source_files.is_empty() {
-        return Ok(source_files.to_vec());
+        return Ok((source_files.to_vec(), None));
     }
     let Some(scope_facts) = descriptor.traceability_scope_facts else {
-        return Ok(source_files.to_vec());
+        return Ok((source_files.to_vec(), None));
     };
 
     let environment_fingerprint = format!(
-        "{}|repo={:016x}",
+        "{}|repo={:016x}|scope={:016x}",
         (descriptor.analysis_environment_fingerprint)(root),
-        crate::cache::parsed_repo_contract_fingerprint(parsed_repo)
+        crate::cache::parsed_repo_contract_fingerprint(parsed_repo),
+        scope_fingerprint(scoped_source_files),
     );
     let facts = load_or_build_language_pack_blob(
         root,
@@ -247,9 +278,30 @@ fn resolve_traceability_source_files(
         descriptor.language.id(),
         source_files,
         &environment_fingerprint,
-        || (scope_facts.build_facts)(root, source_files, parsed_repo),
+        || {
+            (scope_facts.build_facts)(
+                root,
+                source_files,
+                scoped_source_files,
+                parsed_repo,
+                file_ownership,
+            )
+        },
     )?;
-    (scope_facts.expand_closure)(source_files, scoped_source_files, file_ownership, &facts)
+    let resolved =
+        (scope_facts.expand_closure)(source_files, scoped_source_files, file_ownership, &facts)?;
+    Ok((resolved, Some(facts)))
+}
+
+fn scope_fingerprint(scoped_source_files: &[PathBuf]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    for path in scoped_source_files {
+        path.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 fn resolve_traceability_graph_facts(

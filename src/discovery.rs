@@ -78,6 +78,10 @@ pub fn discover_annotation_files(config: DiscoveryConfig<'_>) -> Result<Discover
     Ok(discovered)
 }
 
+pub(crate) fn path_matches_patterns(root: &Path, path: &Path, patterns: &[String]) -> Result<bool> {
+    Ok(IgnoreMatcher::build(root, patterns)?.is_ignored(path))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct DiscoveryCacheKey {
     root: PathBuf,
@@ -144,8 +148,10 @@ impl IgnoreMatcher {
     }
 
     fn is_ignored(&self, path: &Path) -> bool {
-        let Ok(relative) = path.strip_prefix(&self.root) else {
-            return false;
+        let relative = if let Ok(relative) = path.strip_prefix(&self.root) {
+            relative
+        } else {
+            path
         };
         let relative = relative.to_string_lossy().replace('\\', "/");
 

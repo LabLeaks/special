@@ -7,6 +7,7 @@ use std::path::Path;
 
 use super::support::{create_dirs, write_architecture, write_file, write_special_toml};
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_typescript_module_analysis_fixture(root: &Path) {
     create_dirs(root, &["_project", "src"]);
     write_special_toml(root);

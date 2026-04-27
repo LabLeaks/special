@@ -9,6 +9,7 @@ use super::support::{
     create_dirs, write_architecture, write_file, write_special_toml, write_specs,
 };
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_local_binary_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -34,6 +35,7 @@ pub fn write_traceability_local_binary_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_lib_crate_binary_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);
@@ -64,6 +66,7 @@ pub fn write_traceability_lib_crate_binary_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_default_binary_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src"]);
     write_special_toml(root);

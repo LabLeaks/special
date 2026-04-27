@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::special_toml::load_special_toml;
-use super::{RootResolution, RootSource, SpecialVersion};
+use super::{PatternMetricBenchmarks, RootResolution, RootSource, SpecialVersion};
 
 pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
     let start = start.canonicalize()?;
@@ -49,6 +49,8 @@ pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
                 version_explicit: config.version_explicit,
                 config_path: Some(config_path),
                 ignore_patterns: config.ignore_patterns,
+                health_ignore_unexplained_patterns: config.health_ignore_unexplained_patterns,
+                pattern_benchmarks: config.pattern_benchmarks,
             });
         }
     }
@@ -62,6 +64,8 @@ pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
                 version_explicit: false,
                 config_path: None,
                 ignore_patterns: Vec::new(),
+                health_ignore_unexplained_patterns: Vec::new(),
+                pattern_benchmarks: PatternMetricBenchmarks::default(),
             });
         }
     }
@@ -73,6 +77,8 @@ pub(super) fn resolve_project_root(start: &Path) -> Result<RootResolution> {
         version_explicit: false,
         config_path: None,
         ignore_patterns: Vec::new(),
+        health_ignore_unexplained_patterns: Vec::new(),
+        pattern_benchmarks: PatternMetricBenchmarks::default(),
     })
 }
 

@@ -11,6 +11,9 @@ special installs the `special` binary from the `special-cli` package.
 @group SPECIAL.DISTRIBUTION.GITHUB_RELEASES
 special GitHub release distribution.
 
+@group SPECIAL.DISTRIBUTION.BUILD_SCRIPT
+special Cargo build-script distribution behavior.
+
 @group SPECIAL.DISTRIBUTION.HOMEBREW
 special Homebrew distribution.
 
@@ -19,6 +22,12 @@ special release automation declares the `https://github.com/LabLeaks/special` re
 
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.WORKFLOW
 special keeps a GitHub Actions release workflow in `.github/workflows/release.yml`.
+
+@spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.LEAN_KERNEL
+special GitHub release automation embeds the standalone Lean traceability kernel in host-native local artifact builds so those released `special` binaries can use the Lean kernel without requiring Lean at user runtime; cross-target artifact builds do not embed a host-built Lean executable.
+
+@spec SPECIAL.DISTRIBUTION.BUILD_SCRIPT.LANGUAGE_PACK_REGISTRY
+special's Cargo build script generates a compile-time built-in language-pack registry from shipped language-pack source files.
 
 @spec SPECIAL.DISTRIBUTION.GITHUB_RELEASES.PUBLISHED
 special publishes GitHub Releases for versioned distribution.
@@ -42,9 +51,9 @@ special selects its platform-specific Homebrew archive URL and checksum with Hom
 special installs the `special` binary from LabLeaks/homebrew-tap.
 
 @attests SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
-artifact: brew install LabLeaks/homebrew-tap/special (confirmed local install for /opt/homebrew/bin/special at v0.4.0)
+artifact: brew install LabLeaks/homebrew-tap/special (confirmed local install for /opt/homebrew/bin/special at v0.7.0)
 owner: gk
-last_reviewed: 2026-04-16
+last_reviewed: 2026-04-24
 
 @module SPECIAL.TESTS.DISTRIBUTION
 Distribution/release asset integration tests in `tests/distribution.rs`.
@@ -444,6 +453,65 @@ fn github_release_workflow_is_committed_and_in_sync() {
         "stdout:\n{}\n\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.BUILD_SCRIPT.LANGUAGE_PACK_REGISTRY
+fn build_script_generates_the_builtin_language_pack_registry() {
+    let build_script = read_repo_file("build.rs");
+
+    assert!(
+        build_script.contains("src/language_packs"),
+        "build script should discover shipped language pack sources"
+    );
+    assert!(
+        build_script.contains("language_pack_registry.rs"),
+        "build script should emit the generated language pack registry"
+    );
+    assert!(
+        build_script.contains("REGISTERED_LANGUAGE_PACKS"),
+        "generated registry should expose the built-in language pack descriptor list"
+    );
+    assert!(
+        build_script.contains("stem != \"mod\"") && build_script.contains("stem != \"python\""),
+        "registry generation should skip helper modules that are not built-in language packs"
+    );
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.GITHUB_RELEASES.LEAN_KERNEL
+fn github_release_workflow_embeds_lean_traceability_kernel_for_host_native_builds() {
+    let workflow = read_repo_file(".github/workflows/release.yml");
+    let dist_config = read_repo_file("dist-workspace.toml");
+    let build_script = read_repo_file("build.rs");
+    let verifier = read_repo_file("scripts/verify-lean-traceability-kernel.py");
+    assert!(
+        workflow.contains("uses: jdx/mise-action@v2"),
+        "release builds should install the project tool manager before building the Lean kernel"
+    );
+    assert!(
+        workflow.contains("SPECIAL_BUILD_LEAN_KERNEL: \"1\""),
+        "release builds should request the standalone Lean traceability kernel"
+    );
+    assert!(
+        dist_config.contains("allow-dirty = [\"ci\"]"),
+        "cargo-dist should allow the intentional release workflow customization"
+    );
+    assert!(
+        build_script.contains("lean_kernel_target_matches_host")
+            && build_script.contains("skipping embedded Lean traceability kernel for cross target"),
+        "cross builds should not embed a Lean executable built for the host architecture"
+    );
+    assert!(
+        !build_script.contains("will use the Rust reference kernel"),
+        "cross builds should not claim a production fallback to the debug/test Rust reference kernel"
+    );
+    assert!(
+        verifier.contains("\"-Krelease\", \"build\", \"special_traceability_kernel\"")
+            && verifier.contains("SPECIAL_TRACEABILITY_KERNEL_EXE")
+            && verifier.contains("SPECIAL_REQUIRE_LEAN_KERNEL_TESTS"),
+        "Lean verification should exercise the release-built kernel through required Rust-vs-Lean equivalence tests"
     );
 }
 

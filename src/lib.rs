@@ -16,9 +16,13 @@ mod model;
 mod modules;
 mod overview;
 mod parser;
+mod patterns;
 mod planned_syntax;
 mod render;
 mod skills;
+mod source_paths;
 mod syntax;
+mod text_lines;
+mod tree_sitter_utils;
 
 pub use cli::run_from_env;

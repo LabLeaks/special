@@ -90,8 +90,9 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::Args;
 
+use super::common::report_cache_stats;
 use super::status::{CommandStatus, StatusStep};
-use crate::cache::{format_cache_stats_summary, reset_cache_stats, with_cache_status_notifier};
+use crate::cache::{reset_cache_stats, with_cache_status_notifier};
 use crate::config::{RootResolution, RootSource, resolve_project_root};
 use crate::index::{build_lint_report, build_spec_document};
 use crate::model::{DeclaredStateFilter, Diagnostic, DiagnosticSeverity, LintReport, SpecFilter};
@@ -165,6 +166,7 @@ const LINT_PLAN: &[StatusStep] = &[
     StatusStep::new("rendering output", 1),
 ];
 
+// @applies COMMAND.PROJECTION_PIPELINE
 pub(super) fn execute_spec(args: SpecArgs, current_dir: &Path) -> Result<ExitCode> {
     let status = CommandStatus::with_plan("special specs", SPEC_PLAN);
     reset_cache_stats();
@@ -230,6 +232,7 @@ impl SpecArgs {
     }
 }
 
+// @applies COMMAND.PROJECTION_PIPELINE
 pub(super) fn execute_lint(current_dir: &Path) -> Result<ExitCode> {
     let status = CommandStatus::with_plan("special lint", LINT_PLAN);
     reset_cache_stats();
@@ -262,12 +265,6 @@ pub(super) fn execute_lint(current_dir: &Path) -> Result<ExitCode> {
     } else {
         ExitCode::from(1)
     })
-}
-
-fn report_cache_stats(status: &CommandStatus) {
-    if let Some(summary) = format_cache_stats_summary() {
-        status.note(&summary);
-    }
 }
 
 fn add_config_lint_warnings(report: &mut LintReport, resolution: &RootResolution) {

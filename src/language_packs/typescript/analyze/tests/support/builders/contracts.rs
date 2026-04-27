@@ -24,7 +24,7 @@ pub(crate) fn build_typescript_exact_contract(
 ) -> Option<analyze::boundary::ScopedTraceabilityContract> {
     let (root, parsed_repo, parsed_architecture, source_files, file_ownership) =
         build_typescript_fixture_context(fixture_name, fixture_writer)?;
-    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo) {
+    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership) {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
             fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -55,7 +55,7 @@ pub(crate) fn build_typescript_exact_contract(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let contract = boundary.exact_contract(&source_files, &full_inputs);
+    let contract = boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
     fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
     Some(contract)
 }
@@ -67,7 +67,7 @@ pub(crate) fn build_typescript_working_and_exact_contract(
 ) -> Option<TypeScriptContractComparisonContext> {
     let (root, parsed_repo, parsed_architecture, source_files, file_ownership) =
         build_typescript_fixture_context(fixture_name, fixture_writer)?;
-    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo) {
+    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership) {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
             fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -99,7 +99,7 @@ pub(crate) fn build_typescript_working_and_exact_contract(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let exact_contract = boundary.exact_contract(&source_files, &full_inputs);
+    let exact_contract = boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
     Some((working_contract, exact_contract, root))
 }
 
@@ -110,7 +110,7 @@ pub(crate) fn build_typescript_exact_contract_target_context(
 ) -> Option<TypeScriptExactTargetContext> {
     let (root, parsed_repo, parsed_architecture, source_files, file_ownership) =
         build_typescript_fixture_context(fixture_name, fixture_writer)?;
-    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo) {
+    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership) {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
             fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -141,7 +141,7 @@ pub(crate) fn build_typescript_exact_contract_target_context(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let contract = boundary.exact_contract(&source_files, &full_inputs);
+    let contract = boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
     Some((contract, full_inputs, root))
 }
 
@@ -160,7 +160,7 @@ pub(crate) fn build_typescript_contract_test_context(
         &parsed_architecture,
         &file_ownership,
     )?;
-    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &parsed_repo) {
+    let facts = match analyze::build_traceability_scope_facts(&root, &source_files, &source_files, &parsed_repo, &file_ownership) {
         Ok(facts) => facts,
         Err(error) if is_typescript_tooling_unavailable(&error) => {
             fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
@@ -191,7 +191,7 @@ pub(crate) fn build_typescript_contract_test_context(
         }
         Err(error) => panic!("full typescript inputs should build: {error}"),
     };
-    let contract = boundary.exact_contract(&source_files, &full_inputs);
+    let contract = boundary.exact_contract(&source_files, &full_inputs).expect("exact traceability contract should derive");
     Some((
         full_summary,
         contract,

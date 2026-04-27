@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use super::{
     LanguagePackAnalysisContext, LanguagePackDescriptor, ProjectToolRequirement,
-    ProjectToolingDescriptor, TraceabilityGraphFactsDescriptor,
+    ProjectToolingDescriptor, ScopedTraceabilityPreparation, TraceabilityGraphFactsDescriptor,
     TraceabilityScopeFactsDescriptor,
 };
 use crate::model::{
@@ -18,6 +18,7 @@ use crate::model::{
     ParsedRepo,
 };
 use crate::modules::analyze::{FileOwnership, ProviderModuleAnalysis};
+use crate::source_paths::has_extension;
 use crate::syntax::{ParsedSourceGraph, SourceLanguage};
 
 #[path = "go/analyze.rs"]
@@ -32,6 +33,7 @@ pub(crate) const DESCRIPTOR: LanguagePackDescriptor = LanguagePackDescriptor {
     project_tooling: Some(&PROJECT_TOOLING),
     traceability_scope_facts: Some(&TRACEABILITY_SCOPE_FACTS),
     traceability_graph_facts: Some(&TRACEABILITY_GRAPH_FACTS),
+    scoped_traceability_preparation: ScopedTraceabilityPreparation::ScopedGraphDiscovery,
 };
 
 const PROJECT_TOOLING: ProjectToolingDescriptor = ProjectToolingDescriptor {
@@ -110,9 +112,17 @@ fn build_traceability_graph_facts(root: &Path, source_files: &[PathBuf]) -> Resu
 fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
     parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<Vec<u8>> {
-    analyze::build_traceability_scope_facts(root, source_files, parsed_repo)
+    analyze::build_traceability_scope_facts(
+        root,
+        source_files,
+        scoped_source_files,
+        parsed_repo,
+        file_ownership,
+    )
 }
 
 fn expand_traceability_closure_from_facts(
@@ -130,7 +140,7 @@ fn expand_traceability_closure_from_facts(
 }
 
 fn is_go_path(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("go")
+    has_extension(path, &["go"])
 }
 
 fn parse_source_graph(path: &Path, text: &str) -> Option<ParsedSourceGraph> {

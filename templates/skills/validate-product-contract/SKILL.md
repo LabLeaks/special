@@ -1,21 +1,47 @@
 ---
 name: validate-product-contract
-description: Use this skill when checking whether a product claim is honestly supported. Inspect the exact claim with `special specs SPEC.ID --verbose`, read the attached support, and decide whether the contract and verification truly match.
+description: Use this skill when reviewing whether a feature, bug fix, test, or release claim is honestly supported. Inspect the exact product claim, inspect the proof artifact, and decide whether to keep, tighten, split, plan, or remove the claim.
 ---
 
 # Validate Product Contract
 
-Use this skill when you need to judge whether a current product claim is honestly supported.
+## When To Use
 
-1. Start from one exact claim, not a whole subtree.
-2. Use `special specs --current` for the normal current tree, `special specs --current --metrics` for grouped support/lifecycle analysis, and `special specs SPEC.ID --verbose` when you need the full attached support for one claim.
-3. Run `special specs SPEC.ID --verbose` and read the claim text before reading the attached support.
-4. Review each attached `@verifies` or `@attests` body and decide whether it proves the exact claim rather than a nearby one.
-5. If the verify hides the important setup behind helpers, treat that as a quality problem and tighten it.
-6. If the claim is not actually ready to ship, move it back to `@planned` instead of pretending the support is good enough.
-7. Run `special lint` if the support looks malformed or the references seem inconsistent.
-8. Treat missing intermediate ids as a tree-structure issue: they should usually exist as explicit `@group` nodes.
-9. Remember the parser constraints while reviewing support: each `@verifies` block targets exactly one spec id and attaches to the next supported item.
-10. Keep architecture validation separate. If the real question is whether code honestly implements a `@module`, switch to `special arch` and the architecture-validation workflow instead of forcing it through product specs.
+Use this when a task asks:
+
+- does this test really prove the behavior?
+- is this release claim safe?
+- is this spec too broad or too vague?
+- are we overclaiming current behavior?
+- should this requirement be planned instead of current?
+
+This skill can introduce Special if the claim is currently untracked.
+
+## How To Use
+
+1. Start from one exact behavior claim.
+2. If Special is present, run `special specs SPEC.ID --verbose`.
+3. If you do not know the id, run `special specs --current` or `special specs --metrics` first.
+4. Read the claim before reading the verify.
+5. Read the attached `@verifies` or `@attests` body.
+6. Ask whether the artifact proves that exact claim through observable behavior or durable evidence.
+
+Useful commands:
+
+```sh
+special specs --current
+special specs EXPORT.CSV.HEADER --verbose
+special specs --metrics
+special lint
+```
+
+## What To Do With Results
+
+- If the verify proves the claim, keep it.
+- If the verify proves only part of the claim, split or narrow the spec.
+- If the verify checks helper mechanics instead of behavior, replace or strengthen it.
+- If the behavior is not ready, mark the claim `@planned`.
+- If the claim is not product behavior, move it to architecture, pattern guidance, or ordinary docs.
+- If the repo has no spec surface yet, add the smallest useful `@spec` and proof attachment instead of leaving the claim implicit.
 
 Read [references/validation-checklist.md](references/validation-checklist.md) for the review rubric and [references/trigger-evals.md](references/trigger-evals.md) for trigger examples.

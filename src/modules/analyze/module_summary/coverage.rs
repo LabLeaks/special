@@ -1,3 +1,4 @@
+// @fileimplements SPECIAL.MODULES.ANALYZE.MODULE_SUMMARY
 use crate::model::{ImplementRef, ModuleCoverageSummary};
 
 pub(super) fn implementations_for_module<'a>(

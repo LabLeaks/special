@@ -1,3 +1,4 @@
+// @fileimplements SPECIAL.RENDER.PROJECTION.MODULE_ANALYSIS.MODULE_VIEW
 use crate::model::ModuleAnalysisSummary;
 use crate::modules::analyze::explain::MetricExplanationKey;
 

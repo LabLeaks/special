@@ -117,7 +117,7 @@ pub struct ArchitectureTraceabilityItem {
     pub test_file: bool,
     pub module_backed_by_current_specs: bool,
     pub module_connected_to_current_specs: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub module_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mediated_reason: Option<String>,
@@ -194,7 +194,7 @@ pub struct ModuleTraceabilitySummary {
 }
 
 impl ModuleTraceabilitySummary {
-    pub fn sort_items(&mut self) {
+    pub(crate) fn sort_items(&mut self) {
         for items in [
             &mut self.current_spec_items,
             &mut self.planned_only_items,
@@ -480,5 +480,110 @@ impl ModuleAnalysisOptions {
     pub fn any(self) -> bool {
         let normalized = self.normalized();
         normalized.coverage || normalized.metrics || normalized.traceability
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ArchitectureTraceabilityItem, ArchitectureTraceabilitySummary, ModuleItemKind,
+        ModuleTraceabilityItem, ModuleTraceabilitySummary,
+    };
+
+    fn module_item(name: &str, line: usize, kind: ModuleItemKind) -> ModuleTraceabilityItem {
+        ModuleTraceabilityItem {
+            line,
+            name: name.to_string(),
+            kind,
+            mediated_reason: None,
+            verifying_tests: Vec::new(),
+            unverified_tests: Vec::new(),
+            current_specs: Vec::new(),
+            planned_specs: Vec::new(),
+            deprecated_specs: Vec::new(),
+        }
+    }
+
+    fn architecture_item(
+        path: &str,
+        name: &str,
+        line: usize,
+        kind: ModuleItemKind,
+    ) -> ArchitectureTraceabilityItem {
+        ArchitectureTraceabilityItem {
+            path: path.into(),
+            line,
+            name: name.to_string(),
+            kind,
+            public: false,
+            review_surface: false,
+            test_file: false,
+            module_backed_by_current_specs: false,
+            module_connected_to_current_specs: false,
+            module_ids: Vec::new(),
+            mediated_reason: None,
+            verifying_tests: Vec::new(),
+            unverified_tests: Vec::new(),
+            current_specs: Vec::new(),
+            planned_specs: Vec::new(),
+            deprecated_specs: Vec::new(),
+        }
+    }
+
+    #[test]
+    // @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.DETERMINISTIC_ORDERING
+    fn traceability_summaries_sort_items_deterministically() {
+        let mut module = ModuleTraceabilitySummary {
+            current_spec_items: vec![
+                module_item("zeta", 3, ModuleItemKind::Function),
+                module_item("alpha", 9, ModuleItemKind::Method),
+                module_item("alpha", 2, ModuleItemKind::Function),
+            ],
+            ..ModuleTraceabilitySummary::default()
+        };
+
+        module.sort_items();
+
+        assert_eq!(
+            module
+                .current_spec_items
+                .iter()
+                .map(|item| (item.name.clone(), item.line, item.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                ("alpha".to_string(), 2, ModuleItemKind::Function),
+                ("alpha".to_string(), 9, ModuleItemKind::Method),
+                ("zeta".to_string(), 3, ModuleItemKind::Function),
+            ]
+        );
+
+        let mut repo = ArchitectureTraceabilitySummary {
+            current_spec_items: vec![
+                architecture_item("src/z.rs", "same", 2, ModuleItemKind::Function),
+                architecture_item("src/a.rs", "zeta", 4, ModuleItemKind::Function),
+                architecture_item("src/a.rs", "alpha", 1, ModuleItemKind::Method),
+            ],
+            ..ArchitectureTraceabilitySummary::default()
+        };
+
+        repo.sort_items();
+
+        assert_eq!(
+            repo.current_spec_items
+                .iter()
+                .map(|item| {
+                    (
+                        item.path.to_string_lossy().to_string(),
+                        item.name.clone(),
+                        item.line,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("src/a.rs".to_string(), "alpha".to_string(), 1),
+                ("src/a.rs".to_string(), "zeta".to_string(), 4),
+                ("src/z.rs".to_string(), "same".to_string(), 2),
+            ]
+        );
     }
 }

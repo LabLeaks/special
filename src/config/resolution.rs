@@ -5,7 +5,7 @@ Defines the resolved project-root result surface and warning semantics exposed a
 // @fileimplements SPECIAL.CONFIG.RESOLUTION
 use std::path::PathBuf;
 
-use super::SpecialVersion;
+use super::{PatternMetricBenchmarks, SpecialVersion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootSource {
@@ -14,7 +14,7 @@ pub enum RootSource {
     CurrentDir,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RootResolution {
     pub root: PathBuf,
     pub source: RootSource,
@@ -22,6 +22,8 @@ pub struct RootResolution {
     pub version_explicit: bool,
     pub config_path: Option<PathBuf>,
     pub ignore_patterns: Vec<String>,
+    pub health_ignore_unexplained_patterns: Vec<String>,
+    pub(crate) pattern_benchmarks: PatternMetricBenchmarks,
 }
 
 impl RootResolution {

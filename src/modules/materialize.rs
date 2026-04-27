@@ -8,13 +8,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::id_path::{immediate_parent_id, nearest_visible_parent_id};
 use crate::model::{
     ImplementRef, ModuleAnalysisSummary, ModuleDecl, ModuleDocument, ModuleFilter, ModuleNode,
-    ParsedArchitecture,
+    ParsedArchitecture, PatternApplication,
 };
+use crate::patterns::implementation_contains_application;
 
 #[derive(Debug, Clone)]
 struct FlatModuleNode {
     decl: ModuleDecl,
     implements: Vec<ImplementRef>,
+    pattern_applications: Vec<PatternApplication>,
 }
 
 pub(super) fn build_module_document(
@@ -30,12 +32,23 @@ pub(super) fn build_module_document(
             .or_insert_with(|| FlatModuleNode {
                 decl: module.clone(),
                 implements: Vec::new(),
+                pattern_applications: Vec::new(),
             });
     }
 
     for implementation in &parsed.implements {
         if let Some(node) = flat_nodes.get_mut(&implementation.module_id) {
             node.implements.push(implementation.clone());
+        }
+    }
+
+    for application in &parsed.pattern_applications {
+        for implementation in &parsed.implements {
+            if implementation_contains_application(implementation, application)
+                && let Some(node) = flat_nodes.get_mut(&implementation.module_id)
+            {
+                node.pattern_applications.push(application.clone());
+            }
         }
     }
 
@@ -123,6 +136,7 @@ fn build_children(
                 result.push(ModuleNode::new(
                     node.decl.clone(),
                     node.implements.clone(),
+                    node.pattern_applications.clone(),
                     module_analysis
                         .and_then(|analysis| analysis.get(child_id))
                         .cloned(),

@@ -98,6 +98,25 @@ const VALIDATE_ARCHITECTURE_IMPLEMENTATION_ASSETS: &[SkillAsset] = &[
     },
 ];
 
+const USE_PROJECT_PATTERNS_ASSETS: &[SkillAsset] = &[
+    SkillAsset {
+        relative_path: "SKILL.md",
+        contents: include_str!("../templates/skills/use-project-patterns/SKILL.md"),
+    },
+    SkillAsset {
+        relative_path: "references/pattern-workflow.md",
+        contents: include_str!(
+            "../templates/skills/use-project-patterns/references/pattern-workflow.md"
+        ),
+    },
+    SkillAsset {
+        relative_path: "references/trigger-evals.md",
+        contents: include_str!(
+            "../templates/skills/use-project-patterns/references/trigger-evals.md"
+        ),
+    },
+];
+
 const EVOLVE_MODULE_ARCHITECTURE_ASSETS: &[SkillAsset] = &[
     SkillAsset {
         relative_path: "SKILL.md",
@@ -167,6 +186,11 @@ const BUNDLED_SKILLS: &[BundledSkill] = &[
         id: "validate-architecture-implementation",
         summary: "Check whether one module is honestly implemented.",
         assets: VALIDATE_ARCHITECTURE_IMPLEMENTATION_ASSETS,
+    },
+    BundledSkill {
+        id: "use-project-patterns",
+        summary: "Follow, define, and review adopted implementation patterns.",
+        assets: USE_PROJECT_PATTERNS_ASSETS,
     },
     BundledSkill {
         id: "evolve-module-architecture",

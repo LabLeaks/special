@@ -68,6 +68,9 @@ installed bundled skills use the `.agents/skills/SKILL_ID/SKILL.md` layout.
 @spec SPECIAL.SKILLS.COMMAND.INSTALLS_VALIDATE_ARCHITECTURE_IMPLEMENTATION_SKILL
 `special skills install` includes the `validate-architecture-implementation` bundled skill.
 
+@spec SPECIAL.SKILLS.COMMAND.INSTALLS_USE_PROJECT_PATTERNS_SKILL
+`special skills install` includes the `use-project-patterns` bundled skill.
+
 @spec SPECIAL.SKILLS.COMMAND.INSTALLS_EVOLVE_MODULE_ARCHITECTURE_SKILL
 `special skills install` includes the `evolve-module-architecture` bundled skill.
 
@@ -669,6 +672,20 @@ fn skills_install_validate_architecture_implementation_skill() {
 }
 
 #[test]
+// @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_USE_PROJECT_PATTERNS_SKILL
+fn skills_install_use_project_patterns_skill() {
+    let root = temp_repo_dir("special-cli-skills-use-patterns");
+    let output = install_skills(&root);
+    assert!(output.status.success());
+
+    let skill = fs::read_to_string(root.join(".agents/skills/use-project-patterns/SKILL.md"))
+        .expect("use-project-patterns skill should exist");
+    assert_eq!(skill, bundled_skill_markdown("use-project-patterns"));
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
 // @verifies SPECIAL.SKILLS.COMMAND.INSTALLS_EVOLVE_MODULE_ARCHITECTURE_SKILL
 fn skills_install_evolve_module_architecture_skill() {
     let root = temp_repo_dir("special-cli-skills-evolve-architecture");
@@ -724,6 +741,8 @@ fn skills_bundle_reference_docs_for_progressive_disclosure() {
         "define-product-specs/references/spec-writing.md",
         "define-product-specs/references/trigger-evals.md",
         "evolve-module-architecture/references/trigger-evals.md",
+        "use-project-patterns/references/pattern-workflow.md",
+        "use-project-patterns/references/trigger-evals.md",
         "validate-architecture-implementation/references/validation-checklist.md",
         "validate-architecture-implementation/references/trigger-evals.md",
         "validate-product-contract/references/validation-checklist.md",
@@ -756,6 +775,7 @@ fn skills_include_trigger_eval_fixtures() {
         "ship-product-change/references/trigger-evals.md",
         "define-product-specs/references/trigger-evals.md",
         "evolve-module-architecture/references/trigger-evals.md",
+        "use-project-patterns/references/trigger-evals.md",
         "validate-architecture-implementation/references/trigger-evals.md",
         "validate-product-contract/references/trigger-evals.md",
         "inspect-current-spec-state/references/trigger-evals.md",

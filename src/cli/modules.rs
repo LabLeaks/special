@@ -1,6 +1,7 @@
 /**
 @module SPECIAL.CLI.MODULES
 Architecture module command boundary. This module resolves the active project root, selects module filters and analysis options from CLI flags, and renders the resulting ownership view without owning module parsing or analysis rules. This surface stays annotation-first: module metrics should expose owned implementation evidence such as coverage, complexity, quality, and dependencies without turning `special arch` into a repo-trace view.
+
 */
 // @fileimplements SPECIAL.CLI.MODULES
 use std::path::Path;
@@ -9,10 +10,12 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::Args;
 
+use super::common::report_cache_stats;
 use super::status::{CommandStatus, StatusStep};
-use crate::cache::{format_cache_stats_summary, reset_cache_stats, with_cache_status_notifier};
+use crate::cache::{reset_cache_stats, with_cache_status_notifier};
 use crate::config::resolve_project_root;
 use crate::model::{DeclaredStateFilter, ModuleAnalysisOptions, ModuleFilter};
+use crate::modules::analyze::with_analysis_status_notifier;
 use crate::modules::build_module_document;
 use crate::render::{render_module_html, render_module_json, render_module_text};
 
@@ -77,6 +80,7 @@ const ARCH_PLAN: &[StatusStep] = &[
     StatusStep::new("rendering output", 1),
 ];
 
+// @applies COMMAND.PROJECTION_PIPELINE
 pub(super) fn execute_modules(args: ModulesArgs, current_dir: &Path) -> Result<ExitCode> {
     let status = CommandStatus::with_plan("special arch", ARCH_PLAN);
     reset_cache_stats();
@@ -93,22 +97,25 @@ pub(super) fn execute_modules(args: ModulesArgs, current_dir: &Path) -> Result<E
     let verbose = args.verbose;
     let metrics = args.metrics;
     status.phase("building architecture view");
+    let analysis_notifier = status.notifier();
     let (document, lint) = with_cache_status_notifier(status.notifier(), || {
-        build_module_document(
-            &root,
-            &resolution.ignore_patterns,
-            resolution.version,
-            ModuleFilter {
-                state,
-                unimplemented_only,
-                scope,
-            },
-            ModuleAnalysisOptions {
-                coverage: metrics,
-                metrics,
-                traceability: false,
-            },
-        )
+        with_analysis_status_notifier(analysis_notifier, || {
+            build_module_document(
+                &root,
+                &resolution.ignore_patterns,
+                resolution.version,
+                ModuleFilter {
+                    state,
+                    unimplemented_only,
+                    scope,
+                },
+                ModuleAnalysisOptions {
+                    coverage: metrics,
+                    metrics,
+                    traceability: false,
+                },
+            )
+        })
     })?;
     report_cache_stats(&status);
 
@@ -144,11 +151,5 @@ impl ModulesArgs {
         } else {
             DeclaredStateFilter::All
         }
-    }
-}
-
-fn report_cache_stats(status: &CommandStatus) {
-    if let Some(summary) = format_cache_stats_summary() {
-        status.note(&summary);
     }
 }

@@ -27,9 +27,9 @@ pub fn temp_repo_dir(prefix: &str) -> PathBuf {
 }
 
 pub fn run_special_raw(root: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_special"))
+    let mut command = special_test_command(root);
+    command
         .args(args)
-        .current_dir(root)
         .output()
         .expect("special command should run")
 }
@@ -38,10 +38,23 @@ pub fn run_special(root: &Path, args: &[&str]) -> std::process::Output {
     run_special_raw(root, args)
 }
 
+pub fn run_special_with_env(
+    root: &Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> std::process::Output {
+    let mut command = special_test_command(root);
+    command.args(args).current_dir(root);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command.output().expect("special command should run")
+}
+
 pub fn spawn_special(root: &Path, args: &[&str]) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_special"))
+    let mut command = special_test_command(root);
+    command
         .args(args)
-        .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -50,9 +63,9 @@ pub fn spawn_special(root: &Path, args: &[&str]) -> Child {
 }
 
 pub fn run_special_with_input(root: &Path, args: &[&str], input: &str) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_special"))
+    let mut command = special_test_command(root);
+    let mut child = command
         .args(args)
-        .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -69,10 +82,9 @@ pub fn run_special_with_input_and_env(
     input: &str,
     envs: &[(&str, &Path)],
 ) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_special"));
+    let mut command = special_test_command(root);
     command
         .args(args)
-        .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -90,12 +102,20 @@ pub fn run_special_with_env_removed(
     args: &[&str],
     removed_envs: &[&str],
 ) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_special"));
-    command.args(args).current_dir(root);
+    let mut command = special_test_command(root);
+    command.args(args);
     for key in removed_envs {
         command.env_remove(key);
     }
     command.output().expect("special command should run")
+}
+
+fn special_test_command(root: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_special"));
+    command
+        .current_dir(root)
+        .env("SPECIAL_TRACEABILITY_KERNEL", "rust-reference");
+    command
 }
 
 pub fn rust_analyzer_available() -> bool {

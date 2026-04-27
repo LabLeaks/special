@@ -52,14 +52,52 @@ fn boundary_exact_contract(
     boundary: &ScopedTraceabilityBoundary,
     graph: &crate::modules::analyze::traceability_core::TraceGraph,
 ) -> super::boundary::ScopedTraceabilityContract {
-    boundary.exact_contract(graph)
+    boundary.exact_contract(graph).expect("exact traceability contract should derive")
 }
 
 fn boundary_reference(
     boundary: &ScopedTraceabilityBoundary,
     graph: &crate::modules::analyze::traceability_core::TraceGraph,
 ) -> super::boundary::ScopedTraceabilityReference {
-    boundary.reference(graph)
+    boundary.reference(graph).expect("traceability reference should derive")
+}
+
+#[test]
+fn build_script_items_are_statically_mediated_as_cargo_invoked_code() {
+    let path = std::path::Path::new("build.rs");
+    let text = r#"
+fn main() {
+    helper();
+}
+
+fn helper() {}
+
+struct BuildState;
+
+impl BuildState {
+    fn finish(&self) {}
+}
+"#;
+    let graph = crate::syntax::parse_source_graph(path, text).expect("build script should parse");
+    let reasons = super::collect_mediated_reasons_in_graph(path, text, &graph);
+    let by_name = graph
+        .items
+        .iter()
+        .map(|item| (item.name.as_str(), item.stable_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
+
+    assert_eq!(
+        reasons.get(by_name["main"]),
+        Some(&super::RustMediatedReason::BuildScriptEntrypoint)
+    );
+    assert_eq!(
+        reasons.get(by_name["helper"]),
+        Some(&super::RustMediatedReason::BuildScriptSupportCode)
+    );
+    assert_eq!(
+        reasons.get(by_name["finish"]),
+        Some(&super::RustMediatedReason::BuildScriptSupportCode)
+    );
 }
 
 #[test]
@@ -1176,6 +1214,7 @@ fn temp_repo_dir(prefix: &str) -> PathBuf {
     path
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 fn write_rust_imported_call_fixture(root: &std::path::Path) {
     fs::create_dir_all(root.join("_project")).expect("project dir should exist");
     fs::create_dir_all(root.join("specs")).expect("specs dir should exist");
@@ -1211,6 +1250,7 @@ fn write_rust_imported_call_fixture(root: &std::path::Path) {
     .expect("verify fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 fn write_rust_module_context_fixture(root: &std::path::Path) {
     fs::create_dir_all(root.join("_project")).expect("project dir should exist");
     fs::create_dir_all(root.join("specs")).expect("specs dir should exist");
@@ -1246,6 +1286,7 @@ fn write_rust_module_context_fixture(root: &std::path::Path) {
     .expect("test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 fn write_rust_instance_method_fixture(root: &std::path::Path) {
     fs::create_dir_all(root.join("_project")).expect("project dir should exist");
     fs::create_dir_all(root.join("specs")).expect("specs dir should exist");
@@ -1281,6 +1322,7 @@ fn write_rust_instance_method_fixture(root: &std::path::Path) {
     .expect("test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 fn write_rust_multiple_support_roots_fixture(root: &std::path::Path) {
     fs::create_dir_all(root.join("_project")).expect("project dir should exist");
     fs::create_dir_all(root.join("specs")).expect("specs dir should exist");
@@ -1331,6 +1373,7 @@ fn write_rust_multiple_support_roots_fixture(root: &std::path::Path) {
     .expect("secondary test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 fn write_rust_recursive_cycle_fixture(root: &std::path::Path) {
     fs::create_dir_all(root.join("_project")).expect("project dir should exist");
     fs::create_dir_all(root.join("specs")).expect("specs dir should exist");

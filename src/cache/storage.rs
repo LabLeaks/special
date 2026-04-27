@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     ArchitectureAnalysisSummary, ArchitectureKind, AttestRef, DeprecatedRelease, Diagnostic,
-    ImplementRef, ModuleDecl, NodeKind, ParsedArchitecture, ParsedRepo, PlanState, PlannedRelease,
-    SourceLocation, SpecDecl, VerifyRef,
+    ImplementRef, ModuleDecl, NodeKind, ParsedArchitecture, ParsedRepo, PatternApplication,
+    PatternDefinition, PlanState, PlannedRelease, SourceLocation, SpecDecl, VerifyRef,
 };
 use crate::modules::analyze::ArchitectureAnalysis;
 
@@ -306,6 +306,10 @@ impl From<&ParsedRepo> for CachedParsedRepo {
 struct CachedParsedArchitecture {
     modules: Vec<CachedModuleDecl>,
     implements: Vec<ImplementRef>,
+    #[serde(default)]
+    patterns: Vec<PatternDefinition>,
+    #[serde(default)]
+    pattern_applications: Vec<PatternApplication>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -318,6 +322,8 @@ impl CachedParsedArchitecture {
                 .map(CachedModuleDecl::into_module_decl)
                 .collect::<Result<Vec<_>>>()?,
             implements: self.implements,
+            patterns: self.patterns,
+            pattern_applications: self.pattern_applications,
             diagnostics: self.diagnostics,
         })
     }
@@ -328,6 +334,8 @@ impl From<&ParsedArchitecture> for CachedParsedArchitecture {
         Self {
             modules: parsed.modules.iter().map(CachedModuleDecl::from).collect(),
             implements: parsed.implements.clone(),
+            patterns: parsed.patterns.clone(),
+            pattern_applications: parsed.pattern_applications.clone(),
             diagnostics: parsed.diagnostics.clone(),
         }
     }

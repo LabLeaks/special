@@ -20,8 +20,9 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 
+use super::common::report_cache_stats;
 use super::status::{CommandStatus, StatusStep};
-use crate::cache::{format_cache_stats_summary, reset_cache_stats, with_cache_status_notifier};
+use crate::cache::{reset_cache_stats, with_cache_status_notifier};
 use crate::config::resolve_project_root;
 use crate::overview::build_overview_document;
 use crate::render::{render_overview_json, render_overview_text};
@@ -36,6 +37,7 @@ const OVERVIEW_PLAN: &[StatusStep] = &[
     StatusStep::new("rendering output", 1),
 ];
 
+// @applies COMMAND.PROJECTION_PIPELINE
 pub(super) fn execute_overview(args: OverviewArgs, current_dir: &Path) -> Result<ExitCode> {
     let status = CommandStatus::with_plan("special", OVERVIEW_PLAN);
     reset_cache_stats();
@@ -69,10 +71,4 @@ pub(super) fn execute_overview(args: OverviewArgs, current_dir: &Path) -> Result
     } else {
         ExitCode::SUCCESS
     })
-}
-
-fn report_cache_stats(status: &CommandStatus) {
-    if let Some(summary) = format_cache_stats_summary() {
-        status.note(&summary);
-    }
 }

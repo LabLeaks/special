@@ -9,14 +9,15 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::cache::{
-    load_or_build_architecture_analysis, load_or_build_repo_analysis_summary,
-    load_or_build_scoped_repo_analysis_summary, load_or_parse_architecture, load_or_parse_repo,
+    load_or_build_architecture_analysis, load_or_build_bounded_repo_analysis_summary,
+    load_or_build_repo_analysis_summary, load_or_build_scoped_repo_analysis_summary,
+    load_or_parse_architecture, load_or_parse_repo,
 };
 use crate::config::SpecialVersion;
 use crate::model::{
-    ArchitectureKind, ArchitectureMetricsSummary, GroupedCount, LintReport, ModuleAnalysisOptions,
-    ModuleDocument, ModuleFilter, ModuleNode, ParsedArchitecture, RepoDocument, RepoMetricsSummary,
-    RepoTraceabilityMetrics,
+    ArchitectureAnalysisSummary, ArchitectureKind, ArchitectureMetricsSummary, GroupedCount,
+    LintReport, ModuleAnalysisOptions, ModuleDocument, ModuleFilter, ModuleNode,
+    ParsedArchitecture, RepoDocument, RepoMetricsSummary, RepoTraceabilityMetrics,
 };
 
 pub(crate) mod analyze;
@@ -24,6 +25,15 @@ mod lint;
 mod materialize;
 mod parse;
 mod parse_markdown;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RepoDocumentOptions<'a> {
+    pub metrics: bool,
+    pub health_ignore_unexplained_patterns: &'a [String],
+    pub target_scope_paths: Option<&'a [PathBuf]>,
+    pub within_scope_paths: Option<&'a [PathBuf]>,
+    pub symbol: Option<&'a str>,
+}
 
 pub fn build_module_document(
     root: &Path,
@@ -70,14 +80,21 @@ pub fn build_repo_document(
     root: &Path,
     ignore_patterns: &[String],
     version: SpecialVersion,
-    metrics: bool,
-    scoped_paths: Option<&[PathBuf]>,
-    symbol: Option<&str>,
+    options: RepoDocumentOptions<'_>,
 ) -> Result<(RepoDocument, LintReport)> {
     let parsed = load_or_parse_architecture(root, ignore_patterns)?;
     let lint = lint::build_module_lint_report(&parsed);
     let parsed_repo = load_or_parse_repo(root, ignore_patterns, version)?;
-    let mut summary = if let Some(scoped_paths) = scoped_paths {
+    let mut summary = if let Some(within_paths) = options.within_scope_paths {
+        load_or_build_bounded_repo_analysis_summary(
+            root,
+            ignore_patterns,
+            version,
+            &parsed,
+            &parsed_repo,
+            within_paths,
+        )?
+    } else if let Some(scoped_paths) = options.target_scope_paths {
         load_or_build_scoped_repo_analysis_summary(
             root,
             ignore_patterns,
@@ -89,31 +106,52 @@ pub fn build_repo_document(
     } else {
         load_or_build_repo_analysis_summary(root, ignore_patterns, version, &parsed, &parsed_repo)?
     };
-    if let Some(symbol) = symbol {
+    if let Some(target_scope_paths) = options.target_scope_paths
+        && Some(target_scope_paths) != options.within_scope_paths
+    {
+        analyze::filter_repo_analysis_summary_to_paths(
+            root,
+            ignore_patterns,
+            target_scope_paths,
+            &mut summary,
+        )?;
+    }
+    if let Some(symbol) = options.symbol {
         analyze::filter_repo_analysis_summary_to_symbol(symbol, &mut summary);
     }
+    apply_health_ignore_unexplained(
+        root,
+        options.health_ignore_unexplained_patterns,
+        &mut summary,
+    )?;
 
     Ok((
         RepoDocument {
-            metrics: metrics.then(|| build_repo_metrics(&summary)),
+            metrics: options.metrics.then(|| build_repo_metrics(&summary)),
             analysis: Some(summary),
         },
         lint,
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_repo_document_from_parsed(
     root: &Path,
     ignore_patterns: &[String],
     version: SpecialVersion,
     parsed: &ParsedArchitecture,
     parsed_repo: &crate::model::ParsedRepo,
-    metrics: bool,
-    scoped_paths: Option<&[PathBuf]>,
-    symbol: Option<&str>,
+    options: RepoDocumentOptions<'_>,
 ) -> Result<RepoDocument> {
-    let mut summary = if let Some(scoped_paths) = scoped_paths {
+    let mut summary = if let Some(within_paths) = options.within_scope_paths {
+        load_or_build_bounded_repo_analysis_summary(
+            root,
+            ignore_patterns,
+            version,
+            parsed,
+            parsed_repo,
+            within_paths,
+        )?
+    } else if let Some(scoped_paths) = options.target_scope_paths {
         load_or_build_scoped_repo_analysis_summary(
             root,
             ignore_patterns,
@@ -125,14 +163,51 @@ pub(crate) fn build_repo_document_from_parsed(
     } else {
         load_or_build_repo_analysis_summary(root, ignore_patterns, version, parsed, parsed_repo)?
     };
-    if let Some(symbol) = symbol {
+    if let Some(target_scope_paths) = options.target_scope_paths
+        && Some(target_scope_paths) != options.within_scope_paths
+    {
+        analyze::filter_repo_analysis_summary_to_paths(
+            root,
+            ignore_patterns,
+            target_scope_paths,
+            &mut summary,
+        )?;
+    }
+    if let Some(symbol) = options.symbol {
         analyze::filter_repo_analysis_summary_to_symbol(symbol, &mut summary);
     }
+    apply_health_ignore_unexplained(
+        root,
+        options.health_ignore_unexplained_patterns,
+        &mut summary,
+    )?;
 
     Ok(RepoDocument {
-        metrics: metrics.then(|| build_repo_metrics(&summary)),
+        metrics: options.metrics.then(|| build_repo_metrics(&summary)),
         analysis: Some(summary),
     })
+}
+
+fn apply_health_ignore_unexplained(
+    root: &Path,
+    patterns: &[String],
+    summary: &mut ArchitectureAnalysisSummary,
+) -> Result<()> {
+    if patterns.is_empty() {
+        return Ok(());
+    }
+    let Some(traceability) = summary.traceability.as_mut() else {
+        return Ok(());
+    };
+
+    let mut retained = Vec::with_capacity(traceability.unexplained_items.len());
+    for item in traceability.unexplained_items.drain(..) {
+        if !crate::discovery::path_matches_patterns(root, &item.path, patterns)? {
+            retained.push(item);
+        }
+    }
+    traceability.unexplained_items = retained;
+    Ok(())
 }
 
 fn build_repo_metrics(summary: &crate::model::ArchitectureAnalysisSummary) -> RepoMetricsSummary {

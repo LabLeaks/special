@@ -16,8 +16,9 @@ This is the item-level shape used when a scoped analysis keeps:
 - the projected output items themselves
 - plus the exact reverse closure of a smaller target set
 
-This is stronger than a witness-only theorem because it states the kept item
-set itself, not only downstream consequences.
+The theorem assumptions name the kept item set itself, so the preservation
+claims below follow from an auditable closure predicate rather than from an
+opaque implementation.
 -/
 structure ProjectedContractClosureBoundary (R : α → α → Prop) where
   target : α → Prop
@@ -38,21 +39,9 @@ theorem projected_contract_keeps_reachable
   exact (boundary.keep_exact _).2 (Or.inr hx)
 
 /--
-Under a projected contract-closure boundary, every declared target item is
-kept.
--/
-theorem projected_contract_keeps_target
-    {R : α → α → Prop}
-    (boundary : ProjectedContractClosureBoundary R)
-    {target : α} :
-    boundary.target target → boundary.keep target := by
-  intro htarget
-  exact (boundary.keep_exact _).2 (Or.inr ⟨target, htarget, Path.refl _⟩)
-
-/--
-If the kept item set is exactly the projected items plus the reverse closure of
-the target set, then every declared target preserves the same reverse closure in
-the induced kept subgraph.
+If the kept item set contains the full reverse closure of the target set, then
+every declared target preserves the same reverse closure in the induced kept
+subgraph.
 -/
 theorem reachable_from_eq_of_projected_contract_closure_boundary
     {R : α → α → Prop}
@@ -61,14 +50,14 @@ theorem reachable_from_eq_of_projected_contract_closure_boundary
     (htarget : boundary.target target) :
     ReachableFrom (Induced boundary.keep R) target =
       ReachableFrom R target := by
-  exact reachable_from_eq_if_keeps_reachable
+  exact reverse_closure_preserved_when_reachable_nodes_are_kept
     htarget
     (fun x hx => projected_contract_keeps_reachable boundary hx)
 
 /--
-If the kept item set is exactly the projected items plus the reverse closure of
-the target set, then every declared target preserves the same support-root
-witnesses in the induced kept subgraph.
+If the kept item set contains the full reverse closure of the target set, then
+every declared target preserves the same support-root witnesses in the induced
+kept subgraph.
 -/
 theorem support_roots_for_eq_of_projected_contract_closure_boundary
     {R : α → α → Prop}
@@ -78,7 +67,7 @@ theorem support_roots_for_eq_of_projected_contract_closure_boundary
     (htarget : boundary.target target) :
     SupportRootsFor (Induced boundary.keep R) IsRoot target =
       SupportRootsFor R IsRoot target := by
-  exact support_roots_for_eq_if_keeps_reachable
+  exact support_roots_preserved_when_reachable_nodes_are_kept
     IsRoot
     htarget
     (fun x hx => projected_contract_keeps_reachable boundary hx)

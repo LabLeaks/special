@@ -15,5 +15,3 @@ mod summary;
 mod contracts;
 #[path = "tests/projection.rs"]
 mod projection;
-#[path = "tests/live.rs"]
-mod live;

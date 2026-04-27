@@ -1,6 +1,6 @@
 /**
 @module SPECIAL.LANGUAGE_PACKS.TYPESCRIPT.ANALYZE
-Owns the built-in TypeScript implementation analysis provider, including pack-specific traceability setup, tool-edge enrichment, and runtime discovery while depending on shared analysis core only through protocolized helpers.
+Owns the built-in TypeScript implementation analysis provider, including pack-specific traceability setup, scoped graph discovery, tool-edge enrichment, and runtime discovery while depending on shared analysis core only through protocolized helpers.
 */
 // @fileimplements SPECIAL.LANGUAGE_PACKS.TYPESCRIPT.ANALYZE
 use std::collections::{BTreeMap, BTreeSet};
@@ -45,6 +45,7 @@ mod scoped_tests;
 
 use boundary::{derive_projected_traceability_boundary, derive_scoped_traceability_boundary};
 
+// @applies ADAPTER.FACTS_TO_MODEL
 pub(crate) fn analyze_module(
     root: &Path,
     implementations: &[&ImplementRef],
@@ -77,7 +78,7 @@ pub(crate) fn analyze_module(
             quality.observe(path, text, &graph);
             owned_items.extend(graph.items);
         }
-        dependencies.observe(root, path, text);
+        dependencies.observe(root, path, text, &context.internal_files_by_source);
         Ok(())
     })?;
 
@@ -105,6 +106,7 @@ pub(crate) fn analyze_module(
 pub(crate) struct TypeScriptRepoAnalysisContext {
     traceability_pack: TypeScriptTraceabilityPack,
     traceability: Option<TraceabilityAnalysis>,
+    internal_files_by_source: BTreeMap<PathBuf, BTreeMap<String, BTreeSet<PathBuf>>>,
     pub(crate) traceability_unavailable_reason: Option<String>,
 }
 
@@ -121,6 +123,20 @@ pub(crate) fn build_repo_analysis_context(
 ) -> TypeScriptRepoAnalysisContext {
     let traceability_pack = TypeScriptTraceabilityPack;
     let traceability_unavailable_reason = typescript_backward_trace_unavailable_reason(root);
+    let internal_files_by_source = match build_tool_module_edges(root, source_files) {
+        Ok(edges) => edges,
+        Err(error) => {
+            emit_analysis_status(&format!(
+                "TypeScript analyzer enrichment degraded: compiler module resolution failed, so dependency/coupling metrics will fall back to parser path heuristics ({error})"
+            ));
+            BTreeMap::new()
+        }
+    };
+    if !source_files.is_empty() && traceability_unavailable_reason.is_some() {
+        emit_analysis_status(
+            "TypeScript analyzer enrichment degraded: declare Node through special.toml, mise.toml, or .tool-versions and install a resolvable `typescript` package to enable compiler-backed dependency, coupling, and health traceability",
+        );
+    }
     let (traceability, traceability_unavailable_reason) = if include_traceability
         && traceability_unavailable_reason.is_none()
     {
@@ -147,6 +163,7 @@ pub(crate) fn build_repo_analysis_context(
     TypeScriptRepoAnalysisContext {
         traceability_pack,
         traceability,
+        internal_files_by_source,
         traceability_unavailable_reason,
     }
 }
@@ -165,14 +182,6 @@ pub(crate) fn summarize_repo_traceability(
 struct TypeScriptTraceabilityPack;
 
 impl TraceabilityLanguagePack for TypeScriptTraceabilityPack {
-    fn backward_trace_availability(
-        &self,
-    ) -> crate::modules::analyze::traceability_core::BackwardTraceAvailability {
-        crate::modules::analyze::traceability_core::BackwardTraceAvailability::unavailable(
-            "TypeScript backward trace availability must be resolved from the analyzed project root",
-        )
-    }
-
     fn owned_items_for_implementations(
         &self,
         root: &Path,
@@ -192,17 +201,104 @@ fn build_traceability_analysis_for_typescript(
     parsed_architecture: &ParsedArchitecture,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<TraceabilityAnalysis> {
-    let inputs = build_traceability_inputs_for_typescript(
+    let inputs =
+        if scoped_graph_discovery_requested(scoped_source_files, traceability_graph_facts) {
+            build_scoped_discovered_traceability_inputs_for_typescript(
+                root,
+                source_files,
+                scoped_source_files.expect("checked by scoped_graph_discovery_requested"),
+                parsed_repo,
+                parsed_architecture,
+                file_ownership,
+            )?
+        } else {
+            build_traceability_inputs_for_typescript(
+                root,
+                source_files,
+                traceability_graph_facts,
+                parsed_repo,
+                parsed_architecture,
+                file_ownership,
+            )?
+        };
+    Ok(build_traceability_analysis(
+        narrow_scoped_traceability_inputs_for_typescript(source_files, scoped_source_files, inputs)?,
+    ))
+}
+
+fn scoped_graph_discovery_requested(
+    scoped_source_files: Option<&[PathBuf]>,
+    traceability_graph_facts: Option<&[u8]>,
+) -> bool {
+    traceability_graph_facts.is_none() && scoped_source_files.is_some_and(|files| !files.is_empty())
+}
+
+fn build_scoped_discovered_traceability_inputs_for_typescript(
+    root: &Path,
+    source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
+    parsed_repo: &ParsedRepo,
+    parsed_architecture: &ParsedArchitecture,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+) -> Result<TraceabilityInputs> {
+    let source_graphs = parse_typescript_source_graphs(root, source_files);
+    let repo_items = collect_repo_items(&source_graphs, file_ownership);
+    let parser_edges = build_parser_call_edges(&source_graphs);
+    let projected_item_ids =
+        projected_traceability_item_ids(source_files, scoped_source_files, &repo_items);
+    let tool_call_edges = build_reverse_reachable_tool_call_edges(
         root,
-        source_files,
-        traceability_graph_facts,
+        &source_graphs,
+        &projected_item_ids,
+        &parser_edges,
+    )?;
+    Ok(assemble_traceability_inputs_for_typescript(
+        source_graphs,
+        tool_call_edges,
         parsed_repo,
         parsed_architecture,
         file_ownership,
-    )?;
-    Ok(build_traceability_analysis(
-        narrow_scoped_traceability_inputs_for_typescript(source_files, scoped_source_files, inputs),
     ))
+}
+
+fn projected_traceability_item_ids(
+    source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
+    repo_items: &[TraceabilityOwnedItem],
+) -> BTreeSet<String> {
+    let boundary = derive_projected_traceability_boundary(source_files, scoped_source_files);
+    repo_items
+        .iter()
+        .filter(|item| boundary.projected_files.contains(&item.path))
+        .map(|item| item.stable_id.clone())
+        .collect()
+}
+
+// @applies ADAPTER.FACTS_TO_MODEL
+fn assemble_traceability_inputs_for_typescript(
+    source_graphs: BTreeMap<PathBuf, ParsedSourceGraph>,
+    tool_call_edges: BTreeMap<String, BTreeSet<String>>,
+    parsed_repo: &ParsedRepo,
+    parsed_architecture: &ParsedArchitecture,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+) -> TraceabilityInputs {
+    let repo_items = collect_repo_items(&source_graphs, file_ownership);
+    let context_items = collect_context_items(&source_graphs, file_ownership);
+    let mut graph = TraceGraph {
+        edges: build_parser_call_edges(&source_graphs),
+        root_supports: BTreeMap::new(),
+    };
+    merge_trace_graph_edges(&mut graph.edges, tool_call_edges);
+    graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
+        parse_source_graph(path, body)
+            .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
+    });
+    let _ = parsed_architecture;
+    TraceabilityInputs {
+        repo_items,
+        context_items,
+        graph,
+    }
 }
 
 fn build_traceability_inputs_for_typescript(
@@ -222,23 +318,13 @@ fn build_traceability_inputs_for_typescript(
                 (source_graphs, tool_call_edges)
             }
         };
-    let repo_items = collect_repo_items(&source_graphs, file_ownership);
-    let context_items = collect_context_items(&source_graphs, file_ownership);
-    let mut graph = TraceGraph {
-        edges: build_parser_call_edges(&source_graphs),
-        root_supports: BTreeMap::new(),
-    };
-    merge_trace_graph_edges(&mut graph.edges, tool_call_edges);
-    graph.root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
-        parse_source_graph(path, body)
-            .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
-    });
-    let _ = parsed_architecture;
-    Ok(TraceabilityInputs {
-        repo_items,
-        context_items,
-        graph,
-    })
+    Ok(assemble_traceability_inputs_for_typescript(
+        source_graphs,
+        tool_call_edges,
+        parsed_repo,
+        parsed_architecture,
+        file_ownership,
+    ))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -252,16 +338,28 @@ pub(crate) struct TypeScriptTraceabilityScopeFacts {
 pub(crate) fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
     parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<Vec<u8>> {
     let source_graphs = parse_typescript_source_graphs(root, source_files);
-    let tool_call_edges = build_tool_call_edges(root, &source_graphs)?;
+    let parser_edges = build_parser_call_edges(&source_graphs);
+    let tool_call_edges = build_reverse_reachable_tool_call_edges_for_scoped_files(
+        root,
+        &source_graphs,
+        scoped_source_files,
+        file_ownership,
+        &parser_edges,
+    )?;
     let root_supports = build_root_supports(parsed_repo, &source_graphs, |path, body| {
         parse_source_graph(path, body)
             .and_then(|graph| graph.items.first().map(|item| item.span.start_line))
     });
     let facts = TypeScriptTraceabilityScopeFacts {
-        adjacency: build_tool_module_graph(root, source_files)?,
+        adjacency: undirected_file_graph(file_graph_from_import_edges(build_tool_module_edges(
+            root,
+            source_files,
+        )?)),
         source_graphs: source_graphs
             .iter()
             .map(|(path, graph)| (path.clone(), CachedParsedSourceGraph::from_parsed(graph)))
@@ -279,16 +377,18 @@ fn narrow_scoped_traceability_inputs_for_typescript(
     source_files: &[PathBuf],
     scoped_source_files: Option<&[PathBuf]>,
     inputs: TraceabilityInputs,
-) -> TraceabilityInputs {
+) -> Result<TraceabilityInputs> {
     let Some(scoped_source_files) = scoped_source_files else {
-        return inputs;
+        return Ok(inputs);
     };
     if scoped_source_files.is_empty() {
-        return inputs;
+        return Ok(inputs);
     }
 
     let boundary = derive_projected_traceability_boundary(source_files, scoped_source_files);
-    let reference = boundary.reference(source_files, &inputs);
+    let reference = boundary
+        .reference(source_files, &inputs)
+        .map_err(anyhow::Error::msg)?;
     let projected_item_ids = &reference.contract.projected_item_ids;
     let preserved_item_ids = &reference.contract.preserved_item_ids;
     let repo_items = inputs
@@ -325,11 +425,11 @@ fn narrow_scoped_traceability_inputs_for_typescript(
             .collect(),
     };
 
-    TraceabilityInputs {
+    Ok(TraceabilityInputs {
         repo_items,
         context_items,
         graph,
-    }
+    })
 }
 
 pub(crate) fn expand_traceability_closure_from_facts(
@@ -369,7 +469,9 @@ pub(crate) fn expand_traceability_closure_from_facts(
     // the exact scoped contract at live narrowing time rather than widening to
     // the broad working file closure.
     let working_contract = boundary.working_contract();
-    let exact_contract = boundary.exact_contract(source_files, &full_inputs);
+    let exact_contract = boundary
+        .exact_contract(source_files, &full_inputs)
+        .map_err(anyhow::Error::msg)?;
     let closure_files = exact_contract.preserved_file_closure;
     emit_analysis_status(&format!(
         "typescript scoped exact traceability closure covers {} of {} file(s) (working closure {})",
@@ -428,7 +530,13 @@ struct TypeScriptDependencySummary {
 }
 
 impl TypeScriptDependencySummary {
-    fn observe(&mut self, root: &Path, source_path: &Path, text: &str) {
+    fn observe(
+        &mut self,
+        root: &Path,
+        source_path: &Path,
+        text: &str,
+        tool_internal_files: &BTreeMap<PathBuf, BTreeMap<String, BTreeSet<PathBuf>>>,
+    ) {
         let mut parser = Parser::new();
         if parser
             .set_language(
@@ -447,9 +555,12 @@ impl TypeScriptDependencySummary {
         };
         let mut imports = Vec::new();
         collect_import_sources(tree.root_node(), text.as_bytes(), &mut imports);
+        let tool_resolved_files = tool_internal_files.get(source_path);
         for target in imports {
             *self.targets.entry(target.clone()).or_default() += 1;
-            if let Some(file) = resolve_internal_import(root, source_path, &target) {
+            if let Some(files) = tool_resolved_files.and_then(|files| files.get(&target)) {
+                self.internal_files.extend(files.iter().cloned());
+            } else if let Some(file) = resolve_internal_import(root, source_path, &target) {
                 self.internal_files.insert(file);
             } else if !target.starts_with('.') {
                 self.external_targets.insert(target);
@@ -559,6 +670,7 @@ fn parse_typescript_source_graphs(
         .collect()
 }
 
+// @applies ADAPTER.FACTS_TO_MODEL.TRACEABILITY_ITEMS
 fn collect_repo_items(
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
@@ -599,6 +711,7 @@ fn collect_repo_items(
     items
 }
 
+// @applies ADAPTER.FACTS_TO_MODEL.TRACEABILITY_ITEMS
 fn collect_context_items(
     source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
     file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
@@ -711,19 +824,84 @@ fn build_tool_call_edges(
         return Ok(BTreeMap::new());
     }
 
-    let Some(runtime) = typescript_runtime(root) else {
-        return Ok(BTreeMap::new());
-    };
-    let Some(script) = write_embedded_tool_script(
-        "special-typescript-trace-edges.cjs",
-        include_str!("assets/typescript_trace_edges.cjs"),
-    ) else {
-        return Err(anyhow!("failed to write embedded TypeScript trace helper"));
-    };
+    let input = callable_tool_trace_input(
+        root,
+        source_graphs,
+        &callable_items,
+        ToolRequestMode::TraceEdges,
+        Vec::new(),
+        BTreeMap::new(),
+    );
+    emit_analysis_status(&format!(
+        "starting TypeScript call graph for {} file(s), {} callable item(s)",
+        source_graphs.len(),
+        callable_items.len()
+    ));
+    let tool_output = run_required_typescript_trace_helper(root, &input)?;
+    let ToolTraceOutput { edges, stats, .. } = tool_output;
+    let edges = filter_tool_call_edges(edges, &callable_items);
+    emit_typescript_tool_trace_status("TypeScript call graph", &stats, &edges);
+    Ok(edges)
+}
 
-    let input = ToolTraceInput {
-        mode: ToolRequestMode::TraceEdges,
+fn build_reverse_reachable_tool_call_edges(
+    root: &Path,
+    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
+    seed_ids: &BTreeSet<String>,
+    parser_edges: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let callable_items = collect_callable_items(source_graphs);
+    if callable_items.is_empty() || seed_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    emit_analysis_status(&format!(
+        "starting TypeScript reverse caller walk for {} file(s), {} callable item(s), {} seed root(s)",
+        source_graphs.len(),
+        callable_items.len(),
+        seed_ids.len()
+    ));
+    let input = callable_tool_trace_input(
+        root,
+        source_graphs,
+        &callable_items,
+        ToolRequestMode::ReverseTraceEdges,
+        seed_ids.iter().cloned().collect(),
+        parser_edges.clone(),
+    );
+    let tool_output = run_required_typescript_trace_helper(root, &input)?;
+    let ToolTraceOutput { edges, stats, .. } = tool_output;
+    let edges = filter_tool_call_edges(edges, &callable_items);
+    emit_typescript_tool_trace_status("TypeScript reverse caller walk", &stats, &edges);
+    Ok(edges)
+}
+
+fn emit_typescript_tool_trace_status(
+    label: &str,
+    stats: &ToolTraceStats,
+    edges: &BTreeMap<String, BTreeSet<String>>,
+) {
+    emit_analysis_status(&format!(
+        "{label} used compiler program with {} file(s), tracked {} source file(s), queried references for {} item(s), discovered {} semantic edge(s)",
+        stats.program_file_count,
+        stats.tracked_file_count,
+        stats.reference_query_count,
+        edges.values().map(BTreeSet::len).sum::<usize>()
+    ));
+}
+
+fn callable_tool_trace_input(
+    root: &Path,
+    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
+    callable_items: &[SourceCallableItem],
+    mode: ToolRequestMode,
+    seed_item_ids: Vec<String>,
+    parser_edges: BTreeMap<String, BTreeSet<String>>,
+) -> ToolTraceInput {
+    ToolTraceInput {
+        mode,
         root: root.display().to_string(),
+        project_source_files: true,
         source_files: source_graphs
             .keys()
             .map(|path| root.join(path).display().to_string())
@@ -739,54 +917,21 @@ fn build_tool_call_edges(
                 start_column: item.start_column,
             })
             .collect(),
-    };
-
-    let json_input = serde_json::to_vec(&input)?;
-
-    let mut child = runtime
-        .toolchain
-        .command("node")
-        .arg(script.path().to_string_lossy().as_ref())
-        .arg(runtime.typescript_entry.to_string_lossy().as_ref())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    if let Some(stdin) = child.stdin.as_mut()
-        && stdin.write_all(&json_input).is_err()
-    {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(anyhow!("failed to write input to TypeScript trace helper"));
+        seed_item_ids,
+        parser_edges,
     }
-    let _ = child.stdin.take();
+}
 
-    let output = match child.wait_with_output() {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(anyhow!(
-                "TypeScript trace helper exited with status {}{}",
-                output.status,
-                if stderr.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {stderr}")
-                }
-            ));
-        }
-        Err(error) => return Err(error.into()),
-    };
-
-    let tool_output: ToolTraceOutput = serde_json::from_slice(&output.stdout)?;
-
+fn filter_tool_call_edges(
+    tool_edges: Vec<ToolTraceEdge>,
+    callable_items: &[SourceCallableItem],
+) -> BTreeMap<String, BTreeSet<String>> {
     let callable_ids = callable_items
         .iter()
         .map(|item| item.stable_id.clone())
         .collect::<BTreeSet<_>>();
     let mut edges = BTreeMap::new();
-    for edge in tool_output.edges {
+    for edge in tool_edges {
         if !callable_ids.contains(&edge.caller) || !callable_ids.contains(&edge.callee) {
             continue;
         }
@@ -795,19 +940,15 @@ fn build_tool_call_edges(
             .or_insert_with(BTreeSet::new)
             .insert(edge.callee);
     }
-    Ok(edges)
+    edges
 }
 
-fn build_tool_module_graph(
+fn run_typescript_trace_helper(
     root: &Path,
-    source_files: &[PathBuf],
-) -> Result<BTreeMap<PathBuf, BTreeSet<PathBuf>>> {
-    if source_files.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
+    input: &ToolTraceInput,
+) -> Result<Option<ToolTraceOutput>> {
     let Some(runtime) = typescript_runtime(root) else {
-        return Ok(BTreeMap::new());
+        return Ok(None);
     };
     let Some(script) = write_embedded_tool_script(
         "special-typescript-trace-edges.cjs",
@@ -816,26 +957,7 @@ fn build_tool_module_graph(
         return Err(anyhow!("failed to write embedded TypeScript trace helper"));
     };
 
-    let absolute_files = source_files
-        .iter()
-        .map(|path| root.join(path))
-        .collect::<Vec<_>>();
-    let absolute_index = absolute_files
-        .iter()
-        .zip(source_files.iter())
-        .map(|(absolute, relative)| (normalize_path(absolute), relative.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let input = ToolTraceInput {
-        mode: ToolRequestMode::ModuleGraph,
-        root: root.display().to_string(),
-        source_files: absolute_files
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect(),
-        items: Vec::new(),
-    };
-    let json_input = serde_json::to_vec(&input)?;
-
+    let json_input = serde_json::to_vec(input)?;
     let mut child = runtime
         .toolchain
         .command("node")
@@ -845,6 +967,7 @@ fn build_tool_module_graph(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+
     if let Some(stdin) = child.stdin.as_mut()
         && let Err(error) = stdin.write_all(&json_input)
     {
@@ -868,8 +991,104 @@ fn build_tool_module_graph(
         ));
     }
 
-    let tool_output: ToolTraceOutput = serde_json::from_slice(&output.stdout)?;
-    let mut graph: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
+    Ok(Some(serde_json::from_slice(&output.stdout)?))
+}
+
+fn run_required_typescript_trace_helper(
+    root: &Path,
+    input: &ToolTraceInput,
+) -> Result<ToolTraceOutput> {
+    run_typescript_trace_helper(root, input)?.ok_or_else(|| {
+        anyhow!(
+            "TypeScript trace helper did not run even though TypeScript traceability was requested"
+        )
+    })
+}
+
+fn build_reverse_reachable_tool_call_edges_for_scoped_files(
+    root: &Path,
+    source_graphs: &BTreeMap<PathBuf, ParsedSourceGraph>,
+    scoped_source_files: &[PathBuf],
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
+    parser_edges: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let callable_items = collect_callable_items(source_graphs);
+    if callable_items.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let known_source_paths = source_graphs.keys().cloned().collect::<Vec<_>>();
+    let scoped_file_set = scoped_source_files
+        .iter()
+        .map(|path| {
+            crate::modules::analyze::traceability_core::normalize_path_for_known_sources(
+                path,
+                &known_source_paths,
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let seed_ids = collect_repo_items(source_graphs, file_ownership)
+        .into_iter()
+        .filter(|item| scoped_file_set.contains(&item.path))
+        .map(|item| item.stable_id)
+        .collect::<Vec<_>>();
+    if seed_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    emit_analysis_status(&format!(
+        "starting TypeScript reverse caller walk for {} callable item(s), {} seed root(s)",
+        callable_items.len(),
+        seed_ids.len()
+    ));
+    let mut input = callable_tool_trace_input(
+        root,
+        source_graphs,
+        &callable_items,
+        ToolRequestMode::ReverseTraceEdges,
+        seed_ids,
+        parser_edges.clone(),
+    );
+    input.project_source_files = false;
+    let tool_output = run_required_typescript_trace_helper(root, &input)?;
+    let ToolTraceOutput { edges, stats, .. } = tool_output;
+    let edges = filter_tool_call_edges(edges, &callable_items);
+    emit_typescript_tool_trace_status("TypeScript reverse caller walk", &stats, &edges);
+    Ok(edges)
+}
+
+fn build_tool_module_edges(
+    root: &Path,
+    source_files: &[PathBuf],
+) -> Result<BTreeMap<PathBuf, BTreeMap<String, BTreeSet<PathBuf>>>> {
+    if source_files.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let absolute_files = source_files
+        .iter()
+        .map(|path| root.join(path))
+        .collect::<Vec<_>>();
+    let absolute_index = absolute_files
+        .iter()
+        .zip(source_files.iter())
+        .map(|(absolute, relative)| (normalize_path(absolute), relative.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let input = ToolTraceInput {
+        mode: ToolRequestMode::ModuleGraph,
+        root: root.display().to_string(),
+        project_source_files: true,
+        source_files: absolute_files
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        items: Vec::new(),
+        seed_item_ids: Vec::new(),
+        parser_edges: BTreeMap::new(),
+    };
+    let Some(tool_output) = run_typescript_trace_helper(root, &input)? else {
+        return Ok(BTreeMap::new());
+    };
+    let mut graph: BTreeMap<PathBuf, BTreeMap<String, BTreeSet<PathBuf>>> = BTreeMap::new();
     for edge in tool_output.file_edges {
         let Some(from) = absolute_index.get(&normalize_path(Path::new(&edge.from))).cloned() else {
             continue;
@@ -880,10 +1099,39 @@ fn build_tool_module_graph(
         if from == to {
             continue;
         }
-        graph.entry(from.clone()).or_default().insert(to.clone());
-        graph.entry(to).or_default().insert(from);
+        graph
+            .entry(from.clone())
+            .or_default()
+            .entry(edge.specifier)
+            .or_default()
+            .insert(to.clone());
     }
     Ok(graph)
+}
+
+fn file_graph_from_import_edges(
+    import_edges: BTreeMap<PathBuf, BTreeMap<String, BTreeSet<PathBuf>>>,
+) -> BTreeMap<PathBuf, BTreeSet<PathBuf>> {
+    let mut graph: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
+    for (from, specifiers) in import_edges {
+        for targets in specifiers.into_values() {
+            graph.entry(from.clone()).or_default().extend(targets);
+        }
+    }
+    graph
+}
+
+fn undirected_file_graph(
+    directed: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+) -> BTreeMap<PathBuf, BTreeSet<PathBuf>> {
+    let mut graph: BTreeMap<PathBuf, BTreeSet<PathBuf>> = BTreeMap::new();
+    for (from, targets) in directed {
+        for to in targets {
+            graph.entry(from.clone()).or_default().insert(to.clone());
+            graph.entry(to).or_default().insert(from.clone());
+        }
+    }
+    graph
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -903,15 +1151,19 @@ fn decode_traceability_graph_facts(
     let facts = facts?;
     Some(
         serde_json::from_slice::<TypeScriptTraceabilityGraphFacts>(facts)
+            .map(|facts| (facts.source_graphs, facts.tool_call_edges))
+            .or_else(|_| {
+                serde_json::from_slice::<TypeScriptTraceabilityScopeFacts>(facts)
+                    .map(|facts| (facts.source_graphs, facts.tool_call_edges))
+            })
             .map_err(anyhow::Error::from)
-            .map(|facts| {
+            .map(|(source_graphs, tool_call_edges)| {
             (
-                facts
-                    .source_graphs
+                source_graphs
                     .into_iter()
                     .map(|(path, graph)| (path, graph.into_parsed()))
                     .collect(),
-                facts.tool_call_edges,
+                tool_call_edges,
             )
         }),
     )
@@ -1394,6 +1646,7 @@ fn write_embedded_tool_script(file_name: &str, contents: &str) -> Option<Embedde
 #[serde(rename_all = "snake_case")]
 enum ToolRequestMode {
     TraceEdges,
+    ReverseTraceEdges,
     ModuleGraph,
 }
 
@@ -1401,8 +1654,13 @@ enum ToolRequestMode {
 struct ToolTraceInput {
     mode: ToolRequestMode,
     root: String,
+    project_source_files: bool,
     source_files: Vec<String>,
     items: Vec<ToolTraceItemInput>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    seed_item_ids: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    parser_edges: BTreeMap<String, BTreeSet<String>>,
 }
 
 #[derive(Serialize)]
@@ -1421,6 +1679,18 @@ struct ToolTraceOutput {
     edges: Vec<ToolTraceEdge>,
     #[serde(default)]
     file_edges: Vec<ToolFileEdge>,
+    #[serde(default)]
+    stats: ToolTraceStats,
+}
+
+#[derive(Default, Deserialize)]
+struct ToolTraceStats {
+    #[serde(default)]
+    program_file_count: usize,
+    #[serde(default)]
+    tracked_file_count: usize,
+    #[serde(default)]
+    reference_query_count: usize,
 }
 
 #[derive(Deserialize)]
@@ -1433,6 +1703,7 @@ struct ToolTraceEdge {
 struct ToolFileEdge {
     from: String,
     to: String,
+    specifier: String,
 }
 
 #[cfg(test)]

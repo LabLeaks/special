@@ -187,11 +187,105 @@ pub(crate) fn build_repo_analysis_summary(
     })
 }
 
+pub(crate) fn build_bounded_repo_analysis_summary(
+    root: &Path,
+    ignore_patterns: &[String],
+    parsed: &ParsedArchitecture,
+    parsed_repo: &ParsedRepo,
+    within_paths: &[PathBuf],
+) -> Result<ArchitectureAnalysisSummary> {
+    let all_files = discover_annotation_files(DiscoveryConfig {
+        root,
+        ignore_patterns,
+    })?
+    .source_files;
+    let Some(boundary) = repo_scope::build_scope_boundary(root, &all_files, Some(within_paths))?
+    else {
+        return build_repo_analysis_summary(root, ignore_patterns, parsed, parsed_repo, None);
+    };
+    let corpus_files = boundary.matched_files();
+    status::emit_analysis_status(&format!(
+        "repo health hard analysis corpus matches {} of {} analyzable source files",
+        corpus_files.len(),
+        all_files.len()
+    ));
+    let file_ownership = ownership::index_file_ownership(parsed);
+
+    let mut repo_signals = coverage::build_repo_signals_summary();
+    status::emit_analysis_status(&format!(
+        "computing repo ownership signals from {} corpus source files",
+        corpus_files.len()
+    ));
+    unreached_code::apply_unowned_item_summary(
+        root,
+        corpus_files,
+        &file_ownership,
+        &mut repo_signals,
+    )?;
+    status::emit_analysis_status(
+        "computing duplicate-logic signals across bounded owned implementation",
+    );
+    duplication::apply_duplicate_item_summary_in_files(
+        root,
+        parsed,
+        &file_ownership,
+        Some(corpus_files),
+        &mut repo_signals,
+    )?;
+
+    status::emit_analysis_status(&format!(
+        "building language analysis contexts from {} bounded source files",
+        corpus_files.len()
+    ));
+    let repo_contexts = registry::build_repo_analysis_contexts(
+        root,
+        corpus_files,
+        None,
+        parsed_repo,
+        parsed,
+        &file_ownership,
+        true,
+    );
+    let traceability = build_repo_traceability_summary(root, corpus_files, &repo_contexts);
+    let traceability_unavailable_reason =
+        build_repo_traceability_unavailable_reason(corpus_files, &repo_contexts);
+
+    Ok(ArchitectureAnalysisSummary {
+        repo_signals: Some(repo_signals),
+        traceability,
+        traceability_unavailable_reason,
+    })
+}
+
 pub(crate) fn filter_repo_analysis_summary_to_symbol(
     symbol: &str,
     summary: &mut ArchitectureAnalysisSummary,
 ) {
     repo_scope::filter_repo_analysis_summary_to_symbol(symbol, summary);
+}
+
+pub(crate) fn filter_repo_analysis_summary_to_paths(
+    root: &Path,
+    ignore_patterns: &[String],
+    scoped_paths: &[PathBuf],
+    summary: &mut ArchitectureAnalysisSummary,
+) -> Result<()> {
+    let all_files = discover_annotation_files(DiscoveryConfig {
+        root,
+        ignore_patterns,
+    })?
+    .source_files;
+    let Some(boundary) = repo_scope::build_scope_boundary(root, &all_files, Some(scoped_paths))?
+    else {
+        return Ok(());
+    };
+    if let Some(repo_signals) = &mut summary.repo_signals {
+        repo_scope::filter_repo_signals_to_scope(&boundary, repo_signals);
+    }
+    if let Some(traceability) = &mut summary.traceability {
+        repo_scope::filter_traceability_to_scope(&boundary, traceability);
+    }
+    Ok(())
 }
 
 fn build_repo_traceability_summary(

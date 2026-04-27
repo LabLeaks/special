@@ -11,6 +11,50 @@ use tree_sitter::{Node, Parser};
 
 use crate::modules::analyze::{ModuleCouplingInput, build_dependency_summary};
 
+use super::toolchain::go_list_packages;
+
+#[derive(Default)]
+pub(super) struct GoDependencyResolver {
+    package_files: BTreeMap<String, BTreeSet<PathBuf>>,
+    tool_backed: bool,
+}
+
+impl GoDependencyResolver {
+    pub(super) fn from_project(root: &Path) -> Self {
+        let Some(packages) = go_list_packages(root) else {
+            return Self::default();
+        };
+        let mut package_files = BTreeMap::<String, BTreeSet<PathBuf>>::new();
+        for package in packages {
+            for file_name in package.go_files {
+                let full_path = package.dir.join(file_name);
+                let canonical_full_path =
+                    fs::canonicalize(&full_path).unwrap_or_else(|_| full_path.clone());
+                let indexed_path = full_path
+                    .strip_prefix(root)
+                    .map(|relative| root.join(relative))
+                    .unwrap_or(canonical_full_path);
+                package_files
+                    .entry(package.import_path.clone())
+                    .or_default()
+                    .insert(indexed_path);
+            }
+        }
+        Self {
+            package_files,
+            tool_backed: true,
+        }
+    }
+
+    pub(super) fn is_tool_backed(&self) -> bool {
+        self.tool_backed
+    }
+
+    fn resolve(&self, target: &str) -> Option<&BTreeSet<PathBuf>> {
+        self.package_files.get(target)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct GoDependencySummary {
     targets: BTreeMap<String, usize>,
@@ -19,7 +63,7 @@ pub(super) struct GoDependencySummary {
 }
 
 impl GoDependencySummary {
-    pub(super) fn observe(&mut self, root: &Path, text: &str) {
+    pub(super) fn observe(&mut self, root: &Path, text: &str, resolver: &GoDependencyResolver) {
         let mut parser = Parser::new();
         if parser
             .set_language(&tree_sitter_go::LANGUAGE.into())
@@ -34,7 +78,10 @@ impl GoDependencySummary {
         collect_import_sources(tree.root_node(), text.as_bytes(), &mut imports);
         for target in imports {
             *self.targets.entry(target.clone()).or_default() += 1;
-            let internal_files = resolve_internal_imports(root, &target);
+            let internal_files = resolver
+                .resolve(&target)
+                .cloned()
+                .unwrap_or_else(|| resolve_internal_imports(root, &target));
             if internal_files.is_empty() {
                 self.external_targets.insert(target);
             } else {

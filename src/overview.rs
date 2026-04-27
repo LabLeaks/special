@@ -16,7 +16,7 @@ use crate::model::{
     ParsedArchitecture, ParsedRepo, SpecFilter,
 };
 use crate::modules::{
-    build_module_document_from_parsed, build_module_lint_report_from_parsed,
+    RepoDocumentOptions, build_module_document_from_parsed, build_module_lint_report_from_parsed,
     build_repo_document_from_parsed,
 };
 
@@ -53,9 +53,7 @@ pub fn build_overview_document(
         version,
         &parsed_arch,
         &parsed_repo,
-        false,
-        None,
-        None,
+        RepoDocumentOptions::default(),
     )?;
     let analysis = repo.analysis;
 

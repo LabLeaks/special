@@ -10,6 +10,7 @@ use super::support::{
     write_specs,
 };
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_module_analysis_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs"]);
     write_special_toml(root);
@@ -31,6 +32,7 @@ pub fn write_traceability_module_analysis_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_module_context_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
     write_rust_toolchain_contract(root);
@@ -56,6 +58,7 @@ pub fn write_traceability_module_context_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_multiple_supports_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests"]);
     write_rust_toolchain_contract(root);
@@ -86,6 +89,7 @@ pub fn write_traceability_multiple_supports_fixture(root: &Path) {
     );
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_traceability_review_surface_fixture(root: &Path) {
     create_dirs(root, &["_project", "specs", "src", "tests/support"]);
     write_rust_toolchain_contract(root);

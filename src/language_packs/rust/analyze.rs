@@ -15,7 +15,8 @@ use crate::model::{
 use self::item_metrics::observe_rust_text;
 use crate::modules::analyze::traceability_core::{TraceabilityAnalysis, TraceabilityLanguagePack};
 use crate::modules::analyze::{
-    FileOwnership, ProviderModuleAnalysis, read_owned_file_text, visit_owned_texts,
+    FileOwnership, ProviderModuleAnalysis, emit_analysis_status, read_owned_file_text,
+    visit_owned_texts,
 };
 
 #[path = "analyze/complexity.rs"]
@@ -57,9 +58,17 @@ pub(crate) fn build_traceability_graph_facts(
 pub(crate) fn build_traceability_scope_facts(
     root: &Path,
     source_files: &[PathBuf],
+    scoped_source_files: &[PathBuf],
     parsed_repo: &ParsedRepo,
+    file_ownership: &BTreeMap<PathBuf, FileOwnership<'_>>,
 ) -> Result<Vec<u8>> {
-    traceability::build_traceability_scope_facts(root, source_files, parsed_repo)
+    traceability::build_traceability_scope_facts(
+        root,
+        source_files,
+        scoped_source_files,
+        parsed_repo,
+        file_ownership,
+    )
 }
 
 pub(crate) fn expand_traceability_closure_from_facts(
@@ -89,14 +98,14 @@ pub(crate) fn build_repo_analysis_context(
 ) -> RustRepoAnalysisContext {
     let traceability_pack =
         traceability::RustTraceabilityPack::new(toolchain::probe_local_toolchain_project(root));
-    let base_traceability_unavailable_reason = traceability_pack
-        .backward_trace_availability()
-        .unavailable_reason()
-        .map(ToString::to_string);
-    let (traceability, traceability_unavailable_reason) =
-        if !include_traceability || base_traceability_unavailable_reason.is_some() {
-            (None, base_traceability_unavailable_reason)
-        } else {
+    if include_traceability && traceability_pack.is_parser_only() {
+        emit_analysis_status(
+            "Rust analyzer enrichment degraded: `rust-analyzer` is unavailable, so health traceability will use parser-resolved Rust call edges only",
+        );
+    }
+    let (traceability, traceability_unavailable_reason) = if !include_traceability {
+        (None, None)
+    } else {
             let analysis = if let Some(scoped_source_files) =
                 scoped_source_files.filter(|files| !files.is_empty())
             {
@@ -123,7 +132,7 @@ pub(crate) fn build_repo_analysis_context(
                 Ok(traceability) => (Some(traceability), None),
                 Err(error) => (None, Some(error.to_string())),
             }
-        };
+    };
     RustRepoAnalysisContext {
         traceability,
         traceability_pack,
@@ -135,6 +144,7 @@ pub(crate) fn analysis_environment_fingerprint(root: &Path) -> String {
     toolchain::analysis_environment_fingerprint(root)
 }
 
+// @applies ADAPTER.FACTS_TO_MODEL
 pub(crate) fn analyze_module(
     root: &Path,
     implementations: &[&ImplementRef],

@@ -1,10 +1,19 @@
+#[cfg(test)]
+use std::cell::Cell;
 /**
 @module SPECIAL.MODULES.ANALYZE.TRACEABILITY_CORE
 Defines the shared item-evidence traceability IR used by language packs to contribute one combined test-rooted trace graph without hardcoding parser or toolchain details into repo or module projections. This core owns the portable item/test/evidence shape, graph propagation, availability contract, and classification rules, while language-specific adapters decide whether backward trace can run at all and only populate the graph when their required local tool is available.
 */
 // @fileimplements SPECIAL.MODULES.ANALYZE.TRACEABILITY_CORE
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
+use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use flate2::read::GzDecoder;
 
 use crate::model::{
     ArchitectureTraceabilityItem, ArchitectureTraceabilitySummary, ImplementRef, ModuleItemKind,
@@ -13,6 +22,16 @@ use crate::model::{
 use crate::syntax::ParsedSourceGraph;
 
 use super::{FileOwnership, display_path};
+
+#[cfg(test)]
+thread_local! {
+    static RUST_REFERENCE_KERNEL_TEST_OPT_IN: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn use_rust_reference_traceability_kernel_for_tests() {
+    RUST_REFERENCE_KERNEL_TEST_OPT_IN.with(|opt_in| opt_in.set(true));
+}
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TraceabilityInputs {
@@ -36,7 +55,7 @@ pub(crate) struct TraceGraph {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ReverseClosureReference {
     pub(crate) target_ids: BTreeSet<String>,
     pub(crate) node_ids: BTreeSet<String>,
@@ -55,7 +74,7 @@ pub(crate) struct ReverseClosureReference {
 /// Pack-specific execution projections, such as file closures, stay downstream
 /// of this item-kernel contract.
 #[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProjectedTraceabilityContract {
     pub(crate) projected_item_ids: BTreeSet<String>,
     pub(crate) preserved_reverse_closure_target_ids: BTreeSet<String>,
@@ -64,10 +83,395 @@ pub(crate) struct ProjectedTraceabilityContract {
 /// Shared exact reference object derived from a projected-contract proof
 /// object plus the full graph.
 #[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ProjectedTraceabilityReference {
     pub(crate) contract: ProjectedTraceabilityContract,
     pub(crate) exact_reverse_closure: ReverseClosureReference,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ProjectedTraceabilityKernelInput {
+    pub(crate) schema_version: u32,
+    pub(crate) projected_item_ids: BTreeSet<String>,
+    pub(crate) preserved_reverse_closure_target_ids: Option<BTreeSet<String>>,
+    pub(crate) edges: BTreeMap<String, BTreeSet<String>>,
+    pub(crate) support_root_ids: BTreeSet<String>,
+}
+
+impl ProjectedTraceabilityKernelInput {
+    pub(crate) const SCHEMA_VERSION: u32 = 1;
+
+    fn from_projected_items_and_graph(
+        projected_item_ids: BTreeSet<String>,
+        graph: &TraceGraph,
+    ) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            projected_item_ids,
+            preserved_reverse_closure_target_ids: None,
+            edges: graph.edges.clone(),
+            support_root_ids: graph.root_supports.keys().cloned().collect(),
+        }
+    }
+
+    fn from_contract_and_graph(
+        contract: ProjectedTraceabilityContract,
+        graph: &TraceGraph,
+    ) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            projected_item_ids: contract.projected_item_ids,
+            preserved_reverse_closure_target_ids: Some(
+                contract.preserved_reverse_closure_target_ids,
+            ),
+            edges: graph.edges.clone(),
+            support_root_ids: graph.root_supports.keys().cloned().collect(),
+        }
+    }
+
+    fn as_trace_graph(&self) -> TraceGraph {
+        TraceGraph {
+            edges: self.edges.clone(),
+            root_supports: self
+                .support_root_ids
+                .iter()
+                .map(|support_root_id| {
+                    (
+                        support_root_id.clone(),
+                        TraceabilityItemSupport::kernel_placeholder(support_root_id),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ProjectedTraceabilityKernelOutput {
+    pub(crate) schema_version: u32,
+    pub(crate) reference: ProjectedTraceabilityReference,
+}
+
+/// Shared projected traceability kernel.
+///
+/// Language packs adapt facts into `TraceGraph` plus projected item ids, then
+/// call this boundary instead of reimplementing the support-root and
+/// reverse-closure rules pack-by-pack. Production execution must go through the
+/// Lean kernel; the Rust implementation is a debug/test oracle only.
+pub(crate) trait ProjectedTraceabilityKernel {
+    fn derive(
+        &self,
+        input: ProjectedTraceabilityKernelInput,
+    ) -> Result<ProjectedTraceabilityKernelOutput, String>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RustReferenceTraceabilityKernel;
+
+impl ProjectedTraceabilityKernel for RustReferenceTraceabilityKernel {
+    fn derive(
+        &self,
+        input: ProjectedTraceabilityKernelInput,
+    ) -> Result<ProjectedTraceabilityKernelOutput, String> {
+        if input.schema_version != ProjectedTraceabilityKernelInput::SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported traceability kernel schema version {}",
+                input.schema_version
+            ));
+        }
+        let graph = input.as_trace_graph();
+        let preserved_reverse_closure_target_ids = input
+            .preserved_reverse_closure_target_ids
+            .unwrap_or_else(|| {
+                collect_support_root_ids(input.projected_item_ids.iter().cloned(), &graph)
+                    .into_iter()
+                    .filter_map(|(item_id, supports)| (!supports.is_empty()).then_some(item_id))
+                    .collect()
+            });
+
+        let contract = ProjectedTraceabilityContract {
+            projected_item_ids: input.projected_item_ids,
+            preserved_reverse_closure_target_ids,
+        };
+        let exact_reverse_closure = build_reverse_closure_reference(
+            contract
+                .preserved_reverse_closure_target_ids
+                .iter()
+                .cloned(),
+            &graph,
+        );
+        let reference = ProjectedTraceabilityReference {
+            contract,
+            exact_reverse_closure,
+        };
+
+        Ok(ProjectedTraceabilityKernelOutput {
+            schema_version: ProjectedTraceabilityKernelInput::SCHEMA_VERSION,
+            reference,
+        })
+    }
+}
+
+static RUST_REFERENCE_TRACEABILITY_KERNEL: RustReferenceTraceabilityKernel =
+    RustReferenceTraceabilityKernel;
+
+#[derive(Debug, Clone, Copy)]
+struct LeanProcessTraceabilityKernel;
+
+impl ProjectedTraceabilityKernel for LeanProcessTraceabilityKernel {
+    fn derive(
+        &self,
+        input: ProjectedTraceabilityKernelInput,
+    ) -> Result<ProjectedTraceabilityKernelOutput, String> {
+        derive_with_lean_process(input)
+    }
+}
+
+fn derive_projected_traceability_kernel(
+    input: ProjectedTraceabilityKernelInput,
+) -> Result<ProjectedTraceabilityKernelOutput, String> {
+    match env::var("SPECIAL_TRACEABILITY_KERNEL") {
+        Ok(value) => derive_projected_traceability_kernel_for_selector(input, Some(value.as_str())),
+        Err(env::VarError::NotPresent) => {
+            derive_projected_traceability_kernel_for_selector(input, None)
+        }
+        Err(error) => Err(format!(
+            "could not read SPECIAL_TRACEABILITY_KERNEL: {error}"
+        )),
+    }
+}
+
+fn derive_projected_traceability_kernel_for_selector(
+    input: ProjectedTraceabilityKernelInput,
+    selector: Option<&str>,
+) -> Result<ProjectedTraceabilityKernelOutput, String> {
+    match selector {
+        Some("rust-reference") => derive_rust_reference_traceability_kernel(input),
+        Some(value) if value.is_empty() || value == "lean" => {
+            LeanProcessTraceabilityKernel.derive(input)
+        }
+        Some(value) => Err(format!(
+            "unsupported SPECIAL_TRACEABILITY_KERNEL value `{value}`; expected `lean` or debug/test-only `rust-reference`"
+        )),
+        None => {
+            #[cfg(test)]
+            {
+                if RUST_REFERENCE_KERNEL_TEST_OPT_IN.with(Cell::get) {
+                    return RUST_REFERENCE_TRACEABILITY_KERNEL.derive(input);
+                }
+            }
+            LeanProcessTraceabilityKernel.derive(input)
+        }
+    }
+}
+
+fn derive_rust_reference_traceability_kernel(
+    input: ProjectedTraceabilityKernelInput,
+) -> Result<ProjectedTraceabilityKernelOutput, String> {
+    if cfg!(debug_assertions) {
+        RUST_REFERENCE_TRACEABILITY_KERNEL.derive(input)
+    } else {
+        Err(
+            "SPECIAL_TRACEABILITY_KERNEL=rust-reference is only available in debug/test builds; production traceability requires the Lean kernel"
+                .to_string(),
+        )
+    }
+}
+
+fn derive_with_lean_process(
+    input: ProjectedTraceabilityKernelInput,
+) -> Result<ProjectedTraceabilityKernelOutput, String> {
+    let payload = serde_json::to_string(&input)
+        .map_err(|error| format!("could not encode Lean kernel input: {error}"))?;
+    let mut command = lean_kernel_command()?;
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not start Lean traceability kernel: {error}"))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "Lean traceability kernel stdin was unavailable".to_string())?
+        .write_all(payload.as_bytes())
+        .map_err(|error| format!("could not send input to Lean traceability kernel: {error}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("could not read Lean traceability kernel output: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Lean traceability kernel exited with {}; stderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|error| format!("Lean traceability kernel emitted non-UTF-8 output: {error}"))?;
+    let json_line = stdout
+        .lines()
+        .rev()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("Lean traceability kernel did not emit JSON output:\n{stdout}"))?;
+    serde_json::from_str(json_line)
+        .map_err(|error| format!("could not decode Lean traceability kernel output: {error}"))
+}
+
+fn lean_kernel_command() -> Result<Command, String> {
+    if let Ok(path) = env::var("SPECIAL_TRACEABILITY_KERNEL_EXE") {
+        if path.is_empty() {
+            return Err("SPECIAL_TRACEABILITY_KERNEL_EXE was set to an empty path".to_string());
+        }
+        return Ok(Command::new(path));
+    }
+
+    if let Some(path) = embedded_lean_kernel_executable()? {
+        return Ok(Command::new(path));
+    }
+
+    Err(
+        "Lean traceability kernel was requested, but this binary was not built with \
+         SPECIAL_BUILD_LEAN_KERNEL=1 and SPECIAL_TRACEABILITY_KERNEL_EXE was not set"
+            .to_string(),
+    )
+}
+
+#[cfg(special_embedded_lean_kernel)]
+fn embedded_lean_kernel_bytes() -> &'static [u8] {
+    include_bytes!(env!("SPECIAL_EMBEDDED_LEAN_KERNEL_PATH"))
+}
+
+#[cfg(not(special_embedded_lean_kernel))]
+fn embedded_lean_kernel_bytes() -> &'static [u8] {
+    &[]
+}
+
+#[cfg(special_embedded_lean_kernel)]
+fn embedded_lean_kernel_filename() -> &'static str {
+    env!("SPECIAL_EMBEDDED_LEAN_KERNEL_FILENAME")
+}
+
+#[cfg(not(special_embedded_lean_kernel))]
+fn embedded_lean_kernel_filename() -> &'static str {
+    ""
+}
+
+#[cfg(special_embedded_lean_kernel)]
+fn embedded_lean_kernel_uncompressed_len() -> u64 {
+    env!("SPECIAL_EMBEDDED_LEAN_KERNEL_UNCOMPRESSED_LEN")
+        .parse()
+        .expect("embedded Lean kernel uncompressed length should be a u64")
+}
+
+#[cfg(not(special_embedded_lean_kernel))]
+fn embedded_lean_kernel_uncompressed_len() -> u64 {
+    0
+}
+
+fn embedded_lean_kernel_executable() -> Result<Option<PathBuf>, String> {
+    let bytes = embedded_lean_kernel_bytes();
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let kernel_hash = hasher.finish();
+
+    let path = env::temp_dir().join(format!(
+        "special-{}-{kernel_hash:016x}-{}",
+        env!("CARGO_PKG_VERSION"),
+        embedded_lean_kernel_filename()
+    ));
+    let expected_len = embedded_lean_kernel_uncompressed_len();
+    if fs::metadata(&path)
+        .map(|metadata| metadata.len() == expected_len)
+        .unwrap_or(false)
+    {
+        return Ok(Some(path));
+    }
+    let temp_path = path.with_extension(format!("tmp-{}", std::process::id()));
+    let decompressed = decompress_embedded_lean_kernel(bytes, expected_len)?;
+    fs::write(&temp_path, decompressed).map_err(|error| {
+        format!(
+            "could not materialize embedded Lean traceability kernel at {}: {error}",
+            temp_path.display()
+        )
+    })?;
+    make_executable(&temp_path)?;
+    if let Err(error) = fs::rename(&temp_path, &path) {
+        if fs::metadata(&path)
+            .map(|metadata| metadata.len() == expected_len)
+            .unwrap_or(false)
+        {
+            let _ = fs::remove_file(&temp_path);
+            return Ok(Some(path));
+        }
+        return Err(format!(
+            "could not install embedded Lean traceability kernel at {}: {error}",
+            path.display()
+        ));
+    }
+    Ok(Some(path))
+}
+
+fn decompress_embedded_lean_kernel(bytes: &[u8], expected_len: u64) -> Result<Vec<u8>, String> {
+    let mut decoder = GzDecoder::new(bytes);
+    let mut decompressed = Vec::with_capacity(expected_len.min(usize::MAX as u64) as usize);
+    decoder.read_to_end(&mut decompressed).map_err(|error| {
+        format!("could not decompress embedded Lean traceability kernel: {error}")
+    })?;
+    if decompressed.len() as u64 != expected_len {
+        return Err(format!(
+            "embedded Lean traceability kernel decompressed to {} bytes, expected {expected_len}",
+            decompressed.len()
+        ));
+    }
+    Ok(decompressed)
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path)
+        .map_err(|error| format!("could not read permissions for {}: {error}", path.display()))?
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).map_err(|error| {
+        format!(
+            "could not make embedded Lean traceability kernel executable at {}: {error}",
+            path.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn build_projected_traceability_contract(
+    projected_item_ids: BTreeSet<String>,
+    graph: &TraceGraph,
+) -> Result<ProjectedTraceabilityContract, String> {
+    Ok(
+        build_projected_traceability_reference_from_projected_items(projected_item_ids, graph)?
+            .contract,
+    )
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+// @applies TRACEABILITY.SCOPED_PROJECTED_KERNEL
+pub(crate) fn build_projected_traceability_reference_from_projected_items(
+    projected_item_ids: BTreeSet<String>,
+    graph: &TraceGraph,
+) -> Result<ProjectedTraceabilityReference, String> {
+    let input =
+        ProjectedTraceabilityKernelInput::from_projected_items_and_graph(projected_item_ids, graph);
+    derive_projected_traceability_kernel(input).map(|output| output.reference)
 }
 
 /// Shared proof-protocol adapter for language-pack exact contracts.
@@ -101,6 +505,17 @@ pub(crate) struct TraceabilityItemSupport {
 }
 
 impl TraceabilityItemSupport {
+    fn kernel_placeholder(stable_id: &str) -> Self {
+        Self {
+            name: stable_id.to_string(),
+            has_item_scoped_support: false,
+            has_file_scoped_support: false,
+            current_specs: BTreeSet::new(),
+            planned_specs: BTreeSet::new(),
+            deprecated_specs: BTreeSet::new(),
+        }
+    }
+
     fn merge_into(self, evidence: &mut ItemTraceabilityEvidence) {
         if self.current_specs.is_empty()
             && self.planned_specs.is_empty()
@@ -132,26 +547,7 @@ pub(crate) struct TraceabilityOwnedItem {
     pub(crate) mediated_reason: Option<&'static str>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct BackwardTraceAvailability {
-    unavailable_reason: Option<&'static str>,
-}
-
-impl BackwardTraceAvailability {
-    pub(crate) fn unavailable(reason: &'static str) -> Self {
-        Self {
-            unavailable_reason: Some(reason),
-        }
-    }
-
-    pub(crate) fn unavailable_reason(&self) -> Option<&'static str> {
-        self.unavailable_reason
-    }
-}
-
 pub(crate) trait TraceabilityLanguagePack {
-    fn backward_trace_availability(&self) -> BackwardTraceAvailability;
-
     fn owned_items_for_implementations(
         &self,
         root: &Path,
@@ -196,18 +592,9 @@ pub(crate) fn build_traceability_analysis(inputs: TraceabilityInputs) -> Traceab
 pub(crate) fn build_projected_traceability_reference(
     contract: ProjectedTraceabilityContract,
     graph: &TraceGraph,
-) -> ProjectedTraceabilityReference {
-    let exact_reverse_closure = build_reverse_closure_reference(
-        contract
-            .preserved_reverse_closure_target_ids
-            .iter()
-            .cloned(),
-        graph,
-    );
-    ProjectedTraceabilityReference {
-        contract,
-        exact_reverse_closure,
-    }
+) -> Result<ProjectedTraceabilityReference, String> {
+    let input = ProjectedTraceabilityKernelInput::from_contract_and_graph(contract, graph);
+    derive_projected_traceability_kernel(input).map(|output| output.reference)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -413,12 +800,17 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
+    use std::env;
 
     use super::{
-        ProjectedTraceabilityContract, ProjectedTraceabilityReference, ReverseClosureReference,
-        TraceGraph, TraceabilityItemSupport, collect_support_root_ids,
-        normalize_path_for_known_sources, preserved_graph_item_ids_for_reference,
-        preserved_item_ids_for_reference,
+        ProjectedTraceabilityContract, ProjectedTraceabilityKernel,
+        ProjectedTraceabilityKernelInput, ProjectedTraceabilityReference,
+        RUST_REFERENCE_TRACEABILITY_KERNEL, ReverseClosureReference, TraceGraph,
+        TraceabilityItemSupport, build_projected_traceability_contract,
+        build_projected_traceability_reference, collect_support_root_ids,
+        derive_projected_traceability_kernel_for_selector, normalize_path_for_known_sources,
+        preserved_graph_item_ids_for_reference, preserved_item_ids_for_reference,
+        use_rust_reference_traceability_kernel_for_tests,
     };
     use crate::model::{
         ArchitectureTraceabilityItem, ArchitectureTraceabilitySummary, ModuleItemKind,
@@ -458,6 +850,510 @@ mod tests {
             ["projected::orphan".to_string(), "target".to_string()]
                 .into_iter()
                 .collect()
+        );
+    }
+
+    // @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.LEAN_KERNEL
+    #[test]
+    fn default_projected_kernel_requires_lean_without_test_opt_in() {
+        let input = ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+            ["app::live".to_string()].into_iter().collect(),
+            &TraceGraph::default(),
+        );
+
+        let result = derive_projected_traceability_kernel_for_selector(input, None);
+        if let Err(error) = result {
+            assert!(
+                error.contains("Lean traceability kernel was requested")
+                    || error.contains("Lean traceability kernel"),
+                "default kernel failure should be a Lean-kernel failure, got {error}"
+            );
+        }
+    }
+
+    // @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.LEAN_KERNEL
+    #[test]
+    fn old_rust_and_auto_kernel_selectors_are_rejected() {
+        for selector in ["rust", "auto"] {
+            let input = ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::live".to_string()].into_iter().collect(),
+                &TraceGraph::default(),
+            );
+
+            let error = derive_projected_traceability_kernel_for_selector(input, Some(selector))
+                .expect_err("old non-Lean selectors should be rejected");
+            assert!(
+                error.contains("expected `lean` or debug/test-only `rust-reference`"),
+                "unexpected selector error for {selector}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn projected_traceability_kernel_targets_only_supported_projected_items() {
+        use_rust_reference_traceability_kernel_for_tests();
+
+        let graph = TraceGraph {
+            edges: [
+                (
+                    "tests::test_live".to_string(),
+                    ["app::live".to_string()].into_iter().collect(),
+                ),
+                (
+                    "tests::test_helper".to_string(),
+                    ["app::helper".to_string()].into_iter().collect(),
+                ),
+                (
+                    "app::helper".to_string(),
+                    ["app::live".to_string()].into_iter().collect(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            root_supports: [(
+                "tests::test_live".to_string(),
+                TraceabilityItemSupport {
+                    name: "tests::test_live".to_string(),
+                    has_item_scoped_support: true,
+                    has_file_scoped_support: false,
+                    current_specs: ["APP.LIVE".to_string()].into_iter().collect(),
+                    planned_specs: BTreeSet::new(),
+                    deprecated_specs: BTreeSet::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let contract = build_projected_traceability_contract(
+            ["app::live".to_string(), "app::orphan".to_string()]
+                .into_iter()
+                .collect(),
+            &graph,
+        )
+        .expect("projected contract should derive");
+
+        assert_eq!(
+            contract.projected_item_ids,
+            ["app::live".to_string(), "app::orphan".to_string()]
+                .into_iter()
+                .collect()
+        );
+        assert_eq!(
+            contract.preserved_reverse_closure_target_ids,
+            ["app::live".to_string()].into_iter().collect()
+        );
+
+        let reference = build_projected_traceability_reference(contract, &graph)
+            .expect("reference should derive");
+
+        assert_eq!(
+            reference.exact_reverse_closure.node_ids,
+            [
+                "app::live".to_string(),
+                "app::helper".to_string(),
+                "tests::test_live".to_string(),
+                "tests::test_helper".to_string(),
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[test]
+    fn projected_traceability_kernel_wire_schema_round_trips() {
+        let graph = TraceGraph {
+            edges: [(
+                "tests::test_live".to_string(),
+                ["app::live".to_string()].into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
+            root_supports: [(
+                "tests::test_live".to_string(),
+                TraceabilityItemSupport {
+                    name: "tests::test_live".to_string(),
+                    has_item_scoped_support: true,
+                    has_file_scoped_support: false,
+                    current_specs: ["APP.LIVE".to_string()].into_iter().collect(),
+                    planned_specs: BTreeSet::new(),
+                    deprecated_specs: BTreeSet::new(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let input = ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+            ["app::live".to_string(), "app::orphan".to_string()]
+                .into_iter()
+                .collect(),
+            &graph,
+        );
+        let input_json = serde_json::to_value(&input).expect("kernel input should serialize");
+
+        assert_eq!(input_json["schema_version"], 1);
+        assert_eq!(
+            input_json["preserved_reverse_closure_target_ids"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            input_json["support_root_ids"],
+            serde_json::json!(["tests::test_live"])
+        );
+
+        let decoded_input: ProjectedTraceabilityKernelInput =
+            serde_json::from_value(input_json).expect("kernel input should deserialize");
+        let output = RUST_REFERENCE_TRACEABILITY_KERNEL
+            .derive(decoded_input)
+            .expect("reference kernel should derive output");
+        let output_json = serde_json::to_value(&output).expect("kernel output should serialize");
+
+        assert_eq!(output_json["schema_version"], 1);
+        assert_eq!(
+            output_json["reference"]["contract"]["preserved_reverse_closure_target_ids"],
+            serde_json::json!(["app::live"])
+        );
+
+        let decoded_output: super::ProjectedTraceabilityKernelOutput =
+            serde_json::from_value(output_json).expect("kernel output should deserialize");
+        assert_eq!(decoded_output, output);
+    }
+
+    // @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.LEAN_KERNEL
+    #[test]
+    fn projected_traceability_lean_kernel_matches_rust_reference_cases() {
+        if !lean_kernel_available_for_equivalence_test() {
+            return;
+        }
+
+        for input in projected_kernel_equivalence_cases() {
+            assert_lean_kernel_matches_rust_reference(input);
+        }
+    }
+
+    // @verifies SPECIAL.HEALTH_COMMAND.TRACEABILITY.LEAN_KERNEL.PROVEN_EXECUTABLE
+    #[test]
+    fn projected_traceability_kernel_default_uses_lean_when_available() {
+        if !lean_kernel_available_for_equivalence_test() {
+            return;
+        }
+
+        let input = ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+            ["app::live".to_string()].into_iter().collect(),
+            &TraceGraph::default(),
+        );
+        super::derive_projected_traceability_kernel(input)
+            .expect("available Lean kernel must run by default");
+    }
+
+    fn lean_kernel_available_for_equivalence_test() -> bool {
+        if cfg!(special_embedded_lean_kernel) {
+            return true;
+        }
+        if env::var("SPECIAL_TRACEABILITY_KERNEL_EXE").is_ok_and(|path| !path.is_empty()) {
+            return true;
+        }
+        if env::var("SPECIAL_REQUIRE_LEAN_KERNEL_TESTS").is_ok() {
+            panic!(
+                "SPECIAL_REQUIRE_LEAN_KERNEL_TESTS was set, but no embedded Lean kernel is present \
+                 and SPECIAL_TRACEABILITY_KERNEL_EXE was not set"
+            );
+        }
+        eprintln!(
+            "skipping Lean kernel equivalence test: set SPECIAL_TRACEABILITY_KERNEL_EXE or build \
+             with SPECIAL_BUILD_LEAN_KERNEL=1"
+        );
+        false
+    }
+
+    fn assert_lean_kernel_matches_rust_reference(input: ProjectedTraceabilityKernelInput) {
+        let expected = RUST_REFERENCE_TRACEABILITY_KERNEL
+            .derive(input.clone())
+            .expect("Rust reference kernel should derive output");
+        let actual = super::LeanProcessTraceabilityKernel
+            .derive(input)
+            .expect("Lean kernel should derive output");
+
+        assert_eq!(actual, expected);
+    }
+
+    fn projected_kernel_equivalence_cases() -> Vec<ProjectedTraceabilityKernelInput> {
+        vec![
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::live".to_string(), "app::orphan".to_string()]
+                    .into_iter()
+                    .collect(),
+                &TraceGraph {
+                    edges: [
+                        (
+                            "tests::test_live".to_string(),
+                            ["app::live".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "tests::test_helper".to_string(),
+                            ["app::helper".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::helper".to_string(),
+                            ["app::live".to_string()].into_iter().collect(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [(
+                        "tests::test_live".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("tests::test_live"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_contract_and_graph(
+                ProjectedTraceabilityContract {
+                    projected_item_ids: ["app::projected".to_string()].into_iter().collect(),
+                    preserved_reverse_closure_target_ids: ["app::leaf".to_string()]
+                        .into_iter()
+                        .collect(),
+                },
+                &TraceGraph {
+                    edges: [
+                        (
+                            "tests::test_entry".to_string(),
+                            ["app::entry".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::entry".to_string(),
+                            ["app::leaf".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::noise".to_string(),
+                            ["app::leaf".to_string()].into_iter().collect(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [(
+                        "tests::test_entry".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("tests::test_entry"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::left".to_string(), "app::right".to_string()]
+                    .into_iter()
+                    .collect(),
+                &TraceGraph {
+                    edges: [
+                        (
+                            "tests::test_left".to_string(),
+                            ["app::left".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "tests::test_right".to_string(),
+                            ["app::right".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::left".to_string(),
+                            ["app::right".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::right".to_string(),
+                            ["app::left".to_string()].into_iter().collect(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [
+                        (
+                            "tests::test_left".to_string(),
+                            TraceabilityItemSupport::kernel_placeholder("tests::test_left"),
+                        ),
+                        (
+                            "tests::test_right".to_string(),
+                            TraceabilityItemSupport::kernel_placeholder("tests::test_right"),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::orphan".to_string()].into_iter().collect(),
+                &TraceGraph {
+                    edges: BTreeMap::new(),
+                    root_supports: BTreeMap::new(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::root".to_string()].into_iter().collect(),
+                &TraceGraph {
+                    edges: BTreeMap::new(),
+                    root_supports: [(
+                        "app::root".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("app::root"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::recursive".to_string()].into_iter().collect(),
+                &TraceGraph {
+                    edges: [(
+                        "app::recursive".to_string(),
+                        ["app::recursive".to_string()].into_iter().collect(),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [(
+                        "app::recursive".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("app::recursive"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                ["app::leaf".to_string()].into_iter().collect(),
+                &TraceGraph {
+                    edges: [
+                        (
+                            "tests::left".to_string(),
+                            ["app::mid_left".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "tests::right".to_string(),
+                            ["app::mid_right".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::mid_left".to_string(),
+                            ["app::leaf".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::mid_right".to_string(),
+                            ["app::leaf".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "tests::noise".to_string(),
+                            ["app::noise".to_string()].into_iter().collect(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [
+                        (
+                            "tests::left".to_string(),
+                            TraceabilityItemSupport::kernel_placeholder("tests::left"),
+                        ),
+                        (
+                            "tests::right".to_string(),
+                            TraceabilityItemSupport::kernel_placeholder("tests::right"),
+                        ),
+                        (
+                            "tests::noise".to_string(),
+                            TraceabilityItemSupport::kernel_placeholder("tests::noise"),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_contract_and_graph(
+                ProjectedTraceabilityContract {
+                    projected_item_ids: ["app::projected".to_string()].into_iter().collect(),
+                    preserved_reverse_closure_target_ids: BTreeSet::new(),
+                },
+                &TraceGraph {
+                    edges: [(
+                        "tests::projected".to_string(),
+                        ["app::projected".to_string()].into_iter().collect(),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [(
+                        "tests::projected".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("tests::projected"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_contract_and_graph(
+                ProjectedTraceabilityContract {
+                    projected_item_ids: ["app::projected".to_string()].into_iter().collect(),
+                    preserved_reverse_closure_target_ids: ["app::external".to_string()]
+                        .into_iter()
+                        .collect(),
+                },
+                &TraceGraph {
+                    edges: [(
+                        "tests::external".to_string(),
+                        ["app::external".to_string()].into_iter().collect(),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [(
+                        "tests::external".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("tests::external"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+            ProjectedTraceabilityKernelInput::from_projected_items_and_graph(
+                [
+                    "app::supported_cycle".to_string(),
+                    "app::unsupported_cycle".to_string(),
+                ]
+                .into_iter()
+                .collect(),
+                &TraceGraph {
+                    edges: [
+                        (
+                            "tests::supported_cycle".to_string(),
+                            ["app::supported_cycle".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::supported_cycle".to_string(),
+                            ["app::unsupported_cycle".to_string()].into_iter().collect(),
+                        ),
+                        (
+                            "app::unsupported_cycle".to_string(),
+                            ["app::supported_cycle".to_string()].into_iter().collect(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    root_supports: [(
+                        "tests::supported_cycle".to_string(),
+                        TraceabilityItemSupport::kernel_placeholder("tests::supported_cycle"),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ),
+        ]
+    }
+
+    #[test]
+    fn projected_traceability_kernel_wire_schema_honors_explicit_contract_targets() {
+        use_rust_reference_traceability_kernel_for_tests();
+
+        let graph = TraceGraph {
+            edges: BTreeMap::new(),
+            root_supports: BTreeMap::new(),
+        };
+        let contract = ProjectedTraceabilityContract {
+            projected_item_ids: ["app::orphan".to_string()].into_iter().collect(),
+            preserved_reverse_closure_target_ids: ["app::orphan".to_string()].into_iter().collect(),
+        };
+        let reference = build_projected_traceability_reference(contract, &graph)
+            .expect("reference should derive");
+
+        assert_eq!(
+            reference.exact_reverse_closure.node_ids,
+            ["app::orphan".to_string()].into_iter().collect()
         );
     }
 
@@ -828,12 +1724,21 @@ fn build_verify_indexes(
         if let Some(body_location) = &verify.body_location {
             let normalized_path =
                 normalize_support_path_for_known_sources(&body_location.path, known_source_paths);
-            let resolved_line = verify
+            let resolved_line = match verify
                 .body
                 .as_deref()
                 .and_then(|body| parse_body_start_line(&normalized_path, body))
-                .map(|start_line| body_location.line + start_line - 1)
-                .unwrap_or(body_location.line);
+            {
+                Some(0) => {
+                    panic!("parse_body_start_line must return 1-based source lines, got 0")
+                }
+                Some(start_line) => body_location
+                    .line
+                    .checked_add(start_line)
+                    .and_then(|line| line.checked_sub(1))
+                    .expect("resolved verify body line should fit usize"),
+                None => body_location.line,
+            };
             for target_line in
                 body_location.line.min(resolved_line)..=body_location.line.max(resolved_line)
             {

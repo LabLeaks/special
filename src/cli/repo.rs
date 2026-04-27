@@ -12,17 +12,34 @@ use std::process::ExitCode;
 use anyhow::{Result, bail};
 use clap::Args;
 
+use super::common::{report_cache_stats, resolve_cli_paths};
 use super::status::{CommandStatus, StatusStep};
-use crate::cache::{format_cache_stats_summary, reset_cache_stats, with_cache_status_notifier};
+use crate::cache::{reset_cache_stats, with_cache_status_notifier};
 use crate::config::resolve_project_root;
 use crate::discovery::{DiscoveryConfig, discover_annotation_files};
-use crate::modules::{analyze::with_analysis_status_notifier, build_repo_document};
+use crate::modules::{
+    RepoDocumentOptions, analyze::with_analysis_status_notifier, build_repo_document,
+};
 use crate::render::{render_lint_text, render_repo_html, render_repo_json, render_repo_text};
 
 #[derive(Debug, Args)]
 pub(super) struct HealthArgs {
-    #[arg(value_name = "PATH")]
-    paths: Vec<PathBuf>,
+    #[arg(value_name = "PATH", hide = true)]
+    positional_paths: Vec<PathBuf>,
+
+    #[arg(
+        long = "target",
+        value_name = "PATH",
+        help = "Limit the current health view to one file or subtree"
+    )]
+    targets: Vec<PathBuf>,
+
+    #[arg(
+        long = "within",
+        value_name = "PATH",
+        help = "Limit the analysis corpus used to build the current health view"
+    )]
+    within: Vec<PathBuf>,
 
     #[arg(
         long = "symbol",
@@ -67,29 +84,32 @@ const HEALTH_PLAN: &[StatusStep] = &[
     StatusStep::new("rendering output", 1),
 ];
 
+// @applies COMMAND.PROJECTION_PIPELINE
 pub(super) fn execute_health(args: HealthArgs, current_dir: &Path) -> Result<ExitCode> {
     let status = CommandStatus::with_plan("special health", HEALTH_PLAN);
     reset_cache_stats();
     status.phase("resolving project root");
+    if !args.positional_paths.is_empty() {
+        bail!(
+            "health path scopes must use --target PATH; try `special health --target {}`",
+            args.positional_paths[0].display()
+        );
+    }
     let resolution = resolve_project_root(current_dir)?;
     if let Some(warning) = resolution.warning() {
         eprintln!("{warning}");
     }
 
     let root = resolution.root.clone();
-    let scope_paths = args
-        .paths
-        .iter()
-        .map(|path| {
-            if path.is_absolute() {
-                path.clone()
-            } else {
-                current_dir.join(path)
-            }
-        })
-        .collect::<Vec<_>>();
-    if args.symbol.is_some() && scope_paths.len() != 1 {
-        bail!("--symbol requires exactly one PATH");
+    let target_paths = resolve_cli_paths(current_dir, &args.targets);
+    let within_paths = resolve_cli_paths(current_dir, &args.within);
+    let view_scope_paths = if target_paths.is_empty() && !within_paths.is_empty() {
+        within_paths.clone()
+    } else {
+        target_paths.clone()
+    };
+    if args.symbol.is_some() && target_paths.len() != 1 {
+        bail!("--symbol requires exactly one --target path");
     }
 
     status.phase("discovering analyzable files");
@@ -102,11 +122,11 @@ pub(super) fn execute_health(args: HealthArgs, current_dir: &Path) -> Result<Exi
         discovered.source_files.len(),
         discovered.markdown_files.len()
     ));
-    if !scope_paths.is_empty() {
+    if !view_scope_paths.is_empty() {
         let scoped_file_count = discovered
             .source_files
             .iter()
-            .filter(|path| scope_matches(path, &scope_paths))
+            .filter(|path| scope_matches(path, &view_scope_paths))
             .count();
         let symbol_suffix = args
             .symbol
@@ -114,10 +134,22 @@ pub(super) fn execute_health(args: HealthArgs, current_dir: &Path) -> Result<Exi
             .map(|symbol| format!(", symbol `{symbol}`"))
             .unwrap_or_default();
         status.note(&format!(
-            "scope covers {} source files across {} path(s){}",
+            "target covers {} source files across {} path(s){}",
             scoped_file_count,
-            scope_paths.len(),
+            view_scope_paths.len(),
             symbol_suffix
+        ));
+    }
+    if !within_paths.is_empty() {
+        let within_file_count = discovered
+            .source_files
+            .iter()
+            .filter(|path| scope_matches(path, &within_paths))
+            .count();
+        status.note(&format!(
+            "analysis corpus covers {} source files across {} path(s)",
+            within_file_count,
+            within_paths.len()
         ));
     }
 
@@ -130,9 +162,16 @@ pub(super) fn execute_health(args: HealthArgs, current_dir: &Path) -> Result<Exi
                 &root,
                 &resolution.ignore_patterns,
                 resolution.version,
-                args.metrics,
-                (!scope_paths.is_empty()).then_some(scope_paths.as_slice()),
-                args.symbol.as_deref(),
+                RepoDocumentOptions {
+                    metrics: args.metrics,
+                    health_ignore_unexplained_patterns: &resolution
+                        .health_ignore_unexplained_patterns,
+                    target_scope_paths: (!target_paths.is_empty())
+                        .then_some(target_paths.as_slice()),
+                    within_scope_paths: (!within_paths.is_empty())
+                        .then_some(within_paths.as_slice()),
+                    symbol: args.symbol.as_deref(),
+                },
             )
         })
     })?;
@@ -159,12 +198,6 @@ pub(super) fn execute_health(args: HealthArgs, current_dir: &Path) -> Result<Exi
     } else {
         ExitCode::SUCCESS
     })
-}
-
-fn report_cache_stats(status: &CommandStatus) {
-    if let Some(summary) = format_cache_stats_summary() {
-        status.note(&summary);
-    }
 }
 
 fn scope_matches(path: &Path, scope_paths: &[PathBuf]) -> bool {

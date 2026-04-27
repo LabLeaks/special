@@ -9,9 +9,10 @@ use std::path::PathBuf;
 use crate::modules::analyze::traceability_core::{
     ProjectedProofProtocol, ProjectedTraceabilityContract,
     ProjectedTraceabilityReference, ReverseClosureReference, TraceabilityInputs,
-    build_reverse_closure_reference, collect_support_root_ids,
-    normalize_path_for_known_sources,
+    build_projected_traceability_reference_from_projected_items, normalize_path_for_known_sources,
 };
+#[cfg(test)]
+use crate::modules::analyze::traceability_core::use_rust_reference_traceability_kernel_for_tests;
 
 /// TypeScript scoped traceability currently uses a broad file-level working
 /// closure.
@@ -95,12 +96,13 @@ impl ScopedTraceabilityBoundary {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
+    // @applies TRACEABILITY.SCOPED_PROJECTED_KERNEL
     pub(super) fn exact_contract(
         &self,
         candidate_files: &[PathBuf],
         full_inputs: &TraceabilityInputs,
-    ) -> ScopedTraceabilityContract {
-        self.reference(candidate_files, full_inputs).contract
+    ) -> Result<ScopedTraceabilityContract, String> {
+        Ok(self.reference(candidate_files, full_inputs)?.contract)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -108,31 +110,28 @@ impl ScopedTraceabilityBoundary {
         &self,
         candidate_files: &[PathBuf],
         full_inputs: &TraceabilityInputs,
-    ) -> ScopedTraceabilityReference {
+    ) -> Result<ScopedTraceabilityReference, String> {
+        #[cfg(test)]
+        use_rust_reference_traceability_kernel_for_tests();
+
         let projected_item_ids = projected_item_ids(self, candidate_files, full_inputs);
         let projected_item_ids = projected_item_ids.into_iter().collect::<BTreeSet<_>>();
-        let support_roots =
-            collect_support_root_ids(projected_item_ids.clone(), &full_inputs.graph);
-        let preserved_reverse_closure_target_ids = support_roots
-            .iter()
-            .filter_map(|(item_id, roots)| (!roots.is_empty()).then_some(item_id.clone()))
-            .collect::<BTreeSet<_>>();
-        let exact_reverse_closure = build_reverse_closure_reference(
-            preserved_reverse_closure_target_ids.iter().cloned(),
+        let projected_reference = build_projected_traceability_reference_from_projected_items(
+            projected_item_ids.clone(),
             &full_inputs.graph,
-        );
+        )?;
         let contract = build_exact_contract(
             self,
             candidate_files,
             full_inputs,
             &projected_item_ids,
-            &exact_reverse_closure,
+            &projected_reference.exact_reverse_closure,
         );
 
-        ScopedTraceabilityReference {
+        Ok(ScopedTraceabilityReference {
             contract,
-            exact_reverse_closure,
-        }
+            exact_reverse_closure: projected_reference.exact_reverse_closure,
+        })
     }
 }
 
@@ -152,6 +151,7 @@ fn projected_item_ids(
         .collect::<Vec<_>>()
 }
 
+// @applies TRACEABILITY.SCOPED_PROJECTED_KERNEL
 fn build_exact_contract(
     boundary: &ScopedTraceabilityBoundary,
     candidate_files: &[PathBuf],

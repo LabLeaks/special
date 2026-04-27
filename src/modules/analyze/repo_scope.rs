@@ -4,7 +4,6 @@ Owns repo-scope path matching and summary filtering for repo-wide analysis views
 */
 // @fileimplements SPECIAL.MODULES.ANALYZE.REPO_SCOPE
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -13,6 +12,7 @@ use crate::model::{
     ArchitectureAnalysisSummary, ArchitectureRepoSignalsSummary, ArchitectureTraceabilityItem,
     ArchitectureTraceabilitySummary,
 };
+use crate::source_paths::normalize_existing_or_joined_path;
 use crate::syntax::SourceLanguage;
 
 pub(crate) struct RepoScopeBoundary {
@@ -111,12 +111,7 @@ pub(super) fn filter_traceability_to_scope(
 }
 
 fn normalize_scope_path(root: &Path, path: &Path) -> PathBuf {
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        root.join(path)
-    };
-    fs::canonicalize(&joined).unwrap_or(joined)
+    normalize_existing_or_joined_path(root, path)
 }
 
 pub(crate) fn normalized_scope_paths(root: &Path, scoped_paths: &[PathBuf]) -> Vec<PathBuf> {

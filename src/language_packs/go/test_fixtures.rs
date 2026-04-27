@@ -14,6 +14,7 @@ fn write_go_toolchain_contract(root: &Path) {
     .expect(".tool-versions should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_module_analysis_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("app")).expect("app dir should be created");
@@ -40,6 +41,7 @@ pub fn write_go_module_analysis_fixture(root: &Path) {
     .expect("go shared fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -77,6 +79,7 @@ pub fn write_go_traceability_fixture(root: &Path) {
     .expect("go traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_tool_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -120,6 +123,7 @@ pub fn write_go_tool_traceability_fixture(root: &Path) {
     .expect("go tool traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_reference_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -163,6 +167,7 @@ pub fn write_go_reference_traceability_fixture(root: &Path) {
     .expect("go reference traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_interface_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -206,6 +211,7 @@ pub fn write_go_interface_traceability_fixture(root: &Path) {
     .expect("go interface traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_embedding_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -255,6 +261,7 @@ pub fn write_go_embedding_traceability_fixture(root: &Path) {
     .expect("go embedding traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_method_value_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -298,6 +305,7 @@ pub fn write_go_method_value_traceability_fixture(root: &Path) {
     .expect("go method-value traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_embedding_method_value_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -347,6 +355,7 @@ pub fn write_go_embedding_method_value_traceability_fixture(root: &Path) {
     .expect("go embedding method-value traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_method_expression_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -390,6 +399,7 @@ pub fn write_go_method_expression_traceability_fixture(root: &Path) {
     .expect("go method-expression traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_receiver_collision_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");
@@ -433,6 +443,7 @@ pub fn write_go_receiver_collision_traceability_fixture(root: &Path) {
     .expect("go receiver-collision traceability test fixture should be written");
 }
 
+// @applies TEST_FIXTURE.REPRESENTATIVE_PROJECT
 pub fn write_go_embedded_interface_traceability_fixture(root: &Path) {
     fs::create_dir_all(root.join("_project")).expect("architecture dir should be created");
     fs::create_dir_all(root.join("specs")).expect("spec dir should be created");

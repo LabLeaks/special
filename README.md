@@ -264,10 +264,10 @@ current spec item: src/delete.rs:delete_remote_file
 unexplained item: src/cleanup.rs:legacy_cleanup_path
 ```
 
-If Rust backward trace is unavailable, `special` says so plainly instead of
-guessing from weaker analysis. Today that means `special health`
-reports that Rust backward trace is unavailable unless `rust-analyzer` is
-installed.
+If a backward-trace route is unavailable, `special` says so plainly instead of
+guessing from weaker analysis. Rust can fall back to parser-resolved call edges
+when `rust-analyzer` is unavailable, and that degraded route is reported in the
+health status.
 
 ## Quick Start
 
@@ -342,8 +342,8 @@ In practice:
   architecture-wide drilldown
 - use `special health --metrics` when you want deeper repo-wide cleanup,
   traceability, and grouped-count analysis
-- use `special health PATH...` when you want the same health view narrowed to
-  touched files
+- use `special health --target PATH` when you want the same health view narrowed
+  to touched files
 - use `special health --verbose` when you want more item-level detail within the
   current health view
 
