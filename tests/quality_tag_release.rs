@@ -2,14 +2,20 @@
 @group SPECIAL.DISTRIBUTION.RELEASE_FLOW
 special local release publication flow.
 
-@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.CHECKLIST
-before publishing, the release script interactively confirms easy-to-forget release tasks such as updating public docs, updating shipped skill templates and examples, updating `CHANGELOG.md`, bumping the release version, and running core validation.
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.PREPARE_CHANGELOG
+the release script has a prepare phase that writes the exact-version `CHANGELOG.md` section from release-visible bullet lines entered during that phase.
 
-@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.SKIP_CHECKLIST_BYPASSES_CHECKLIST
-the release script accepts `--skip-checklist` to bypass the interactive prerelease checklist.
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.PREFLIGHT
+before publishing, the release script automatically rejects missing or placeholder changelog entries and tracked private or generated project paths.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.VALIDATION_EVIDENCE
+the release script has a validate phase that runs deterministic release validation commands and records ignored evidence tied to the release version and revision.
+
+@spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.REJECTS_LEGACY_CHECKLIST_BYPASS
+the release script rejects legacy `--skip-checklist` and `--yes` bypass flags.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.DRY_RUN
-the release script dry-run prints the planned checklist and publication commands without creating a tag, moving the main bookmark, pushing to origin, or updating Homebrew.
+the release script dry-run prints the planned prepare, validate, and publish pipeline plus publication commands without creating a tag, moving the main bookmark, pushing to origin, or updating Homebrew.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.MATCHES_MANIFEST_VERSION
 the release script requires the requested tag version to exactly match the current `Cargo.toml` package version.
@@ -18,7 +24,7 @@ the release script requires the requested tag version to exactly match the curre
 the release script publishes the current Jujutsu working-copy revision when it contains changes, or its parent when the working-copy revision is an empty child.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.PUSHES_MAIN_AND_TAG
-the release script publishes the release revision by pushing the `main` bookmark with Jujutsu and the release Git tag to origin.
+the release script publishes only through the explicit publish phase, which pushes the `main` bookmark with Jujutsu and the release Git tag to origin.
 
 @spec SPECIAL.DISTRIBUTION.RELEASE_FLOW.VERIFIES_GITHUB_RELEASE
 after pushing the release tag, the release script waits for the GitHub release artifacts to publish and verifies the release asset set.
@@ -39,8 +45,7 @@ use std::{fs, path::Path, process::Command};
 use support::{
     current_package_version, current_python_executable, default_release_revision,
     default_release_revset, release_tag_command_output, release_tag_dry_run,
-    release_tag_live_output, release_tag_live_output_with_input, tag_exists,
-    tag_points_at_default_release_revision,
+    release_tag_live_output, tag_exists, tag_points_at_default_release_revision,
 };
 
 fn run_jj(temp_root: &Path, args: &[&str]) {
@@ -90,7 +95,7 @@ fn copy_release_script_fixture(temp_root: &Path) {
 
 #[test]
 // @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.DRY_RUN
-fn release_tag_dry_run_lists_checklist_and_publication_commands() {
+fn release_tag_dry_run_lists_pipeline_and_publication_commands() {
     let version = current_package_version();
     let payload = release_tag_dry_run(&version, &[]);
     let revision = payload["revision"].clone();
@@ -106,27 +111,25 @@ fn release_tag_dry_run_lists_checklist_and_publication_commands() {
             .is_some_and(|value| !value.is_empty()),
         "revision should be a non-empty string"
     );
-    assert_eq!(
-        payload["checklist"]
-            .as_array()
-            .expect("checklist should be an array")
-            .len(),
-        5
-    );
-    let checklist = payload["checklist"]
+    let pipeline = payload["pipeline"]
         .as_array()
-        .expect("checklist should be an array");
-    let checklist_ids: Vec<_> = checklist
+        .expect("pipeline should be an array");
+    let phases: Vec<_> = pipeline
         .iter()
-        .map(|entry| {
-            entry["id"]
-                .as_str()
-                .expect("checklist id should be a string")
-        })
+        .map(|entry| entry["phase"].as_str().expect("phase should be a string"))
         .collect();
-    assert_eq!(
-        checklist_ids,
-        vec!["readme", "skills", "changelog", "version", "validation"]
+    assert_eq!(phases, vec!["prepare", "validate", "publish"]);
+    assert!(
+        pipeline[0]["produces"]
+            .as_str()
+            .is_some_and(|value| value.contains("CHANGELOG.md")),
+        "prepare phase should produce changelog content"
+    );
+    assert!(
+        payload["validation_commands"]
+            .as_array()
+            .is_some_and(|commands| commands.len() >= 3),
+        "dry-run should expose deterministic validation commands"
     );
     assert_eq!(
         payload["bookmark_command"]
@@ -276,35 +279,13 @@ fn release_tag_dry_run_uses_current_non_empty_jj_revision() {
 }
 
 #[test]
-// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.CHECKLIST
-fn release_tag_script_aborts_when_checklist_answer_is_no() {
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.REJECTS_LEGACY_CHECKLIST_BYPASS
+fn release_tag_script_rejects_legacy_checklist_bypass_flags() {
     let version = current_package_version();
-    let execution = release_tag_live_output_with_input(&version, &[], "n\n");
+    let execution = release_tag_live_output(&version, &["--skip-checklist"]);
     let output = execution.output;
 
     assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("aborted release publishing"),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(execution.mock_log.is_empty());
-}
-
-#[test]
-// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.CHECKLIST
-fn release_tag_script_aborts_cleanly_when_checklist_has_no_input() {
-    let version = current_package_version();
-    let execution = release_tag_live_output(&version, &[]);
-    let output = execution.output;
-
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("interactive release checklist is unavailable"),
-        "stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("--skip-checklist"),
         "stderr:\n{}",
@@ -314,10 +295,237 @@ fn release_tag_script_aborts_cleanly_when_checklist_has_no_input() {
 }
 
 #[test]
-// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.SKIP_CHECKLIST_BYPASSES_CHECKLIST
-fn release_tag_script_skip_checklist_bypasses_checklist_and_runs_publication_steps() {
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.PREPARE_CHANGELOG
+fn release_tag_prepare_writes_exact_changelog_section() {
+    let root = std::env::temp_dir().join(format!(
+        "special-tag-release-prepare-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(root.join("scripts")).expect("scripts directory should be created");
+    fs::copy(
+        support::repo_root().join("scripts/tag-release.py"),
+        root.join("scripts/tag-release.py"),
+    )
+    .expect("tag-release fixture should be copied");
+    fs::copy(
+        support::repo_root().join("scripts/release_tooling.py"),
+        root.join("scripts/release_tooling.py"),
+    )
+    .expect("release_tooling fixture should be copied");
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"tag-fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo.toml fixture should be written");
+    fs::write(root.join("CHANGELOG.md"), "# Changelog\n\n## 1.2.2 - 2026-01-01\n\n- Old.\n")
+        .expect("changelog fixture should be written");
+
+    run_jj(&root, &["git", "init", "."]);
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+    );
+
+    let mut command = support::python3_command();
+    let mut child = command
+        .arg("scripts/tag-release.py")
+        .arg("1.2.3")
+        .arg("--prepare")
+        .current_dir(&root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("prepare should spawn");
+    use std::io::Write as _;
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(b"Added release pipeline.\nFixed docs.\n\n")
+        .expect("prepare input should be written");
+    let output = child.wait_with_output().expect("prepare should finish");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let changelog = fs::read_to_string(root.join("CHANGELOG.md"))
+        .expect("changelog should be readable");
+    assert!(changelog.contains("## 1.2.3 - "));
+    assert!(changelog.contains("- Added release pipeline."));
+    assert!(changelog.contains("- Fixed docs."));
+    assert!(changelog.find("## 1.2.3").unwrap() < changelog.find("## 1.2.2").unwrap());
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.PREFLIGHT
+fn release_tag_publish_rejects_bad_changelog_and_private_tracked_paths() {
+    let root = std::env::temp_dir().join(format!(
+        "special-tag-release-preflight-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(&root).expect("temp repo should be created");
+    copy_release_script_fixture(&root);
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"tag-fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo.toml fixture should be written");
+    fs::write(
+        root.join("CHANGELOG.md"),
+        "# Changelog\n\n## 1.2.3 - 2026-01-01\n\n- TODO.\n",
+    )
+    .expect("changelog fixture should be written");
+
+    run_jj(&root, &["git", "init", "."]);
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+    );
+
+    let mut placeholder_command = support::python3_command();
+    let placeholder_output = placeholder_command
+        .arg("scripts/tag-release.py")
+        .arg("1.2.3")
+        .arg("--publish")
+        .arg("--allow-existing-tag")
+        .arg("--allow-mock-publish")
+        .current_dir(&root)
+        .output()
+        .expect("publish preflight should run");
+    assert!(!placeholder_output.status.success());
+    assert!(
+        String::from_utf8_lossy(&placeholder_output.stderr).contains("real bullet notes"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&placeholder_output.stderr)
+    );
+
+    fs::write(
+        root.join("CHANGELOG.md"),
+        "# Changelog\n\n## 1.2.3 - 2026-01-01\n\n- Real release note.\n",
+    )
+    .expect("changelog fixture should be repaired");
+    fs::create_dir_all(root.join(".codex-evals")).expect("private directory should be created");
+    fs::write(root.join(".codex-evals/private.md"), "private\n")
+        .expect("private tracked fixture should be written");
+
+    let mut private_path_command = support::python3_command();
+    let private_path_output = private_path_command
+        .arg("scripts/tag-release.py")
+        .arg("1.2.3")
+        .arg("--publish")
+        .arg("--allow-existing-tag")
+        .arg("--allow-mock-publish")
+        .current_dir(&root)
+        .output()
+        .expect("publish preflight should run");
+    assert!(!private_path_output.status.success());
+    assert!(
+        String::from_utf8_lossy(&private_path_output.stderr).contains(".codex-evals/private.md"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&private_path_output.stderr)
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.VALIDATION_EVIDENCE
+fn release_tag_validate_records_version_and_revision_evidence() {
+    let root = std::env::temp_dir().join(format!(
+        "special-tag-release-validate-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("existing temp repo should be removable");
+    }
+    fs::create_dir_all(&root).expect("temp repo should be created");
+    copy_release_script_fixture(&root);
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"tag-fixture\"\nversion = \"1.2.3\"\nedition = \"2024\"\n",
+    )
+    .expect("Cargo.toml fixture should be written");
+    fs::write(
+        root.join("CHANGELOG.md"),
+        "# Changelog\n\n## 1.2.3 - 2026-01-01\n\n- Release validation pipeline.\n",
+    )
+    .expect("changelog fixture should be written");
+
+    run_jj(&root, &["git", "init", "."]);
+    run_jj(
+        &root,
+        &[
+            "--config=user.name=Test User",
+            "--config=user.email=test@example.com",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+    );
+    let revision = jj_commit_id(&root, "@-");
+
+    let mut command = support::python3_command();
+    let output = command
+        .arg("scripts/tag-release.py")
+        .arg("1.2.3")
+        .arg("--validate")
+        .arg("--allow-existing-tag")
+        .arg("--allow-mock-publish")
+        .current_dir(&root)
+        .output()
+        .expect("validate should run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join("_project/release/1.2.3.json"))
+            .expect("validation evidence should be written"),
+    )
+    .expect("validation evidence should be json");
+
+    assert_eq!(evidence["version"], Value::String("1.2.3".to_string()));
+    assert_eq!(evidence["revision"], Value::String(revision));
+    assert!(
+        evidence["commands"]
+            .as_array()
+            .is_some_and(|commands| commands.len() >= 3),
+        "validation evidence should record deterministic validation commands"
+    );
+
+    fs::remove_dir_all(&root).expect("temp repo should be cleaned up");
+}
+
+#[test]
+// @verifies SPECIAL.DISTRIBUTION.RELEASE_FLOW.PUSHES_MAIN_AND_TAG
+fn release_tag_publish_runs_publication_steps_after_pipeline_gates() {
     let version = current_package_version();
-    let execution = release_tag_live_output(&version, &["--skip-checklist"]);
+    let execution = release_tag_live_output(&version, &["--publish"]);
     let output = execution.output;
 
     assert!(output.status.success());

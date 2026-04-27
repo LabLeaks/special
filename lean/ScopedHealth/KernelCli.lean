@@ -1,7 +1,7 @@
 import ScopedHealth.ProjectedKernel
 
 /-
-Thin executable adapter for the proof-facing projected traceability kernel.
+Thin executable adapter for the theorem-backed projected traceability kernel.
 
 All traceability decisions live in `ScopedHealth.ProjectedKernel`; this module
 only handles process IO and exit behavior.

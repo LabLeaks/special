@@ -14,7 +14,7 @@ use flate2::write::GzEncoder;
 
 fn main() {
     println!("cargo:rerun-if-changed=src/language_packs");
-    println!("cargo:rerun-if-changed=proof/lean");
+    println!("cargo:rerun-if-changed=lean");
     println!("cargo:rerun-if-env-changed=SPECIAL_BUILD_LEAN_KERNEL");
     println!("cargo:rustc-check-cfg=cfg(special_embedded_lean_kernel)");
 
@@ -79,7 +79,7 @@ fn build_embedded_lean_kernel(manifest_dir: &Path, out_dir: &Path) {
         return;
     }
 
-    let lean_root = manifest_dir.join("proof/lean");
+    let lean_root = manifest_dir.join("lean");
     let exe_suffix = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         ".exe"
     } else {

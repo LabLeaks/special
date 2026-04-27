@@ -6,7 +6,7 @@ Shared proof-boundary tests that compare full and scoped traceability surfaces a
 The scoped traceability proof boundary uses the Lean projected traceability kernel for the shared item-level contract; the Rust reference kernel is only an explicit debug/test oracle and must not be a production fallback.
 
 @spec SPECIAL.HEALTH_COMMAND.TRACEABILITY.LEAN_KERNEL.PROVEN_EXECUTABLE
-The production Lean traceability executable must delegate support-root target selection and reverse-closure derivation to the proof-imported `ScopedHealth.ProjectedKernel` module, leaving the CLI layer as process and JSON adaptation only.
+The production Lean traceability executable must delegate support-root target selection and reverse-closure derivation to the theorem-backed `ScopedHealth.ProjectedKernel` module, leaving the CLI layer as process and JSON adaptation only.
 */
 // @fileimplements SPECIAL.TESTS.SCOPED_HEALTH_PROOF_BOUNDARY
 // @fileverifies SPECIAL.HEALTH_COMMAND.TARGET.TRACEABILITY.LANGUAGE_PARITY
@@ -610,21 +610,21 @@ fn project_with_exact_match_only(summary: &Summary, request: ScopeRequest) -> Su
 #[test]
 fn production_lean_kernel_cli_delegates_to_proof_imported_projected_kernel() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let proof_root = root.join("proof/lean/ScopedHealth.lean");
-    let cli = root.join("proof/lean/ScopedHealth/KernelCli.lean");
-    let kernel = root.join("proof/lean/ScopedHealth/ProjectedKernel.lean");
+    let lean_root = root.join("lean/ScopedHealth.lean");
+    let cli = root.join("lean/ScopedHealth/KernelCli.lean");
+    let kernel = root.join("lean/ScopedHealth/ProjectedKernel.lean");
 
-    let proof_root = fs::read_to_string(&proof_root).expect("proof root should be readable");
+    let lean_root = fs::read_to_string(&lean_root).expect("Lean kernel root should be readable");
     let cli = fs::read_to_string(&cli).expect("Lean kernel CLI should be readable");
     let kernel = fs::read_to_string(&kernel).expect("projected Lean kernel should be readable");
 
     assert!(
-        proof_root.contains("import ScopedHealth.ProjectedKernel"),
-        "the proof root must import the executable projected kernel module",
+        lean_root.contains("import ScopedHealth.ProjectedKernel"),
+        "the Lean kernel root must import the executable projected kernel module",
     );
     assert!(
         cli.contains("import ScopedHealth.ProjectedKernel"),
-        "the production Lean executable must import the proof-facing kernel",
+        "the production Lean executable must import the theorem-backed kernel",
     );
     assert!(
         cli.contains("ProjectedKernel.run input"),
@@ -640,7 +640,7 @@ fn production_lean_kernel_cli_delegates_to_proof_imported_projected_kernel() {
     ] {
         assert!(
             !cli.contains(forbidden_cli_algorithm),
-            "the CLI adapter must not define `{forbidden_cli_algorithm}` outside the proof-facing kernel",
+            "the CLI adapter must not define `{forbidden_cli_algorithm}` outside the projected kernel",
         );
     }
     assert!(

@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-LEAN_ROOT = ROOT / "proof" / "lean"
+LEAN_ROOT = ROOT / "lean"
 LEAN_TOOLCHAIN = (LEAN_ROOT / "lean-toolchain").read_text().strip()
 
 

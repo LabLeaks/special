@@ -1,11 +1,11 @@
 /-
-Lean traceability kernel proof surface
-======================================
+Lean traceability kernel
+========================
 
-This package contains the small abstract theorem family that the production
-traceability kernel is meant to inhabit. The executable JSON kernel lives in
-`ScopedHealth.KernelCli`; this root imports only the proof surface needed to
-audit the current contract.
+This package contains the production scoped traceability kernel plus the small
+abstract theorem family that audits its graph-narrowing contract. The executable
+JSON kernel lives in `ScopedHealth.KernelCli`; this root imports the theorem
+surface and executable kernel used by the released binary.
 
 How to read this package
 ------------------------
@@ -27,7 +27,7 @@ Read the files in this order:
    defines the executable projected-kernel decisions and proves that those
    target-selection definitions inhabit the projected contract theorem surface.
 7. `KernelCli.lean`
-   adapts the proof-facing kernel to stdin/stdout JSON.
+   adapts the projected kernel to stdin/stdout JSON.
 
 Why there is a narrowed kernel
 ------------------------------

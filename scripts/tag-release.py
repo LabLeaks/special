@@ -10,8 +10,10 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse
+import datetime as dt
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -22,30 +24,29 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from release_tooling import normalize_tag, package_version, run_checked
 
-CHECKLIST = [
-    {
-        "id": "readme",
-        "prompt": "Updated README.md and other public docs for this release?",
-    },
-    {
-        "id": "skills",
-        "prompt": "Updated shipped skill templates and examples for this release?",
-    },
-    {
-        "id": "changelog",
-        "prompt": "Updated CHANGELOG.md for this release?",
-    },
-    {
-        "id": "version",
-        "prompt": "Bumped Cargo.toml and release references to this version?",
-    },
-    {
-        "id": "validation",
-        "prompt": "Ran core validation (`cargo test`, `special lint`, `special specs`)?",
-    },
-]
 GITHUB_RELEASE_POLL_SECONDS = 10
 GITHUB_RELEASE_TIMEOUT_SECONDS = 15 * 60
+CORE_VALIDATION_COMMANDS = [
+    ["mise", "exec", "--", "cargo", "test"],
+    ["mise", "exec", "--", "cargo", "run", "--", "lint"],
+    ["mise", "exec", "--", "cargo", "run", "--", "specs", "--metrics"],
+    [sys.executable, str(SCRIPT_DIR / "verify-lean-traceability-kernel.py")],
+]
+PRIVATE_TRACKED_PATH_PATTERNS = [
+    re.compile(pattern)
+    for pattern in [
+        r"^_project/",
+        r"^BACKLOG(?:\.md)?$",
+        r"^\.codex-evals/",
+        r"(^|/)__pycache__/",
+        r"\.pyc$",
+        r"(^|/)\.lake/",
+        r"(^|/)lake-manifest\.json$",
+        r"^target/",
+        r"^\.agents/",
+        r"^\.projector/",
+    ]
+]
 
 
 def repo_root() -> Path:
@@ -55,26 +56,46 @@ def repo_root() -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Publish the current revision by updating main, tagging the release, pushing both, "
-            "verifying the GitHub release, and updating Homebrew."
+            "Run the deterministic release pipeline: prepare release notes, validate, "
+            "then publish by updating main, tagging, pushing, verifying GitHub, and updating Homebrew."
         )
     )
     parser.add_argument("version", help="Release version, with or without a leading `v`.")
+    phase = parser.add_mutually_exclusive_group()
+    phase.add_argument(
+        "--prepare",
+        action="store_true",
+        help="Write the exact CHANGELOG.md section from interactive release bullets and stop.",
+    )
+    phase.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run deterministic release validation and record ignored evidence for this revision.",
+    )
+    phase.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publish the prepared and validated release revision.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the planned checklist and publication commands without publishing.",
+        help="Print the planned pipeline and publication commands without mutating or publishing.",
     )
     parser.add_argument(
         "--skip-checklist",
         dest="skip_checklist",
         action="store_true",
-        help="Bypass the interactive prerelease checklist.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--yes", dest="skip_checklist", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--allow-mock-publish", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--allow-existing-tag", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
+
+
+def release_version(value: str) -> str:
+    return normalize_tag(value).removeprefix("v")
 
 
 def existing_tags(root: Path) -> set[str]:
@@ -131,17 +152,143 @@ def tag_revision(root: Path, tag: str) -> str:
     return run_checked(root, ["jj", "log", "-r", tag, "--no-graph", "-T", "commit_id"]).strip()
 
 
-def prompt_checklist() -> None:
-    print("Prerelease checklist:")
-    for item in CHECKLIST:
+def changelog_section_pattern(version: str) -> re.Pattern[str]:
+    escaped = re.escape(version)
+    return re.compile(rf"^##\s+v?{escaped}(?:\s+-\s+\d{{4}}-\d{{2}}-\d{{2}})?\s*$", re.M)
+
+
+def changelog_section_body(text: str, version: str) -> str | None:
+    match = changelog_section_pattern(version).search(text)
+    if not match:
+        return None
+    next_heading = re.search(r"^##\s+", text[match.end() :], re.M)
+    end = match.end() + next_heading.start() if next_heading else len(text)
+    return text[match.end() : end]
+
+
+def require_changelog_entry(root: Path, version: str) -> None:
+    changelog = root / "CHANGELOG.md"
+    if not changelog.is_file():
+        raise SystemExit("CHANGELOG.md is missing; write release notes before publishing")
+    text = changelog.read_text(encoding="utf-8")
+    body = changelog_section_body(text, version)
+    if body is None:
+        today = dt.date.today().isoformat()
+        raise SystemExit(
+            "CHANGELOG.md is missing the release section for this version; "
+            f"add `## {version} - {today}` with release-visible changes before publishing"
+        )
+    if "TODO" in body or not any(line.strip().startswith("- ") for line in body.splitlines()):
+        raise SystemExit(
+            f"CHANGELOG.md section for {version} must contain real bullet notes, not placeholders"
+        )
+    if re.search(r"^##\s+Unreleased\s*$", text, re.M):
+        raise SystemExit(
+            "CHANGELOG.md contains an `Unreleased` section; release notes must be attached to the exact release version"
+        )
+
+
+def tracked_files(root: Path) -> list[str]:
+    output = run_checked(root, ["jj", "file", "list"])
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def require_no_private_tracked_files(root: Path) -> None:
+    matches = [
+        path
+        for path in tracked_files(root)
+        if any(pattern.search(path) for pattern in PRIVATE_TRACKED_PATH_PATTERNS)
+    ]
+    if matches:
+        formatted = "\n".join(f"  - {path}" for path in matches)
+        raise SystemExit(
+            "release publishing refuses tracked private/generated paths:\n"
+            f"{formatted}\n"
+            "move private notes under ignored _project/ or remove generated artifacts from version control"
+        )
+
+
+def require_release_preflight(root: Path, version: str) -> None:
+    require_changelog_entry(root, version)
+    require_no_private_tracked_files(root)
+
+
+def collect_changelog_bullets(version: str) -> list[str]:
+    print(f"Release changelog for {version}.")
+    print("Enter release-visible bullet lines. Blank line finishes.")
+    print("Do not include local cleanup notes that are not release-visible.")
+    bullets: list[str] = []
+    while True:
         try:
-            answer = input(f" - {item['prompt']} [y/N]: ").strip().lower()
+            line = input("> ").strip()
         except EOFError as err:
-            raise SystemExit(
-                "interactive release checklist is unavailable; rerun with --skip-checklist to publish"
-            ) from err
-        if answer not in {"y", "yes"}:
-            raise SystemExit("aborted release publishing")
+            raise SystemExit("changelog entry is required; no bullets were provided") from err
+        if not line:
+            break
+        bullet = line[2:].strip() if line.startswith("- ") else line
+        if bullet:
+            bullets.append(bullet)
+    if not bullets:
+        raise SystemExit("at least one release-visible changelog bullet is required")
+    if any("TODO" in bullet.upper() or "TBD" in bullet.upper() for bullet in bullets):
+        raise SystemExit("changelog bullets must be real release notes, not placeholders")
+    return bullets
+
+
+def upsert_changelog_section(root: Path, version: str, bullets: list[str]) -> None:
+    changelog = root / "CHANGELOG.md"
+    if not changelog.is_file():
+        raise SystemExit("CHANGELOG.md is missing")
+    text = changelog.read_text(encoding="utf-8")
+    section = "## {} - {}\n\n{}\n\n".format(
+        version,
+        dt.date.today().isoformat(),
+        "\n".join(f"- {bullet}" for bullet in bullets),
+    )
+    match = changelog_section_pattern(version).search(text)
+    if match:
+        next_heading = re.search(r"^##\s+", text[match.end() :], re.M)
+        end = match.end() + next_heading.start() if next_heading else len(text)
+        updated = text[: match.start()] + section + text[end:]
+    else:
+        title_match = re.match(r"^# .*\n+", text)
+        if not title_match:
+            raise SystemExit("CHANGELOG.md must start with a top-level title")
+        insert_at = title_match.end()
+        updated = text[:insert_at] + "\n" + section + text[insert_at:]
+    changelog.write_text(updated, encoding="utf-8")
+    print(f"Wrote CHANGELOG.md section for {version}.")
+    print("Review it, include it in the release revision, rerun validation, then publish.")
+
+
+def evidence_path(root: Path, version: str) -> Path:
+    return root / "_project" / "release" / f"{version}.json"
+
+
+def write_validation_evidence(root: Path, version: str, revision: str, commands: list[list[str]]) -> None:
+    path = evidence_path(root, version)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": version,
+        "revision": revision,
+        "validated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "commands": commands,
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote validation evidence to {path}")
+
+
+def require_validation_evidence(root: Path, version: str, revision: str) -> None:
+    path = evidence_path(root, version)
+    if not path.is_file():
+        raise SystemExit(
+            f"release validation evidence is missing at {path}; run `python3 scripts/tag-release.py {version} --validate`"
+        )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("version") != version or payload.get("revision") != revision:
+        raise SystemExit(
+            f"release validation evidence at {path} does not match version {version} and revision {revision}"
+        )
 
 
 def run_command(root: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -167,6 +314,18 @@ def run_step(root: Path, label: str, command: list[str], args: argparse.Namespac
     run_checked(root, command)
 
 
+def run_validation(root: Path, version: str, revision: str, args: argparse.Namespace) -> None:
+    completed: list[list[str]] = []
+    for command in CORE_VALIDATION_COMMANDS:
+        if args.allow_mock_publish:
+            record_mock_step(root, "validate", command)
+        else:
+            print(f"+ {' '.join(command)}")
+            run_checked(root, command)
+        completed.append(command)
+    write_validation_evidence(root, version, revision, completed)
+
+
 def wait_for_github_release(root: Path, label: str, command: list[str], args: argparse.Namespace) -> None:
     if args.allow_mock_publish:
         record_mock_step(root, label, command)
@@ -187,16 +346,20 @@ def wait_for_github_release(root: Path, label: str, command: list[str], args: ar
 
 def main() -> int:
     args = parse_args()
+    if args.skip_checklist:
+        raise SystemExit(
+            "`--skip-checklist`/`--yes` was removed; use --prepare, --validate, then --publish"
+        )
+    if not (args.prepare or args.validate or args.publish or args.dry_run):
+        raise SystemExit("choose exactly one release phase: --prepare, --validate, or --publish")
     root = repo_root()
+    version = release_version(args.version)
     tag = normalize_tag(args.version)
     manifest_tag = normalize_tag(package_version(root))
 
     if not root.joinpath(".jj").exists():
         raise SystemExit("release publishing requires a jj repository root")
     target = release_revset(root)
-    if not args.dry_run and not args.allow_mock_publish:
-        require_clean_working_copy(root)
-        require_releasable_revision(root, target)
     revision = release_revision(root)
     tag_exists = tag in existing_tags(root)
     if tag_exists and not args.allow_existing_tag:
@@ -205,6 +368,11 @@ def main() -> int:
         raise SystemExit(
             f"release tag `{tag}` does not match Cargo.toml version `{manifest_tag}`"
         )
+
+    if args.prepare:
+        bullets = collect_changelog_bullets(version)
+        upsert_changelog_section(root, version, bullets)
+        return 0
 
     bookmark_command = ["jj", "bookmark", "set", "main", "-r", revision]
     tag_command = ["jj", "tag", "set", tag, "-r", revision]
@@ -233,9 +401,32 @@ def main() -> int:
             json.dumps(
                 {
                     "tag": tag,
+                    "version": version,
                     "release_revset": target,
                     "revision": revision,
-                    "checklist": CHECKLIST,
+                    "pipeline": [
+                        {
+                            "phase": "prepare",
+                            "command": ["python3", "scripts/tag-release.py", version, "--prepare"],
+                            "produces": "CHANGELOG.md exact-version release section",
+                        },
+                        {
+                            "phase": "validate",
+                            "command": ["python3", "scripts/tag-release.py", version, "--validate"],
+                            "produces": str(evidence_path(root, version)),
+                        },
+                        {
+                            "phase": "publish",
+                            "command": ["python3", "scripts/tag-release.py", version, "--publish"],
+                            "requires": [
+                                "clean release revision",
+                                "CHANGELOG.md exact-version section",
+                                "no tracked private/generated paths",
+                                "validation evidence for this version and revision",
+                            ],
+                        },
+                    ],
+                    "validation_commands": CORE_VALIDATION_COMMANDS,
                     "bookmark_command": bookmark_command,
                     "tag_command": tag_command,
                     "push_main_command": push_main_command,
@@ -249,8 +440,16 @@ def main() -> int:
         )
         return 0
 
-    if not args.skip_checklist:
-        prompt_checklist()
+    require_release_preflight(root, version)
+
+    if args.validate:
+        run_validation(root, version, revision, args)
+        return 0
+
+    if not args.allow_mock_publish:
+        require_clean_working_copy(root)
+        require_releasable_revision(root, target)
+        require_validation_evidence(root, version, revision)
 
     run_step(root, "bookmark_main", bookmark_command, args)
     if not (tag_exists and tag_revision(root, tag) == revision):

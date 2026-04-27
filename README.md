@@ -14,7 +14,7 @@ not “the model is dumb.” The repo itself has become hard to read:
 
 `special` makes that visible again.
 
-It turns lightweight annotations in normal source files and markdown into four
+It turns lightweight annotations in normal source files and markdown into five
 inspectable views:
 
 - `special`
@@ -23,6 +23,8 @@ inspectable views:
   What the repo claims across current, planned, deprecated, and unverified specs.
 - `special arch`
   How the repo says implementation is organized.
+- `special patterns`
+  Adopted implementation patterns and the source surfaces that apply them.
 - `special health`
   Cross-cutting code health and traceability that do not belong to one module.
 
@@ -68,13 +70,16 @@ Today `special` is a Rust CLI that:
 - builds one spec tree across files and file types
 - builds one architecture module tree across source-local declarations and
   project architecture notes
+- builds one adopted-pattern tree with source-attached applications
 - materializes all declared specs by default
 - materializes all declared modules by default
+- materializes all declared patterns by default
 - lets you filter to current or planned declarations on request
 - reports annotation and reference errors
 - shows attached verification and attestation bodies in verbose views
 - shows implementation ownership and architecture analysis evidence in module
   views
+- shows pattern definitions, applications, and advisory shape metrics
 - installs task-shaped skills for product-spec and architecture workflows
 
 This repo is self-hosting: `special` describes and verifies its own behavior
@@ -269,6 +274,65 @@ guessing from weaker analysis. Rust can fall back to parser-resolved call edges
 when `rust-analyzer` is unavailable, and that degraded route is reported in the
 health status.
 
+### 4. Keeping repeated implementation approaches intentional
+
+Some repeated code should become a helper or component. Some repeated code is
+not a direct duplicate: it is the same adopted approach showing up in different
+contexts.
+
+`special patterns` is for the second case.
+
+Suppose the repo has a cache-fill approach that intentionally looks similar
+across several cache entries: check the cache, take a single-flight lock, rebuild
+once, write the cache, and release waiters. That is not just “style.” It answers
+the practical question a maintainer or agent will ask later:
+
+Why is this done this way, and where else should I copy the approach instead of
+inventing a new one?
+
+Declare the pattern once:
+
+```text
+### `@pattern CACHE.SINGLE_FLIGHT_FILL`
+@strictness high
+Use single-flight cache fills when a shared cache entry may be requested by
+multiple concurrent callers and rebuilding it more than once would waste work or
+produce inconsistent progress reporting.
+```
+
+Then attach applications to the source item or file that actually uses the
+approach:
+
+```text
+// @applies CACHE.SINGLE_FLIGHT_FILL
+fn load_or_build_repo_analysis(...) -> ... {
+    ...
+}
+```
+
+Run:
+
+```sh
+special patterns
+special patterns CACHE.SINGLE_FLIGHT_FILL --verbose
+special patterns --metrics
+special patterns --metrics --target src/cache.rs
+```
+
+The default view shows the known patterns and where they are applied. The verbose
+view includes the definition and application bodies. The metrics view adds
+advisory source-shape checks: possible missing applications, possible new pattern
+clusters, and helper/component extraction candidates when implementations are so
+similar that a named pattern may be the wrong abstraction.
+
+What you can do with that evidence:
+
+- preserve intentional approaches across future edits
+- help agents reuse the project’s adopted implementation vocabulary
+- notice when an application claims a pattern but does not resemble the other
+  applications
+- notice when repeated code should become a helper instead of a pattern
+
 ## Quick Start
 
 Inspect the current contract:
@@ -287,6 +351,13 @@ Inspect architecture ownership and implementation evidence:
 
 ```sh
 special arch --metrics
+```
+
+Inspect adopted implementation patterns:
+
+```sh
+special patterns
+special patterns --metrics
 ```
 
 Inspect repo-wide quality signals and cross-cutting traceability:
@@ -309,7 +380,7 @@ special init
 
 ## How To Read The Commands
 
-`special` has four main surfaces:
+`special` has five main surfaces:
 
 - `special`
   The compact overview and “what should I inspect next?” surface.
@@ -317,6 +388,8 @@ special init
   The product-contract view.
 - `special arch`
   The annotated architecture view.
+- `special patterns`
+  The adopted-pattern view.
 - `special health`
   The cross-cutting code-health and traceability view.
 
@@ -340,10 +413,18 @@ In practice:
   boundary without dumping the whole repo
 - use `special arch --metrics --verbose` when you really want the full
   architecture-wide drilldown
+- use `special patterns --verbose` when you want pattern definitions and concrete
+  source applications together
+- use `special patterns --metrics` when you want advisory pattern similarity,
+  missing-application, and candidate-cluster analysis
+- use `special patterns --metrics --target PATH` when you want pattern advice for
+  touched files
 - use `special health --metrics` when you want deeper repo-wide cleanup,
   traceability, and grouped-count analysis
 - use `special health --target PATH` when you want the same health view narrowed
   to touched files
+- use `special health --within PATH` only when you intentionally want to limit the
+  analysis corpus before building the health view
 - use `special health --verbose` when you want more item-level detail within the
   current health view
 
@@ -389,9 +470,19 @@ special arch APP.PARSER --metrics
 special arch --metrics --verbose
 special arch --json --metrics
 
+special patterns
+special patterns APP.CACHE_FILL
+special patterns APP.CACHE_FILL --verbose
+special patterns --metrics
+special patterns --metrics --target src/foo.rs
+special patterns --metrics --target src/foo.rs --symbol parseConfig
+special patterns --metrics --within crates/app
+special patterns --json
+
 special health
-special health src/foo.rs
-special health src/foo.rs --symbol parseConfig
+special health --target src/foo.rs
+special health --target src/foo.rs --symbol parseConfig
+special health --within crates/app
 special health --metrics
 special health --metrics --verbose
 special health --verbose
@@ -431,6 +522,7 @@ another selected destination for:
 - validating whether a concrete architecture module is honestly implemented
 - inspecting the current spec state
 - finding planned work
+- following and reviewing adopted implementation patterns
 
 The installed skill files are generated output and are typically ignored in the
 repo.
@@ -461,9 +553,15 @@ For local repo development, use the tool-managed commands:
 mise exec -- cargo test
 mise exec -- cargo run -- lint
 mise exec -- cargo run -- specs
+mise exec -- cargo run -- patterns
 mise exec -- cargo run -- health
 mise exec -- cargo run -- arch --metrics
 ```
+
+The repo is a small polyglot monorepo: the Rust CLI crate lives at the root with
+Cargo's conventional `src/`, `tests/`, and Askama `templates/` layout, while the
+Lean scoped traceability kernel lives as a separate Lake project under `lean/`.
+`build.rs` embeds the compiled Lean kernel for released host-native binaries.
 
 ## Annotation Model
 
@@ -498,6 +596,16 @@ mise exec -- cargo run -- arch --metrics
   architecture module.
 - `@fileverifies ID`
   Attaches one file-scoped verification artifact to one claim.
+- `@pattern ID`
+  Declares one adopted implementation pattern. Pattern ids may nest with dot
+  notation.
+- `@strictness high|medium|low`
+  Optional pattern metadata that tells advisory metrics how closely applications
+  are expected to resemble each other. Omitted strictness defaults to `medium`.
+- `@applies ID`
+  Attaches one supported source item as a concrete application of a pattern.
+- `@fileapplies ID`
+  Attaches the containing source file as a concrete application of a pattern.
 
 Important constraints:
 
@@ -512,6 +620,10 @@ Important constraints:
 - current `@module` nodes require direct `@implements` or `@fileimplements` unless
   they are planned.
 - `@area` is structural only and does not accept `@planned` or `@implements`.
+- each `@pattern ID` may have only one definition.
+- `@applies` and `@fileapplies` must attach to source code, not markdown
+  declarations.
+- pattern metrics are advisory and do not create lint failures.
 
 ## Annotation Examples
 
@@ -571,6 +683,24 @@ Parses reserved annotations from extracted comment blocks.
 // @fileimplements APP.PARSER
 ```
 
+Pattern declarations name an adopted approach:
+
+```text
+### `@pattern CACHE.SINGLE_FLIGHT_FILL`
+@strictness high
+Use this when concurrent callers may request the same expensive cache fill and
+only one caller should rebuild while the rest wait for the shared result.
+```
+
+Pattern applications attach to source:
+
+```text
+// @applies CACHE.SINGLE_FLIGHT_FILL
+fn load_or_build_repo_analysis(...) -> ... {
+    ...
+}
+```
+
 ## Root Discovery
 
 `special` prefers explicit root selection.
@@ -618,28 +748,31 @@ Run the Rust code review separately when you want it:
 python3 scripts/review-rust-release-style.py
 ```
 
-Publish a release through the local wrapper so one process handles the release
-checklist, main bookmark push, release tag push, GitHub release verification, and
-Homebrew formula update:
+Publish a release through the local wrapper as a three-step pipeline. The first
+step makes you enter the exact release-visible changelog bullets and writes the
+versioned `CHANGELOG.md` section:
 
 ```sh
-python3 scripts/tag-release.py X.Y.Z
+python3 scripts/tag-release.py X.Y.Z --prepare
 ```
 
-The wrapper will walk you through the easy-to-forget prerelease items before it
-publishes:
-
-- public docs like `README.md`
-- `CHANGELOG.md`
-- version bump and release references
-- core validation (`cargo test`, `special lint`, `special specs`)
-
-If you have already checked the prerelease list and want to bypass the
-interactive prompts, use:
+Then run the validation phase. It executes the release validation commands and
+records ignored local evidence for the current release revision:
 
 ```sh
-python3 scripts/tag-release.py X.Y.Z --skip-checklist
+python3 scripts/tag-release.py X.Y.Z --validate
 ```
+
+Publish only after the prepared changelog and validation evidence are attached
+to the release revision:
+
+```sh
+python3 scripts/tag-release.py X.Y.Z --publish
+```
+
+The wrapper refuses missing or placeholder changelog notes, tracked private or
+generated files, mismatched manifest versions, missing validation evidence, and
+legacy checklist bypass flags.
 
 The current distribution slice covers:
 

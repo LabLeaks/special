@@ -1,6 +1,6 @@
 /target
-/proof/lean/.lake/
-/proof/lean/lake-manifest.json
+/lean/.lake/
+/lean/lake-manifest.json
 special-spec.html
 .agents/skills/
 .projector/

@@ -51,9 +51,9 @@ special selects its platform-specific Homebrew archive URL and checksum with Hom
 special installs the `special` binary from LabLeaks/homebrew-tap.
 
 @attests SPECIAL.DISTRIBUTION.HOMEBREW.INSTALLS_SPECIAL
-artifact: brew install LabLeaks/homebrew-tap/special (confirmed local install for /opt/homebrew/bin/special at v0.7.0)
+artifact: brew install LabLeaks/homebrew-tap/special (confirmed local install for /opt/homebrew/bin/special at v0.8.0)
 owner: gk
-last_reviewed: 2026-04-24
+last_reviewed: 2026-04-27
 
 @module SPECIAL.TESTS.DISTRIBUTION
 Distribution/release asset integration tests in `tests/distribution.rs`.
